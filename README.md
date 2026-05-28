@@ -19,6 +19,7 @@ For local development from this repository:
 npm install
 npm run build
 node dist/cli.js generate --cwd .
+node dist/cli.js sync-agents --scope user
 pi install -l .
 pi install npm:pi-subagents
 ```
@@ -45,6 +46,12 @@ pi-gsd sync-agents --scope project
 
 This writes generated GSD agents into `.pi/agents/`, where `pi-subagents` can discover them.
 
+User-level sync is also supported when you want the same GSD agents available across projects:
+
+```bash
+pi-gsd sync-agents --scope user
+```
+
 Safety behavior:
 
 - `pi-gsd` only writes official `gsd-*.md` agent files.
@@ -62,7 +69,13 @@ Doctor checks official package resolution, `pi-subagents` dependency resolution,
 To also check generated agents and project `.pi/agents` sync status:
 
 ```bash
-pi-gsd doctor --agents generated/agents
+pi-gsd doctor --agents
+```
+
+For user-level synced agents:
+
+```bash
+pi-gsd doctor --agents --scope user
 ```
 
 If project agents have not been synced yet, this check reports missing synced agents. Run `pi-gsd sync-agents --scope project` when you want the project-local `.pi/agents` files materialized.

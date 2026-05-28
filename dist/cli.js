@@ -4,15 +4,16 @@ import {
   generatePrompts,
   runDoctor,
   syncAgents
-} from "./chunk-OOKVDRFX.js";
+} from "./chunk-3C6DISIM.js";
 import {
   resolveOfficialPackage
 } from "./chunk-ZNIYZQO4.js";
 
 // src/cli.ts
 import { spawnSync } from "child_process";
-import { pathToFileURL } from "url";
-import { resolve } from "path";
+import { existsSync, realpathSync } from "fs";
+import { dirname, join, resolve } from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 var defaultIO = {
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text)
@@ -21,10 +22,11 @@ var usage = `Usage: pi-gsd <command> [options]
 
 Commands:
   generate [--out <dir>] [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
-  doctor [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
+  doctor [--prompts <dir>] [--agents [dir]] [--scope project|user] [--cwd <dir>]
   sync-agents [--scope project|user] [--agents <dir>] [--cwd <dir>] [--dry-run] [--check]
   official [--cwd <dir>] [--] [...args]
 `;
+var packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 async function runCli(argv, io = defaultIO) {
   try {
     const [command, ...args] = argv;
@@ -49,13 +51,16 @@ async function runCli(argv, io = defaultIO) {
       return 0;
     }
     if (command === "doctor") {
-      const options = parseOptions(args, { prompts: true, agents: true, cwd: true });
+      const options = parseOptions(args, { prompts: true, agents: "optional", scope: true, cwd: true });
       const cwd = resolve(options.cwd ?? process.cwd());
-      const generatedPromptsDir = resolve(cwd, options.prompts ?? "generated/prompts");
+      const generatedPromptsDir = resolveGeneratedResourceDir(cwd, options.prompts, "generated/prompts");
       const result = runDoctor({
         startDir: cwd,
         generatedPromptsDir,
-        ...options.agents ? { generatedAgentsDir: resolve(cwd, options.agents) } : {}
+        ...options.agents ? {
+          generatedAgentsDir: resolveGeneratedResourceDir(cwd, options.agents === "true" ? void 0 : options.agents, "generated/agents"),
+          agentSyncScope: parseSyncScope(options.scope ?? "project")
+        } : {}
       });
       for (const message of result.messages) {
         io.stdout(`${message}
@@ -69,7 +74,7 @@ async function runCli(argv, io = defaultIO) {
       const scope = parseSyncScope(options.scope ?? "project");
       const officialPackage = resolveOfficialPackage({ startDir: cwd });
       const result = syncAgents({
-        generatedAgentsDir: resolve(cwd, options.agents ?? "generated/agents"),
+        generatedAgentsDir: resolveGeneratedResourceDir(cwd, options.agents, "generated/agents"),
         cwd,
         officialRoot: officialPackage.packageRoot,
         scope,
@@ -124,8 +129,19 @@ function parseOptions(args, allowed) {
     if (!(name in allowed)) {
       throw new Error(`Unknown option: ${arg}`);
     }
-    if (!allowed[name]) {
+    const mode = allowed[name];
+    if (!mode) {
       options[name] = "true";
+      continue;
+    }
+    if (mode === "optional") {
+      const value2 = args[index + 1];
+      if (value2 === void 0 || value2.startsWith("--")) {
+        options[name] = "true";
+        continue;
+      }
+      options[name] = value2;
+      index += 1;
       continue;
     }
     const value = args[index + 1];
@@ -136,6 +152,16 @@ function parseOptions(args, allowed) {
     index += 1;
   }
   return options;
+}
+function resolveGeneratedResourceDir(cwd, optionValue, relativeDir) {
+  if (optionValue) {
+    return resolve(cwd, optionValue);
+  }
+  const cwdDir = resolve(cwd, relativeDir);
+  if (existsSync(cwdDir)) {
+    return cwdDir;
+  }
+  return join(packageRoot, relativeDir);
 }
 function parseSyncScope(scope) {
   if (scope === "project" || scope === "user") {
@@ -167,7 +193,20 @@ function parseOfficialArgs(args) {
   }
   return { cwd, passthrough };
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isCliEntrypoint(importMetaUrl, argvPath) {
+  if (!argvPath) {
+    return false;
+  }
+  if (importMetaUrl === pathToFileURL(argvPath).href) {
+    return true;
+  }
+  try {
+    return importMetaUrl === pathToFileURL(realpathSync(argvPath)).href;
+  } catch {
+    return false;
+  }
+}
+if (isCliEntrypoint(import.meta.url, process.argv[1])) {
   const code = await runCli(process.argv.slice(2));
   process.exitCode = code;
 }

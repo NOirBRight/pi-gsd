@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createOfficialFixture } from "./fixtures.js";
 import { runCli } from "../src/cli.js";
@@ -144,6 +144,43 @@ describe("runCli", () => {
     expect(stderr.join("")).not.toContain("Unknown option: --agents");
   });
 
+  it("accepts doctor agents as a flag using the default generated agents directory", async () => {
+    const fixture = createOfficialFixture();
+    writePlanCommand(fixture.packageRoot);
+    writeAgent(fixture.packageRoot);
+    const stdout: string[] = [];
+    await runCli(["generate", "--cwd", fixture.root], {
+      stdout: () => undefined,
+      stderr: () => undefined,
+    });
+    await runCli(["sync-agents", "--cwd", fixture.root], {
+      stdout: () => undefined,
+      stderr: () => undefined,
+    });
+
+    const code = await runCli(["doctor", "--agents", "--cwd", fixture.root], {
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    });
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("generated agents: ok");
+  });
+
+  it("syncs packaged generated agents when the target project has no generated agents directory", async () => {
+    const fixture = createOfficialFixture();
+    const stdout: string[] = [];
+
+    const code = await runCli(["sync-agents", "--cwd", fixture.root], {
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    });
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("agent: gsd-planner.md");
+    expect(readFileSync(join(fixture.root, ".pi", "agents", "gsd-planner.md"), "utf8")).toContain("pi-gsd generated agent");
+  });
+
   it("syncs generated agents into project .pi agents", async () => {
     const fixture = createOfficialFixture();
     const generatedAgents = join(fixture.root, "generated", "agents");
@@ -242,6 +279,22 @@ describe("runCli", () => {
 
     ensureBuiltCli();
     const child = spawnSync(process.execPath, ["dist/cli.js", "generate", "--out", output, "--cwd", fixture.root], {
+      encoding: "utf8",
+    });
+
+    expect(child.status).toBe(0);
+    expect(readFileSync(join(output, "gsd-plan-phase.md"), "utf8")).toContain("description: Plan");
+  });
+
+  it("executes the built cli entrypoint through a symlinked package path", async () => {
+    const fixture = createOfficialFixture();
+    writePlanCommand(fixture.packageRoot);
+    const output = join(fixture.root, "linked-output");
+    const linkedPackage = join(fixture.root, "linked-pi-gsd");
+    symlinkSync(process.cwd(), linkedPackage, process.platform === "win32" ? "junction" : "dir");
+
+    ensureBuiltCli();
+    const child = spawnSync(process.execPath, [join(linkedPackage, "dist", "cli.js"), "generate", "--out", output, "--cwd", fixture.root], {
       encoding: "utf8",
     });
 

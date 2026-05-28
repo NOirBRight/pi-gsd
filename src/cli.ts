@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { runDoctor } from "./doctor.js";
 import { generateAll, generatePrompts } from "./generator.js";
@@ -21,10 +22,12 @@ const usage = `Usage: pi-gsd <command> [options]
 
 Commands:
   generate [--out <dir>] [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
-  doctor [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
+  doctor [--prompts <dir>] [--agents [dir]] [--scope project|user] [--cwd <dir>]
   sync-agents [--scope project|user] [--agents <dir>] [--cwd <dir>] [--dry-run] [--check]
   official [--cwd <dir>] [--] [...args]
 `;
+
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<number> {
   try {
@@ -51,13 +54,18 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
     }
 
     if (command === "doctor") {
-      const options = parseOptions(args, { prompts: true, agents: true, cwd: true });
+      const options = parseOptions(args, { prompts: true, agents: "optional", scope: true, cwd: true });
       const cwd = resolve(options.cwd ?? process.cwd());
-      const generatedPromptsDir = resolve(cwd, options.prompts ?? "generated/prompts");
+      const generatedPromptsDir = resolveGeneratedResourceDir(cwd, options.prompts, "generated/prompts");
       const result = runDoctor({
         startDir: cwd,
         generatedPromptsDir,
-        ...(options.agents ? { generatedAgentsDir: resolve(cwd, options.agents) } : {}),
+        ...(options.agents
+          ? {
+              generatedAgentsDir: resolveGeneratedResourceDir(cwd, options.agents === "true" ? undefined : options.agents, "generated/agents"),
+              agentSyncScope: parseSyncScope(options.scope ?? "project"),
+            }
+          : {}),
       });
 
       for (const message of result.messages) {
@@ -73,7 +81,7 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
       const scope = parseSyncScope(options.scope ?? "project");
       const officialPackage = resolveOfficialPackage({ startDir: cwd });
       const result = syncAgents({
-        generatedAgentsDir: resolve(cwd, options.agents ?? "generated/agents"),
+        generatedAgentsDir: resolveGeneratedResourceDir(cwd, options.agents, "generated/agents"),
         cwd,
         officialRoot: officialPackage.packageRoot,
         scope,
@@ -125,7 +133,9 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
   }
 }
 
-function parseOptions(args: string[], allowed: Record<string, boolean>) {
+type OptionMode = boolean | "optional";
+
+function parseOptions(args: string[], allowed: Record<string, OptionMode>) {
   const options: Record<string, string> = {};
 
   for (let index = 0; index < args.length; index += 1) {
@@ -140,8 +150,22 @@ function parseOptions(args: string[], allowed: Record<string, boolean>) {
       throw new Error(`Unknown option: ${arg}`);
     }
 
-    if (!allowed[name]) {
+    const mode = allowed[name];
+
+    if (!mode) {
       options[name] = "true";
+      continue;
+    }
+
+    if (mode === "optional") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        options[name] = "true";
+        continue;
+      }
+
+      options[name] = value;
+      index += 1;
       continue;
     }
 
@@ -155,6 +179,19 @@ function parseOptions(args: string[], allowed: Record<string, boolean>) {
   }
 
   return options;
+}
+
+function resolveGeneratedResourceDir(cwd: string, optionValue: string | undefined, relativeDir: string): string {
+  if (optionValue) {
+    return resolve(cwd, optionValue);
+  }
+
+  const cwdDir = resolve(cwd, relativeDir);
+  if (existsSync(cwdDir)) {
+    return cwdDir;
+  }
+
+  return join(packageRoot, relativeDir);
 }
 
 function parseSyncScope(scope: string): AgentSyncScope {
@@ -194,7 +231,23 @@ function parseOfficialArgs(args: string[]) {
   return { cwd, passthrough };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isCliEntrypoint(importMetaUrl: string, argvPath: string | undefined): boolean {
+  if (!argvPath) {
+    return false;
+  }
+
+  if (importMetaUrl === pathToFileURL(argvPath).href) {
+    return true;
+  }
+
+  try {
+    return importMetaUrl === pathToFileURL(realpathSync(argvPath)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntrypoint(import.meta.url, process.argv[1])) {
   const code = await runCli(process.argv.slice(2));
   process.exitCode = code;
 }

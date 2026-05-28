@@ -397,11 +397,12 @@ function runDoctor(options) {
         generatedAgentsDir: options.generatedAgentsDir,
         cwd: options.startDir ?? process.cwd(),
         officialRoot: officialPackage.packageRoot,
-        scope: "project",
+        scope: options.agentSyncScope ?? "project",
         check: true
       });
       ok = ok && syncResult.ok;
-      messages.push(syncResult.ok ? "project synced agents: ok" : "project synced agents: stale or missing");
+      const syncScope = options.agentSyncScope ?? "project";
+      messages.push(syncResult.ok ? `${syncScope} synced agents: ok` : `${syncScope} synced agents: stale or missing`);
       messages.push(...syncResult.messages);
     }
     return { ok, messages };

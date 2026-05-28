@@ -1,0 +1,12 @@
+.worktrees/
+node_modules/
+
+# Local runtime state
+.bg-shell/
+.gsd/
+.pi/
+.tmp-cli-smoke/
+
+# Internal planning/debug artifacts
+docs/superpowers/
+scripts/

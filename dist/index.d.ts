@@ -105,6 +105,7 @@ type DoctorOptions = {
     startDir?: string;
     generatedPromptsDir: string;
     generatedAgentsDir?: string;
+    agentSyncScope?: AgentSyncScope;
     piSubagentsResolver?: typeof resolvePiSubagentsPackage;
 };
 type DoctorResult = {

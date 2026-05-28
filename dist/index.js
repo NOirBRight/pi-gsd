@@ -12,7 +12,7 @@ import {
   syncAgents,
   transformOfficialAgentMarkdown,
   writeFrontmatter
-} from "./chunk-OOKVDRFX.js";
+} from "./chunk-3C6DISIM.js";
 import {
   rewriteOfficialClaudePaths,
   rewriteRuntimeMessageText

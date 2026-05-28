@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { generateAgents } from "./agent-generator.js";
-import { syncAgents } from "./agent-sync.js";
+import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { generatePrompts } from "./generator.js";
 import { resolveOfficialPackage } from "./official.js";
 import { resolvePiSubagentsPackage } from "./pi-subagents.js";
@@ -11,6 +11,7 @@ export type DoctorOptions = {
   startDir?: string;
   generatedPromptsDir: string;
   generatedAgentsDir?: string;
+  agentSyncScope?: AgentSyncScope;
   piSubagentsResolver?: typeof resolvePiSubagentsPackage;
 };
 
@@ -58,11 +59,12 @@ export function runDoctor(options: DoctorOptions): DoctorResult {
         generatedAgentsDir: options.generatedAgentsDir,
         cwd: options.startDir ?? process.cwd(),
         officialRoot: officialPackage.packageRoot,
-        scope: "project",
+        scope: options.agentSyncScope ?? "project",
         check: true,
       });
       ok = ok && syncResult.ok;
-      messages.push(syncResult.ok ? "project synced agents: ok" : "project synced agents: stale or missing");
+      const syncScope = options.agentSyncScope ?? "project";
+      messages.push(syncResult.ok ? `${syncScope} synced agents: ok` : `${syncScope} synced agents: stale or missing`);
       messages.push(...syncResult.messages);
     }
 
