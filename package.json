@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "pi-gsd-redux": "./dist/cli.js"
+    "pi-gsd-redux": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -31,7 +31,13 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "keywords": ["pi-package", "gsd", "open-gsd", "agent", "planning"],
+  "keywords": [
+    "pi-package",
+    "gsd",
+    "open-gsd",
+    "agent",
+    "planning"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/NOirBRight/pi-gsd.git"
@@ -53,7 +59,11 @@
     "vitest": "^4.0.0"
   },
   "pi": {
-    "extensions": ["./dist/extension.js"],
-    "prompts": ["./generated/prompts"]
+    "extensions": [
+      "./dist/extension.js"
+    ],
+    "prompts": [
+      "./generated/prompts"
+    ]
   }
 }
