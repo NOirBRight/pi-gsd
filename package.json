@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Pi adapter for official Open GSD without forking workflows",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "bin": {
     "pi-gsd": "./dist/cli.js"
   },
@@ -13,10 +21,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/cli.ts src/extension.ts --format esm --dts --clean --out-dir dist",
+    "build": "tsup src/cli.ts src/extension.ts src/index.ts --format esm --dts --clean --out-dir dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run typecheck && npm test && npm run build && node dist/cli.js doctor --prompts generated/prompts --cwd .",
     "generate": "node dist/cli.js generate"
   },
   "engines": {

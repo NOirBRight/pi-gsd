@@ -1,0 +1,88 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createOfficialFixture } from "./fixtures.js";
+import { generatePrompts } from "../src/generator.js";
+
+describe("generatePrompts", () => {
+  it("generates Pi prompt files from official command files", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "plan-phase.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(commandPath, "---\ndescription: Plan\n---\n# Plan Phase\n", "utf8");
+
+    const result = generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = join(outDir, "gsd-plan-phase.md");
+    expect(result.written).toContain(generated);
+    expect(existsSync(generated)).toBe(true);
+    expect(readFileSync(generated, "utf8")).toContain("description: Plan");
+  });
+
+  it("preserves frontmatter from command files with CRLF line endings", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "plan-phase.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(commandPath, "---\r\ndescription: CRLF\r\nargument-hint: '[x]'\r\n---\r\nBody\r\n", "utf8");
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-plan-phase.md"), "utf8");
+    expect(generated).toBe("---\ndescription: CRLF\nargument-hint: '[x]'\n---\nBody\r\n");
+  });
+
+  it("normalizes slash references in generated prompt bodies", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "new-project.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(
+      commandPath,
+      "---\ndescription: New\n---\nNext: /gsd:plan-phase 1\nURL: https://example.com/#/gsd:plan-phase\n",
+      "utf8",
+    );
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-new-project.md"), "utf8");
+    expect(generated).toContain("Next: /gsd-plan-phase 1");
+    expect(generated).toContain("URL: https://example.com/#/gsd:plan-phase");
+  });
+
+  it("removes stale generated prompts before writing", () => {
+    const fixture = createOfficialFixture();
+    const outDir = join(fixture.root, "generated", "prompts");
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+    writeFileSync(join(outDir, "stale.md"), "stale\n", "utf8");
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    expect(existsSync(join(outDir, "stale.md"))).toBe(false);
+  });
+
+  it("rejects the fixture root as an unsafe output directory before deleting", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "plan-phase.md");
+
+    expect(() => generatePrompts({ officialRoot: fixture.packageRoot, outDir: fixture.root })).toThrow(/unsafe output directory/i);
+    expect(existsSync(commandPath)).toBe(true);
+  });
+
+  it("rejects the official package root as an unsafe output directory before deleting", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "plan-phase.md");
+
+    expect(() => generatePrompts({ officialRoot: fixture.packageRoot, outDir: fixture.packageRoot })).toThrow(
+      /unsafe output directory/i,
+    );
+    expect(existsSync(commandPath)).toBe(true);
+  });
+
+  it("rejects an output directory inside the official package root before deleting", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "plan-phase.md");
+
+    expect(() =>
+      generatePrompts({ officialRoot: fixture.packageRoot, outDir: join(fixture.packageRoot, "generated", "prompts") }),
+    ).toThrow(/unsafe output directory/i);
+    expect(existsSync(commandPath)).toBe(true);
+  });
+});
