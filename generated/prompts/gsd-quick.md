@@ -2,6 +2,13 @@
 description: 'Execute a quick task with GSD guarantees (atomic commits, state tracking) but skip optional agents'
 argument-hint: '[list | status <slug> | resume <slug> | --full] [--validate] [--discuss] [--research] [task description]'
 ---
+<pi_subagents_runtime_note>
+Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
+Before delegation, inspect available agents with `subagent({ action: "list" })`.
+Use exact official GSD agent names such as `gsd-planner`, `gsd-executor`, and `gsd-code-reviewer`.
+If the `subagent` tool is unavailable, stop and ask the user to install or enable `pi-subagents`; do not simulate subagents inline.
+</pi_subagents_runtime_note>
+
 <objective>
 Execute small, ad-hoc tasks with GSD guarantees (atomic commits, STATE.md tracking).
 

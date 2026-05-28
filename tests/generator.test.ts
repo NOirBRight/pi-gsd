@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createOfficialFixture } from "./fixtures.js";
 import { generatePrompts } from "../src/generator.js";
@@ -84,5 +84,44 @@ describe("generatePrompts", () => {
       generatePrompts({ officialRoot: fixture.packageRoot, outDir: join(fixture.packageRoot, "generated", "prompts") }),
     ).toThrow(/unsafe output directory/i);
     expect(existsSync(commandPath)).toBe(true);
+  });
+
+  it("rejects explicit safe root output even when official package root is elsewhere", () => {
+    const fixture = createOfficialFixture();
+    const safeRoot = join(fixture.root, "project");
+    mkdirSync(safeRoot);
+    const marker = join(safeRoot, "keep.txt");
+    writeFileSync(marker, "keep\n", "utf8");
+
+    expect(() => generatePrompts({ officialRoot: fixture.packageRoot, outDir: safeRoot, safeRoot })).toThrow(
+      /unsafe output directory/i,
+    );
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("rejects an existing nonempty non-generated directory under safe root before deleting", () => {
+    const fixture = createOfficialFixture();
+    const outDir = join(fixture.root, "src");
+    const marker = join(outDir, "keep.ts");
+    mkdirSync(outDir);
+    writeFileSync(marker, "export const keep = true;\n", "utf8");
+
+    expect(() => generatePrompts({ officialRoot: fixture.packageRoot, outDir, safeRoot: fixture.root })).toThrow(
+      /unsafe output directory/i,
+    );
+    expect(readFileSync(marker, "utf8")).toBe("export const keep = true;\n");
+  });
+
+  it("adds Pi subagent guidance to prompts that spawn subagents", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "execute-phase.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(commandPath, "---\ndescription: Execute\n---\nSpawn subagents for each plan.\n", "utf8");
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-execute-phase.md"), "utf8");
+    expect(generated).toContain("<pi_subagents_runtime_note>");
+    expect(generated).toContain('subagent({ action: "list" })');
   });
 });

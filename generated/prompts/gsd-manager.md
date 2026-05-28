@@ -2,6 +2,13 @@
 description: Interactive command center for managing multiple phases from one terminal
 argument-hint: '[--analyze-deps]'
 ---
+<pi_subagents_runtime_note>
+Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
+Before delegation, inspect available agents with `subagent({ action: "list" })`.
+Use exact official GSD agent names such as `gsd-planner`, `gsd-executor`, and `gsd-code-reviewer`.
+If the `subagent` tool is unavailable, stop and ask the user to install or enable `pi-subagents`; do not simulate subagents inline.
+</pi_subagents_runtime_note>
+
 <objective>
 Single-terminal command center for managing a milestone. Shows a dashboard of all phases with visual status indicators, recommends optimal next actions, and dispatches work — discuss runs inline, plan/execute run as background agents.
 

@@ -1,9 +1,9 @@
 import {
   rewriteRuntimeMessageText
-} from "./chunk-UV4E3ZBD.js";
+} from "./chunk-YKDNLLJM.js";
 import {
   resolveOfficialPackage
-} from "./chunk-JTETA7Z5.js";
+} from "./chunk-ZNIYZQO4.js";
 
 // src/extension.ts
 function piGsdExtension(pi) {

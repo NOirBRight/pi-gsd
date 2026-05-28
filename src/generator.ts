@@ -1,22 +1,37 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, parse, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { generateAgents, type GenerateAgentsResult } from "./agent-generator.js";
 import { splitFrontmatter, writeFrontmatter } from "./frontmatter.js";
-import { commandFileToPiPromptName, normalizeGsdSlashReferences } from "./prompt-transform.js";
+import { addPiSubagentGuidance, commandFileToPiPromptName, normalizeGsdSlashReferences } from "./prompt-transform.js";
+import { assertSafeOutDir } from "./safe-output.js";
 
 export type GeneratePromptsOptions = {
   officialRoot: string;
   outDir: string;
+  safeRoot?: string;
 };
 
 export type GeneratePromptsResult = {
   written: string[];
 };
 
+export type GenerateAllOptions = {
+  officialRoot: string;
+  promptsDir: string;
+  agentsDir: string;
+  safeRoot?: string;
+};
+
+export type GenerateAllResult = {
+  prompts: GeneratePromptsResult;
+  agents: GenerateAgentsResult;
+};
+
 export function generatePrompts(options: GeneratePromptsOptions): GeneratePromptsResult {
   const officialRoot = resolve(options.officialRoot);
   const outDir = resolve(options.outDir);
 
-  assertSafeOutDir(officialRoot, outDir);
+  assertSafeOutDir({ officialRoot, outDir, safeRoot: options.safeRoot });
 
   const commandsDir = join(officialRoot, "commands", "gsd");
   const fileNames = readdirSync(commandsDir)
@@ -30,7 +45,7 @@ export function generatePrompts(options: GeneratePromptsOptions): GeneratePrompt
     const source = readFileSync(join(commandsDir, fileName), "utf8");
     const parsed = splitFrontmatter(source);
     const targetPath = join(outDir, commandFileToPiPromptName(fileName));
-    const body = normalizeGsdSlashReferences(parsed.body);
+    const body = addPiSubagentGuidance(normalizeGsdSlashReferences(parsed.body));
 
     writeFileSync(targetPath, writeFrontmatter(parsed.data, body), "utf8");
     return targetPath;
@@ -39,27 +54,9 @@ export function generatePrompts(options: GeneratePromptsOptions): GeneratePrompt
   return { written };
 }
 
-function assertSafeOutDir(officialRoot: string, outDir: string) {
-  if (
-    parse(outDir).root === outDir ||
-    samePath(outDir, process.cwd()) ||
-    samePath(outDir, officialRoot) ||
-    isInside(outDir, officialRoot) ||
-    isInside(officialRoot, outDir)
-  ) {
-    throw new Error(`Unsafe output directory: ${outDir}`);
-  }
-}
-
-function samePath(left: string, right: string) {
-  return normalizePath(left) === normalizePath(right);
-}
-
-function isInside(parent: string, child: string) {
-  const childRelativePath = relative(parent, child);
-  return childRelativePath !== "" && !childRelativePath.startsWith("..") && !isAbsolute(childRelativePath);
-}
-
-function normalizePath(path: string) {
-  return process.platform === "win32" ? path.toLowerCase() : path;
+export function generateAll(options: GenerateAllOptions): GenerateAllResult {
+  return {
+    prompts: generatePrompts({ officialRoot: options.officialRoot, outDir: options.promptsDir, safeRoot: options.safeRoot }),
+    agents: generateAgents({ officialRoot: options.officialRoot, outDir: options.agentsDir, safeRoot: options.safeRoot }),
+  };
 }

@@ -1,5 +1,5 @@
 import { splitFrontmatter, writeFrontmatter } from "../src/frontmatter.js";
-import { commandFileToPiPromptName, normalizeGsdSlashReferences } from "../src/prompt-transform.js";
+import { addPiSubagentGuidance, commandFileToPiPromptName, normalizeGsdSlashReferences } from "../src/prompt-transform.js";
 
 describe("frontmatter helpers", () => {
   it("splits markdown frontmatter from body", () => {
@@ -71,5 +71,71 @@ describe("prompt transforms", () => {
     const input = "See https://example.com/?next=/gsd:new-project and /gsd:new-project";
 
     expect(normalizeGsdSlashReferences(input)).toBe("See https://example.com/?next=/gsd:new-project and /gsd-new-project");
+  });
+});
+
+describe("Pi subagent guidance", () => {
+  it("adds guidance when prompt body mentions spawning subagents", () => {
+    const body = "Spawn subagents to execute the plans.\n";
+
+    const result = addPiSubagentGuidance(body);
+
+    expect(result).toContain("<pi_subagents_runtime_note>");
+    expect(result).toContain('subagent({ action: "list" })');
+    expect(result).toContain("Spawn subagents to execute the plans.");
+  });
+
+  it("does not add guidance to prompts without delegation language", () => {
+    const body = "Execute this inline without spawning anything.\n";
+
+    expect(addPiSubagentGuidance(body)).toBe(body);
+  });
+
+  it("does not add guidance when subagent spawning is explicitly negated", () => {
+    const body = "Execute inline without spawning subagents.\n";
+
+    expect(addPiSubagentGuidance(body)).toBe(body);
+  });
+
+  it("adds guidance when spawning an official GSD agent by name", () => {
+    const body = "Spawn `gsd-phase-researcher` for phase N.\n";
+
+    expect(addPiSubagentGuidance(body)).toContain("<pi_subagents_runtime_note>");
+  });
+
+  it("adds guidance when delegating to GSD subagents", () => {
+    const body = "Delegates to gsd-doc-writer subagents for documentation.\n";
+
+    expect(addPiSubagentGuidance(body)).toContain("<pi_subagents_runtime_note>");
+  });
+
+  it("adds guidance when spawning an official GSD role noun", () => {
+    const body = "This command spawns integration checker for cross-phase wiring.\n";
+
+    expect(addPiSubagentGuidance(body)).toContain("<pi_subagents_runtime_note>");
+  });
+
+  it("adds guidance when prompt optionally spawns research", () => {
+    const body = "probing questions, optionally spawns research, then routes outputs.\n";
+
+    expect(addPiSubagentGuidance(body)).toContain("<pi_subagents_runtime_note>");
+  });
+
+  it("adds guidance when orchestrating official GSD agents by name", () => {
+    const body = "Orchestrates gsd-ui-researcher and gsd-ui-checker.\n";
+
+    expect(addPiSubagentGuidance(body)).toContain("<pi_subagents_runtime_note>");
+  });
+
+  it("adds guidance when dispatching background agents", () => {
+    const body = "dispatches plan to execute as background agents.\n";
+
+    expect(addPiSubagentGuidance(body)).toContain("<pi_subagents_runtime_note>");
+  });
+
+  it("does not add duplicate guidance", () => {
+    const body = "<pi_subagents_runtime_note>Already here</pi_subagents_runtime_note>\nSpawn subagents.\n";
+
+    expect(addPiSubagentGuidance(body)).toBe(body);
   });
 });

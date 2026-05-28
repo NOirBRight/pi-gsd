@@ -2,6 +2,13 @@
 description: Generate or update project documentation verified against the codebase
 argument-hint: '[--force] [--verify-only]'
 ---
+<pi_subagents_runtime_note>
+Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
+Before delegation, inspect available agents with `subagent({ action: "list" })`.
+Use exact official GSD agent names such as `gsd-planner`, `gsd-executor`, and `gsd-code-reviewer`.
+If the `subagent` tool is unavailable, stop and ask the user to install or enable `pi-subagents`; do not simulate subagents inline.
+</pi_subagents_runtime_note>
+
 <objective>
 Generate and update up to 9 documentation files for the current project. Each doc type is written by a gsd-doc-writer subagent that explores the codebase directly — no hallucinated paths, phantom endpoints, or stale signatures.
 

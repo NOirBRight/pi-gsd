@@ -1,30 +1,50 @@
 import {
+  OFFICIAL_ROOT_PLACEHOLDER,
+  PI_SUBAGENTS_PACKAGE_NAME,
+  generateAgents,
+  generateAll,
   generatePrompts,
+  materializeOfficialAgentPaths,
+  resolveAgentTargetDir,
+  resolvePiSubagentsPackage,
   runDoctor,
   splitFrontmatter,
+  syncAgents,
+  transformOfficialAgentMarkdown,
   writeFrontmatter
-} from "./chunk-7Y7JXFQB.js";
+} from "./chunk-OOKVDRFX.js";
 import {
   rewriteOfficialClaudePaths,
   rewriteRuntimeMessageText
-} from "./chunk-UV4E3ZBD.js";
+} from "./chunk-YKDNLLJM.js";
 import {
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
+  addPiSubagentGuidance,
   commandFileToPiPromptName,
   normalizeGsdSlashReferences,
   resolveOfficialPackage
-} from "./chunk-JTETA7Z5.js";
+} from "./chunk-ZNIYZQO4.js";
 export {
   OFFICIAL_PACKAGE_NAME,
+  OFFICIAL_ROOT_PLACEHOLDER,
   OfficialPackageError,
+  PI_SUBAGENTS_PACKAGE_NAME,
+  addPiSubagentGuidance,
   commandFileToPiPromptName,
+  generateAgents,
+  generateAll,
   generatePrompts,
+  materializeOfficialAgentPaths,
   normalizeGsdSlashReferences,
+  resolveAgentTargetDir,
   resolveOfficialPackage,
+  resolvePiSubagentsPackage,
   rewriteOfficialClaudePaths,
   rewriteRuntimeMessageText,
   runDoctor,
   splitFrontmatter,
+  syncAgents,
+  transformOfficialAgentMarkdown,
   writeFrontmatter
 };

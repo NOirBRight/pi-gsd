@@ -2,6 +2,13 @@
 description: Analyze codebase with parallel mapper agents to produce .planning/codebase/ documents
 argument-hint: '[--fast [--focus tech|arch|quality|concerns]] [--query <term>|status|diff|refresh] [area]'
 ---
+<pi_subagents_runtime_note>
+Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
+Before delegation, inspect available agents with `subagent({ action: "list" })`.
+Use exact official GSD agent names such as `gsd-planner`, `gsd-executor`, and `gsd-code-reviewer`.
+If the `subagent` tool is unavailable, stop and ask the user to install or enable `pi-subagents`; do not simulate subagents inline.
+</pi_subagents_runtime_note>
+
 
 <objective>
 Analyze existing codebase using parallel gsd-codebase-mapper agents to produce structured codebase documents.

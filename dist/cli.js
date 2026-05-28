@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import {
+  generateAll,
   generatePrompts,
-  runDoctor
-} from "./chunk-7Y7JXFQB.js";
+  runDoctor,
+  syncAgents
+} from "./chunk-OOKVDRFX.js";
 import {
   resolveOfficialPackage
-} from "./chunk-JTETA7Z5.js";
+} from "./chunk-ZNIYZQO4.js";
 
 // src/cli.ts
 import { spawnSync } from "child_process";
@@ -18,28 +20,62 @@ var defaultIO = {
 var usage = `Usage: pi-gsd <command> [options]
 
 Commands:
-  generate [--out <dir>] [--cwd <dir>]
-  doctor [--prompts <dir>] [--cwd <dir>]
+  generate [--out <dir>] [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
+  doctor [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
+  sync-agents [--scope project|user] [--agents <dir>] [--cwd <dir>] [--dry-run] [--check]
   official [--cwd <dir>] [--] [...args]
 `;
 async function runCli(argv, io = defaultIO) {
   try {
     const [command, ...args] = argv;
     if (command === "generate") {
-      const options = parseOptions(args, { out: true, cwd: true });
+      const options = parseOptions(args, { out: true, prompts: true, agents: true, cwd: true });
       const cwd = resolve(options.cwd ?? process.cwd());
-      const outDir = resolve(cwd, options.out ?? "generated/prompts");
       const officialPackage = resolveOfficialPackage({ startDir: cwd });
-      const result = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir });
-      io.stdout(`generated ${result.written.length} prompt(s)
+      if (options.out) {
+        const result2 = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir: resolve(cwd, options.out), safeRoot: cwd });
+        io.stdout(`generated ${result2.written.length} prompt(s)
+`);
+        return 0;
+      }
+      const result = generateAll({
+        officialRoot: officialPackage.packageRoot,
+        promptsDir: resolve(cwd, options.prompts ?? "generated/prompts"),
+        agentsDir: resolve(cwd, options.agents ?? "generated/agents"),
+        safeRoot: cwd
+      });
+      io.stdout(`generated ${result.prompts.written.length} prompt(s) and ${result.agents.written.length} agent(s)
 `);
       return 0;
     }
     if (command === "doctor") {
-      const options = parseOptions(args, { prompts: true, cwd: true });
+      const options = parseOptions(args, { prompts: true, agents: true, cwd: true });
       const cwd = resolve(options.cwd ?? process.cwd());
       const generatedPromptsDir = resolve(cwd, options.prompts ?? "generated/prompts");
-      const result = runDoctor({ startDir: cwd, generatedPromptsDir });
+      const result = runDoctor({
+        startDir: cwd,
+        generatedPromptsDir,
+        ...options.agents ? { generatedAgentsDir: resolve(cwd, options.agents) } : {}
+      });
+      for (const message of result.messages) {
+        io.stdout(`${message}
+`);
+      }
+      return result.ok ? 0 : 1;
+    }
+    if (command === "sync-agents") {
+      const options = parseOptions(args, { scope: true, agents: true, cwd: true, "dry-run": false, check: false });
+      const cwd = resolve(options.cwd ?? process.cwd());
+      const scope = parseSyncScope(options.scope ?? "project");
+      const officialPackage = resolveOfficialPackage({ startDir: cwd });
+      const result = syncAgents({
+        generatedAgentsDir: resolve(cwd, options.agents ?? "generated/agents"),
+        cwd,
+        officialRoot: officialPackage.packageRoot,
+        scope,
+        dryRun: Object.hasOwn(options, "dry-run"),
+        check: Object.hasOwn(options, "check")
+      });
       for (const message of result.messages) {
         io.stdout(`${message}
 `);
@@ -85,8 +121,12 @@ function parseOptions(args, allowed) {
       throw new Error(`Unexpected argument: ${arg}`);
     }
     const name = arg.slice(2);
-    if (!allowed[name]) {
+    if (!(name in allowed)) {
       throw new Error(`Unknown option: ${arg}`);
+    }
+    if (!allowed[name]) {
+      options[name] = "true";
+      continue;
     }
     const value = args[index + 1];
     if (value === void 0 || value.startsWith("--")) {
@@ -96,6 +136,12 @@ function parseOptions(args, allowed) {
     index += 1;
   }
   return options;
+}
+function parseSyncScope(scope) {
+  if (scope === "project" || scope === "user") {
+    return scope;
+  }
+  throw new Error(`Invalid sync scope: ${scope}`);
 }
 function parseOfficialArgs(args) {
   const markerIndex = args.indexOf("--");

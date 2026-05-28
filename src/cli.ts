@@ -2,8 +2,9 @@
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { runDoctor } from "./doctor.js";
-import { generatePrompts } from "./generator.js";
+import { generateAll, generatePrompts } from "./generator.js";
 import { resolveOfficialPackage } from "./official.js";
 
 export interface CliIO {
@@ -19,8 +20,9 @@ const defaultIO: CliIO = {
 const usage = `Usage: pi-gsd <command> [options]
 
 Commands:
-  generate [--out <dir>] [--cwd <dir>]
-  doctor [--prompts <dir>] [--cwd <dir>]
+  generate [--out <dir>] [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
+  doctor [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
+  sync-agents [--scope project|user] [--agents <dir>] [--cwd <dir>] [--dry-run] [--check]
   official [--cwd <dir>] [--] [...args]
 `;
 
@@ -29,26 +31,58 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
     const [command, ...args] = argv;
 
     if (command === "generate") {
-      const options = parseOptions(args, { out: true, cwd: true });
+      const options = parseOptions(args, { out: true, prompts: true, agents: true, cwd: true });
       const cwd = resolve(options.cwd ?? process.cwd());
-      const outDir = resolve(cwd, options.out ?? "generated/prompts");
       const officialPackage = resolveOfficialPackage({ startDir: cwd });
-      const result = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir });
+      if (options.out) {
+        const result = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir: resolve(cwd, options.out), safeRoot: cwd });
+        io.stdout(`generated ${result.written.length} prompt(s)\n`);
+        return 0;
+      }
 
-      io.stdout(`generated ${result.written.length} prompt(s)\n`);
+      const result = generateAll({
+        officialRoot: officialPackage.packageRoot,
+        promptsDir: resolve(cwd, options.prompts ?? "generated/prompts"),
+        agentsDir: resolve(cwd, options.agents ?? "generated/agents"),
+        safeRoot: cwd,
+      });
+      io.stdout(`generated ${result.prompts.written.length} prompt(s) and ${result.agents.written.length} agent(s)\n`);
       return 0;
     }
 
     if (command === "doctor") {
-      const options = parseOptions(args, { prompts: true, cwd: true });
+      const options = parseOptions(args, { prompts: true, agents: true, cwd: true });
       const cwd = resolve(options.cwd ?? process.cwd());
       const generatedPromptsDir = resolve(cwd, options.prompts ?? "generated/prompts");
-      const result = runDoctor({ startDir: cwd, generatedPromptsDir });
+      const result = runDoctor({
+        startDir: cwd,
+        generatedPromptsDir,
+        ...(options.agents ? { generatedAgentsDir: resolve(cwd, options.agents) } : {}),
+      });
 
       for (const message of result.messages) {
         io.stdout(`${message}\n`);
       }
 
+      return result.ok ? 0 : 1;
+    }
+
+    if (command === "sync-agents") {
+      const options = parseOptions(args, { scope: true, agents: true, cwd: true, "dry-run": false, check: false });
+      const cwd = resolve(options.cwd ?? process.cwd());
+      const scope = parseSyncScope(options.scope ?? "project");
+      const officialPackage = resolveOfficialPackage({ startDir: cwd });
+      const result = syncAgents({
+        generatedAgentsDir: resolve(cwd, options.agents ?? "generated/agents"),
+        cwd,
+        officialRoot: officialPackage.packageRoot,
+        scope,
+        dryRun: Object.hasOwn(options, "dry-run"),
+        check: Object.hasOwn(options, "check"),
+      });
+      for (const message of result.messages) {
+        io.stdout(`${message}\n`);
+      }
       return result.ok ? 0 : 1;
     }
 
@@ -91,7 +125,7 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
   }
 }
 
-function parseOptions(args: string[], allowed: Record<string, true>) {
+function parseOptions(args: string[], allowed: Record<string, boolean>) {
   const options: Record<string, string> = {};
 
   for (let index = 0; index < args.length; index += 1) {
@@ -102,8 +136,13 @@ function parseOptions(args: string[], allowed: Record<string, true>) {
     }
 
     const name = arg.slice(2);
-    if (!allowed[name]) {
+    if (!(name in allowed)) {
       throw new Error(`Unknown option: ${arg}`);
+    }
+
+    if (!allowed[name]) {
+      options[name] = "true";
+      continue;
     }
 
     const value = args[index + 1];
@@ -116,6 +155,13 @@ function parseOptions(args: string[], allowed: Record<string, true>) {
   }
 
   return options;
+}
+
+function parseSyncScope(scope: string): AgentSyncScope {
+  if (scope === "project" || scope === "user") {
+    return scope;
+  }
+  throw new Error(`Invalid sync scope: ${scope}`);
 }
 
 function parseOfficialArgs(args: string[]) {

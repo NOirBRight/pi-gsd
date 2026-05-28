@@ -91,6 +91,25 @@ describe("runCli", () => {
     expect(stdout.join("")).toContain("official package: @opengsd/get-shit-done-redux@1.2.3");
   });
 
+  it("does not check project synced agents unless doctor agents option is provided", async () => {
+    const fixture = createOfficialFixture();
+    writePlanCommand(fixture.packageRoot);
+    writeAgent(fixture.packageRoot);
+    const stdout: string[] = [];
+    await runCli(["generate", "--out", "generated/prompts", "--cwd", fixture.root], {
+      stdout: () => undefined,
+      stderr: () => undefined,
+    });
+
+    const code = await runCli(["doctor", "--cwd", fixture.root], {
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    });
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).not.toContain("project synced agents");
+  });
+
   it("resolves relative doctor prompts from cwd", async () => {
     const fixture = createOfficialFixture();
     writePlanCommand(fixture.packageRoot);
@@ -105,6 +124,41 @@ describe("runCli", () => {
     });
 
     expect(code).toBe(0);
+  });
+
+  it("accepts doctor agents option while prompts are valid", async () => {
+    const fixture = createOfficialFixture();
+    writePlanCommand(fixture.packageRoot);
+    const stderr: string[] = [];
+    await runCli(["generate", "--out", "relative-prompts", "--cwd", fixture.root], {
+      stdout: () => undefined,
+      stderr: () => undefined,
+    });
+
+    const code = await runCli(["doctor", "--prompts", "relative-prompts", "--agents", "relative-agents", "--cwd", fixture.root], {
+      stdout: () => undefined,
+      stderr: (text) => stderr.push(text),
+    });
+
+    expect(code).toBe(0);
+    expect(stderr.join("")).not.toContain("Unknown option: --agents");
+  });
+
+  it("syncs generated agents into project .pi agents", async () => {
+    const fixture = createOfficialFixture();
+    const generatedAgents = join(fixture.root, "generated", "agents");
+    mkdirSync(generatedAgents, { recursive: true });
+    writeFileSync(join(generatedAgents, "gsd-planner.md"), "---\nname: gsd-planner\ndescription: Plans\n---\nBody\n", "utf8");
+    const stdout: string[] = [];
+
+    const code = await runCli(["sync-agents", "--cwd", fixture.root], {
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    });
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("synced agent: gsd-planner.md");
+    expect(readFileSync(join(fixture.root, ".pi", "agents", "gsd-planner.md"), "utf8")).toContain("pi-gsd generated agent");
   });
 
   it("passes arguments to official gsd-tools", async () => {
@@ -220,6 +274,10 @@ describe("runCli", () => {
 
 function writePlanCommand(packageRoot: string) {
   writeFileSync(join(packageRoot, "commands", "gsd", "plan-phase.md"), "---\ndescription: Plan\n---\n# Plan Phase\n", "utf8");
+}
+
+function writeAgent(packageRoot: string) {
+  writeFileSync(join(packageRoot, "agents", "gsd-planner.md"), "---\nname: gsd-planner\ndescription: Plans\n---\nBody\n", "utf8");
 }
 
 function ensureBuiltCli() {

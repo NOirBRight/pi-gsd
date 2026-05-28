@@ -1,6 +1,6 @@
 import {
   normalizeGsdSlashReferences
-} from "./chunk-JTETA7Z5.js";
+} from "./chunk-ZNIYZQO4.js";
 
 // src/runtime-rewrites.ts
 function rewriteOfficialClaudePaths(input, officialRoot) {

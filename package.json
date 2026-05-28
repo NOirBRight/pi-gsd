@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "generated/prompts",
+    "generated/agents",
     "README.md",
     "LICENSE"
   ],
@@ -33,7 +34,8 @@
   "keywords": ["pi-package", "gsd", "open-gsd", "agent", "planning"],
   "license": "MIT",
   "dependencies": {
-    "@opengsd/get-shit-done-redux": "latest"
+    "@opengsd/get-shit-done-redux": "latest",
+    "pi-subagents": "^0.25.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",
