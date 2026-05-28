@@ -2,7 +2,7 @@
 import {
   generatePrompts,
   runDoctor
-} from "./chunk-PMIHJJBK.js";
+} from "./chunk-7Y7JXFQB.js";
 import {
   resolveOfficialPackage
 } from "./chunk-JTETA7Z5.js";

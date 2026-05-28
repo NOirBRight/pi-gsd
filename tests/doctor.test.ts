@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createOfficialFixture } from "./fixtures.js";
 import { generatePrompts } from "../src/generator.js";
@@ -26,6 +26,19 @@ describe("runDoctor", () => {
 
     expect(result.ok).toBe(false);
     expect(result.messages.join("\n")).toContain("stale generated prompt: gsd-plan-phase.md");
+  });
+
+  it("accepts generated prompts that differ only by CRLF line endings", () => {
+    const fixture = createOfficialFixture();
+    const outDir = join(fixture.root, "generated", "prompts");
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+    const promptPath = join(outDir, "gsd-plan-phase.md");
+    const prompt = readFileSync(promptPath, "utf8");
+    writeFileSync(promptPath, prompt.replace(/\n/g, "\r\n"), "utf8");
+
+    const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: outDir });
+
+    expect(result.ok).toBe(true);
   });
 
   it("reports missing generated prompts", () => {

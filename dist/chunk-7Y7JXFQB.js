@@ -152,7 +152,7 @@ function runDoctor(options) {
         throw error;
       }
       const expectedContent = readFileSync2(expectedPath, "utf8");
-      if (actual !== expectedContent) {
+      if (normalizeLineEndings(actual) !== normalizeLineEndings(expectedContent)) {
         ok = false;
         messages.push(`stale generated prompt: ${fileName}`);
       }
@@ -170,6 +170,9 @@ function runDoctor(options) {
 }
 function isMissingFileError(error) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+function normalizeLineEndings(content) {
+  return content.replace(/\r\n/g, "\n");
 }
 function readGeneratedPromptFileNames(generatedPromptsDir) {
   try {

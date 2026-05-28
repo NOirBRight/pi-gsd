@@ -3,7 +3,7 @@ import {
   runDoctor,
   splitFrontmatter,
   writeFrontmatter
-} from "./chunk-PMIHJJBK.js";
+} from "./chunk-7Y7JXFQB.js";
 import {
   rewriteOfficialClaudePaths,
   rewriteRuntimeMessageText
