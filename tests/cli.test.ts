@@ -255,7 +255,7 @@ describe("runCli", () => {
     });
 
     expect(code).toBe(2);
-    expect(stderr.join("")).toContain("Usage: pi-gsd");
+    expect(stderr.join("")).toContain("Usage: pi-gsd-redux");
   });
 
   it("catches errors and returns one", async () => {
@@ -290,7 +290,7 @@ describe("runCli", () => {
     const fixture = createOfficialFixture();
     writePlanCommand(fixture.packageRoot);
     const output = join(fixture.root, "linked-output");
-    const linkedPackage = join(fixture.root, "linked-pi-gsd");
+    const linkedPackage = join(fixture.root, "linked-pi-gsd-redux");
     symlinkSync(process.cwd(), linkedPackage, process.platform === "win32" ? "junction" : "dir");
 
     ensureBuiltCli();

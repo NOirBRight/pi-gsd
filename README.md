@@ -1,4 +1,4 @@
-# pi-gsd
+# pi-gsd-redux
 
 Pi adapter for official Open GSD (`@opengsd/get-shit-done-redux`).
 
@@ -9,8 +9,16 @@ This package keeps official GSD as canonical. It generates Pi prompt templates a
 Install this package as a Pi package, then install `pi-subagents` as a Pi package so the `subagent` tool is available:
 
 ```bash
-pi install npm:pi-gsd
+pi install npm:pi-gsd-redux
 pi install npm:pi-subagents
+npx pi-gsd-redux sync-agents --scope user
+```
+
+If you want the helper CLI available without `npx`, install it globally too:
+
+```bash
+npm install -g pi-gsd-redux
+pi-gsd-redux sync-agents --scope user
 ```
 
 For local development from this repository:
@@ -41,7 +49,7 @@ This writes:
 Project-local sync is recommended:
 
 ```bash
-pi-gsd sync-agents --scope project
+npx pi-gsd-redux sync-agents --scope project
 ```
 
 This writes generated GSD agents into `.pi/agents/`, where `pi-subagents` can discover them.
@@ -49,19 +57,19 @@ This writes generated GSD agents into `.pi/agents/`, where `pi-subagents` can di
 User-level sync is also supported when you want the same GSD agents available across projects:
 
 ```bash
-pi-gsd sync-agents --scope user
+npx pi-gsd-redux sync-agents --scope user
 ```
 
 Safety behavior:
 
-- `pi-gsd` only writes official `gsd-*.md` agent files.
+- `pi-gsd-redux` only writes official `gsd-*.md` agent files.
 - Existing files without the `pi-gsd generated agent` marker are not overwritten.
 - Extra user files are not deleted.
 
 ## Doctor
 
 ```bash
-pi-gsd doctor
+npx pi-gsd-redux doctor
 ```
 
 Doctor checks official package resolution, `pi-subagents` dependency resolution, and generated prompt drift.
@@ -69,16 +77,16 @@ Doctor checks official package resolution, `pi-subagents` dependency resolution,
 To also check generated agents and project `.pi/agents` sync status:
 
 ```bash
-pi-gsd doctor --agents
+npx pi-gsd-redux doctor --agents
 ```
 
 For user-level synced agents:
 
 ```bash
-pi-gsd doctor --agents --scope user
+npx pi-gsd-redux doctor --agents --scope user
 ```
 
-If project agents have not been synced yet, this check reports missing synced agents. Run `pi-gsd sync-agents --scope project` when you want the project-local `.pi/agents` files materialized.
+If project agents have not been synced yet, this check reports missing synced agents. Run `npx pi-gsd-redux sync-agents --scope project` when you want the project-local `.pi/agents` files materialized.
 
 ## Update Official GSD
 
@@ -86,6 +94,6 @@ If project agents have not been synced yet, this check reports missing synced ag
 npm update @opengsd/get-shit-done-redux
 npm run build
 node dist/cli.js generate --cwd .
-pi-gsd sync-agents --scope project
+node dist/cli.js sync-agents --scope project
 npm run check
 ```

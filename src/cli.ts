@@ -18,7 +18,7 @@ const defaultIO: CliIO = {
   stderr: (text) => process.stderr.write(text),
 };
 
-const usage = `Usage: pi-gsd <command> [options]
+const usage = `Usage: pi-gsd-redux <command> [options]
 
 Commands:
   generate [--out <dir>] [--prompts <dir>] [--agents <dir>] [--cwd <dir>]

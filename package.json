@@ -1,5 +1,5 @@
 {
-  "name": "pi-gsd",
+  "name": "pi-gsd-redux",
   "version": "0.1.0",
   "description": "Pi adapter for official Open GSD without forking workflows",
   "type": "module",
@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "pi-gsd": "./dist/cli.js"
+    "pi-gsd-redux": "./dist/cli.js"
   },
   "files": [
     "dist",
@@ -32,6 +32,14 @@
     "node": ">=22.0.0"
   },
   "keywords": ["pi-package", "gsd", "open-gsd", "agent", "planning"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NOirBRight/pi-gsd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NOirBRight/pi-gsd/issues"
+  },
+  "homepage": "https://github.com/NOirBRight/pi-gsd#readme",
   "license": "MIT",
   "dependencies": {
     "@opengsd/get-shit-done-redux": "latest",

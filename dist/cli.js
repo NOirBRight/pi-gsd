@@ -18,7 +18,7 @@ var defaultIO = {
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text)
 };
-var usage = `Usage: pi-gsd <command> [options]
+var usage = `Usage: pi-gsd-redux <command> [options]
 
 Commands:
   generate [--out <dir>] [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
