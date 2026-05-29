@@ -50,13 +50,10 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
         : { provider: "unknown", id: "unknown", name: "unknown" };
 
       const allModels = ctx.modelRegistry.getAvailable();
-      // scopedModels is not directly on ExtensionContext, so fall back to all available
-      const scopedModelIds = new Set(allModels.map((m) => `${m.provider}/${m.id}`));
 
       await runGsdModelsCommand(args, {
         cwd: ctx.cwd,
         model: modelChoice,
-        scopedModelIds,
         modelRegistry: {
           getAvailable() {
             return allModels.map((m) => ({ provider: String(m.provider), id: m.id, name: m.name }));

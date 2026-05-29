@@ -61,30 +61,18 @@ const agentTiers: Record<string, GsdTier> = {
 };
 
 const tierDescriptions: Record<GsdTier, string> = {
-  light: "Light — mappers, scanners, audits (e.g. gsd-codebase-mapper)",
-  standard: "Standard — execution, research, writing (e.g. gsd-executor)",
-  heavy: "Heavy — planning, debugging, architecture (e.g. gsd-planner)",
+  light: "mapping, scanning, audits (e.g. gsd-codebase-mapper)",
+  standard: "execution, research, writing (e.g. gsd-executor)",
+  heavy: "planning, debugging, architecture (e.g. gsd-planner)",
 };
 
 const profileDescriptions: Record<GsdProfile | "inherit", string> = {
-  inherit: "Inherit — all GSD agents use your current Pi model",
-  quality: "Quality — Opus/strong model for every agent",
-  balanced: "Balanced — strong for planning, standard for execution, light for mapping",
-  budget: "Budget — standard for execution, light for everything else",
-  adaptive: "Adaptive — heavy for planning/debugging, standard for execution, light for mapping",
+  inherit: `All GSD agents use your current model`,
+  quality: "Heavy model for every agent (maximum quality)",
+  balanced: "Heavy for planning, standard for execution, light for mapping",
+  budget: "Standard for execution, light for everything else",
+  adaptive: "Heavy for planning/debugging, standard for execution, light for mapping",
 };
-
-export const keyGsdAgents = [
-  "gsd-planner",
-  "gsd-executor",
-  "gsd-roadmapper",
-  "gsd-codebase-mapper",
-  "gsd-phase-researcher",
-  "gsd-project-researcher",
-  "gsd-code-reviewer",
-  "gsd-verifier",
-  "gsd-plan-checker",
-] as const;
 
 // ── Pure helpers ─────────────────────────────────────────────────────
 
@@ -141,9 +129,9 @@ export function formatModelId(model: ModelChoiceLike): string {
 export function formatModelChoiceLabel(model: ModelChoiceLike, scopedModelIds?: Set<string>): string {
   const id = formatModelId(model);
   const inScope = scopedModelIds?.has(id) ?? true;
-  const prefix = inScope ? "" : "  "; // indent out-of-scope models subtly
+  const marker = inScope ? "● " : "○ ";
   const suffix = model.name && model.name !== model.id ? ` — ${model.name}` : "";
-  return `${prefix}${id}${suffix}`;
+  return `${marker}${id}${suffix}`;
 }
 
 // ── Interactive command ──────────────────────────────────────────────
@@ -151,7 +139,6 @@ export function formatModelChoiceLabel(model: ModelChoiceLike, scopedModelIds?: 
 export type GsdModelsCommandContext = {
   cwd: string;
   model: ModelChoiceLike;
-  scopedModelIds: Set<string>;
   modelRegistry: { getAvailable(): ModelChoiceLike[] };
   ui: {
     select<T>(
@@ -172,42 +159,18 @@ export async function runGsdModelsCommand(
     return;
   }
 
-  const currentConfigPath = resolveGsdConfigPath({ scope: "project", cwd: ctx.cwd });
+  const scope = parseScope(args);
+  const currentConfigPath = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
   const currentConfig = readJsonObject(currentConfigPath);
   const currentProfile = typeof currentConfig.model_profile === "string" ? currentConfig.model_profile : "(not set)";
 
-  const scope = await chooseScope(args, ctx);
-  if (!scope) return;
-
   const mode = await ctx.ui.select<GsdProfile | "inherit">(
-    `GSD model routing — current: ${currentProfile}`,
-    [
-      {
-        value: "inherit" as const,
-        label: "Inherit current model",
-        description: `All GSD agents use ${formatModelChoiceLabel(ctx.model)} directly`,
-      },
-      {
-        value: "quality" as const,
-        label: "Quality",
-        description: profileDescriptions.quality,
-      },
-      {
-        value: "balanced" as const,
-        label: "Balanced",
-        description: profileDescriptions.balanced,
-      },
-      {
-        value: "budget" as const,
-        label: "Budget",
-        description: profileDescriptions.budget,
-      },
-      {
-        value: "adaptive" as const,
-        label: "Adaptive",
-        description: profileDescriptions.adaptive,
-      },
-    ],
+    `GSD model routing [${scope}] — current: ${currentProfile}`,
+    (["inherit", "quality", "balanced", "budget", "adaptive"] as const).map((p) => ({
+      value: p,
+      label: p === "inherit" ? "Inherit" : p.charAt(0).toUpperCase() + p.slice(1),
+      description: profileDescriptions[p],
+    })),
   );
   if (!mode) return;
 
@@ -215,7 +178,7 @@ export async function runGsdModelsCommand(
     const configPath = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
     const merged = mergeGsdModelConfig(readJsonObject(configPath), { model_profile: "inherit" });
     writeJsonObject(configPath, merged);
-    ctx.ui.notify(`GSD model routing set to inherit (${formatModelChoiceLabel(ctx.model)})`, "info");
+    ctx.ui.notify(`✓ GSD set to inherit (${formatModelId(ctx.model)}) → ${configPath}`, "info");
     return;
   }
 
@@ -229,31 +192,24 @@ export async function runGsdModelsCommand(
     model_overrides: buildTierModelOverrides(tiers),
   });
   writeJsonObject(configPath, merged);
-  ctx.ui.notify(`GSD model routing set to ${mode}: light=${tiers.light} standard=${tiers.standard} heavy=${tiers.heavy}`, "info");
+  ctx.ui.notify(`✓ GSD set to ${mode} [L=${tiers.light} S=${tiers.standard} H=${tiers.heavy}] → ${configPath}`, "info");
 }
 
-async function chooseScope(
-  args: string | undefined,
-  ctx: GsdModelsCommandContext,
-): Promise<GsdModelScope | undefined> {
-  const trimmed = args?.trim();
+function parseScope(args: string | undefined): GsdModelScope {
+  const trimmed = args?.trim().toLowerCase() ?? "";
   if (trimmed === "--user" || trimmed === "user") return "user";
-  if (trimmed === "--project" || trimmed === "project" || trimmed === "") return "project";
-  return ctx.ui.select<GsdModelScope>("GSD config scope", [
-    { value: "project", label: "Project", description: ".planning/config.json (recommended)" },
-    { value: "user", label: "User", description: "~/.gsd/defaults.json (applies across projects)" },
-  ]);
+  return "project";
 }
 
 async function chooseTierModels(
   available: ModelChoiceLike[],
   ctx: GsdModelsCommandContext,
 ): Promise<TierModelMap | undefined> {
-  const heavy = await chooseModel("Heavy tier (planning, debugging)", available, ctx);
+  const heavy = await chooseModel(`Heavy tier (${tierDescriptions.heavy})`, available, ctx);
   if (heavy === undefined) return undefined;
-  const standard = await chooseModel("Standard tier (execution, research)", available, ctx);
+  const standard = await chooseModel(`Standard tier (${tierDescriptions.standard})`, available, ctx);
   if (standard === undefined) return undefined;
-  const light = await chooseModel("Light tier (mapping, scanning, audits)", available, ctx);
+  const light = await chooseModel(`Light tier (${tierDescriptions.light})`, available, ctx);
   if (light === undefined) return undefined;
   return { heavy, standard, light };
 }
@@ -263,20 +219,17 @@ async function chooseModel(
   available: ModelChoiceLike[],
   ctx: GsdModelsCommandContext,
 ): Promise<string | undefined> {
-  // Scoped models first, then all models
-  const scopedModels = available.filter((m) => ctx.scopedModelIds.has(formatModelId(m)));
-  const otherModels = available.filter((m) => !ctx.scopedModelIds.has(formatModelId(m)));
-
-  const items = [
-    ...scopedModels.map((model) => ({
-      value: formatModelId(model),
-      label: formatModelChoiceLabel(model, ctx.scopedModelIds),
-    })),
-    ...otherModels.map((model) => ({
-      value: formatModelId(model),
-      label: formatModelChoiceLabel(model, ctx.scopedModelIds),
-    })),
-  ];
+  const currentId = formatModelId(ctx.model);
+  const items = available.map((model) => {
+    const id = formatModelId(model);
+    const isCurrent = id === currentId;
+    const marker = isCurrent ? "▸ " : "  ";
+    const suffix = model.name && model.name !== model.id ? ` — ${model.name}` : "";
+    return {
+      value: id,
+      label: `${marker}${id}${suffix}`,
+    };
+  });
 
   return ctx.ui.select<string>(title, items);
 }

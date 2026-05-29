@@ -119,27 +119,27 @@ describe("buildBalancedModelOverrides (backward-compat alias)", () => {
 });
 
 describe("formatModelChoiceLabel", () => {
-  it("formats model choices with provider and model id", () => {
+  it("formats model choices with marker and name", () => {
     expect(formatModelChoiceLabel({ provider: "openai-codex", id: "gpt-5.5", name: "GPT 5.5" })).toBe(
-      "openai-codex/gpt-5.5 — GPT 5.5",
+      "● openai-codex/gpt-5.5 — GPT 5.5",
     );
   });
 
   it("omits name when same as id", () => {
-    expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3", name: "llama3" })).toBe("ollama/llama3");
+    expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3", name: "llama3" })).toBe("● ollama/llama3");
   });
 
   it("omits name when undefined", () => {
-    expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3" })).toBe("ollama/llama3");
+    expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3" })).toBe("● ollama/llama3");
   });
 
-  it("indents out-of-scope models", () => {
+  it("shows out-of-scope marker", () => {
     const scopedIds = new Set(["openai-codex/gpt-5.5"]);
     expect(formatModelChoiceLabel({ provider: "openai-codex", id: "gpt-5.5" }, scopedIds)).toBe(
-      "openai-codex/gpt-5.5",
+      "● openai-codex/gpt-5.5",
     );
     expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3" }, scopedIds)).toBe(
-      "  ollama/llama3",
+      "○ ollama/llama3",
     );
   });
 });
