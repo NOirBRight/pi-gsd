@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveOfficialPackage } from "./official.js";
 import { rewriteRuntimeMessageText } from "./runtime-rewrites.js";
+import { runGsdModelsCommand, formatModelId } from "./gsd-models.js";
 
 export default function piGsdExtension(pi: ExtensionAPI): void {
   let warnedResolveFailure = false;
@@ -38,6 +39,36 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
     } catch {
       return undefined;
     }
+  });
+
+  pi.registerCommand("gsd-models", {
+    description: "Configure GSD model routing for Pi subagents",
+    handler: async (args, ctx) => {
+      const model = ctx.model;
+      const modelChoice = model
+        ? { provider: String(model.provider), id: model.id, name: model.name }
+        : { provider: "unknown", id: "unknown", name: "unknown" };
+
+      await runGsdModelsCommand(args, {
+        cwd: ctx.cwd,
+        model: modelChoice,
+        modelRegistry: {
+          async getAvailable() {
+            const models = ctx.modelRegistry.getAvailable();
+            return models.map((m) => ({ provider: String(m.provider), id: m.id, name: m.name }));
+          },
+        },
+        ui: {
+          async select<T>(_title: string, items: Array<{ value: T; label: string; description?: string }>): Promise<T | undefined> {
+            const options = items.map((item) => item.label);
+            const selectedLabel = await ctx.ui.select(_title, options);
+            if (selectedLabel === undefined) return undefined;
+            return items.find((item) => item.label === selectedLabel)?.value as T | undefined;
+          },
+          notify: (message: string, type?: "info" | "warning" | "error") => ctx.ui.notify(message, type),
+        },
+      });
+    },
   });
 }
 

@@ -1,4 +1,6 @@
 import { rewriteMessageForRuntime } from "../src/extension.js";
+import piGsdExtension from "../src/extension.js";
+import { vi } from "vitest";
 
 describe("piGsdExtension message rewriting", () => {
   it("rewrites assistant next-step slash commands", () => {
@@ -29,5 +31,26 @@ describe("piGsdExtension message rewriting", () => {
         { type: "image", source: "unchanged" },
       ],
     });
+  });
+});
+
+describe("piGsdExtension command registration", () => {
+  it("registers the gsd-models command", () => {
+    const commands: Record<string, unknown> = {};
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn((name: string, options: unknown) => {
+        commands[name] = options;
+      }),
+    };
+
+    piGsdExtension(pi as never);
+
+    expect(pi.registerCommand).toHaveBeenCalledWith(
+      "gsd-models",
+      expect.objectContaining({ description: expect.stringContaining("GSD model") }),
+    );
+    expect(commands["gsd-models"]).toBeTruthy();
+    expect(typeof (commands["gsd-models"] as any).handler).toBe("function");
   });
 });
