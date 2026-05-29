@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveOfficialPackage } from "./official.js";
 import { rewriteRuntimeMessageText } from "./runtime-rewrites.js";
-import { runGsdModelsCommand, formatModelId } from "./gsd-models.js";
+import { runGsdModelsCommand } from "./gsd-models.js";
 
 export default function piGsdExtension(pi: ExtensionAPI): void {
   let warnedResolveFailure = false;
@@ -49,13 +49,17 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
         ? { provider: String(model.provider), id: model.id, name: model.name }
         : { provider: "unknown", id: "unknown", name: "unknown" };
 
+      const allModels = ctx.modelRegistry.getAvailable();
+      // scopedModels is not directly on ExtensionContext, so fall back to all available
+      const scopedModelIds = new Set(allModels.map((m) => `${m.provider}/${m.id}`));
+
       await runGsdModelsCommand(args, {
         cwd: ctx.cwd,
         model: modelChoice,
+        scopedModelIds,
         modelRegistry: {
-          async getAvailable() {
-            const models = ctx.modelRegistry.getAvailable();
-            return models.map((m) => ({ provider: String(m.provider), id: m.id, name: m.name }));
+          getAvailable() {
+            return allModels.map((m) => ({ provider: String(m.provider), id: m.id, name: m.name }));
           },
         },
         ui: {

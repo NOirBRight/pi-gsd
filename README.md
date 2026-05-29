@@ -88,23 +88,30 @@ npx pi-gsd-redux doctor --agents --scope user
 
 If project agents have not been synced yet, this check reports missing synced agents. Run `npx pi-gsd-redux sync-agents --scope project` when you want the project-local `.pi/agents` files materialized.
 
-## Configure GSD Subagent Models
+## Configure GSD Subagent Model Routing
 
 Use `/gsd-models` inside Pi to configure how upstream GSD model profiles map to local Pi models.
 
-Recommended default for non-Anthropic Pi setups:
+The command shows your current profile and lets you choose:
 
-```text
-/gsd-models
-# choose Project → Inherit current Pi model
-```
+1. **Inherit** — all GSD agents use your current Pi model. Best for non-Anthropic providers. No further selection needed.
+2. **Quality** — map the `heavy` tier to a strong model, `standard` and `light` follow automatically.
+3. **Balanced** — pick separate Pi models for `heavy`, `standard`, and `light` tiers.
+4. **Budget** — same tier picker, optimized for cost.
+5. **Adaptive** — same tier picker, role-based optimization.
 
-For more control, choose "Map balanced tiers" and select local Pi models for upstream `haiku`, `sonnet`, and `opus` tiers. The command writes upstream-compatible GSD config to `.planning/config.json` by default, or `~/.gsd/defaults.json` when user scope is selected.
-
-Scope flags:
+Scoped models (from your `enabledModels` list) appear first in the model selector. Scope flags:
 
 - `--project` or no argument: write `.planning/config.json` (default, project-level)
 - `--user`: write `~/.gsd/defaults.json` (user-level, applies across projects)
+
+Upstream tier mapping:
+
+| Tier | Agents | Example |
+|------|--------|---------|
+| heavy | gsd-planner, gsd-roadmapper, gsd-debugger | Planning & architecture |
+| standard | gsd-executor, gsd-verifier, gsd-doc-writer | Execution & research |
+| light | gsd-codebase-mapper, gsd-plan-checker | Mapping, scanning, audits |
 
 ## Update Official GSD
 

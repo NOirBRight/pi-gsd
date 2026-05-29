@@ -1,14 +1,13 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
 import {
   resolveGsdConfigPath,
   mergeGsdModelConfig,
   readJsonObject,
   writeJsonObject,
-  buildBalancedModelOverrides,
+  buildTierModelOverrides,
 } from "../src/gsd-models.js";
 import { describe, expect, it } from "vitest";
 
@@ -34,10 +33,10 @@ describe("integration: config write and GSD SDK readback", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "pi-gsd-inttest-"));
     const configPath = resolveGsdConfigPath({ scope: "project", cwd: tmpDir });
 
-    const overrides = buildBalancedModelOverrides({
-      haiku: "ollama-cloud/gemini-3-flash-preview",
-      sonnet: "openai-codex/gpt-5.5",
-      opus: "claude-bridge/claude-opus-4-7",
+    const overrides = buildTierModelOverrides({
+      light: "ollama-cloud/gemini-3-flash-preview",
+      standard: "openai-codex/gpt-5.5",
+      heavy: "claude-bridge/claude-opus-4-7",
     });
 
     const merged = mergeGsdModelConfig({}, { model_profile: "balanced", model_overrides: overrides });
@@ -46,8 +45,8 @@ describe("integration: config write and GSD SDK readback", () => {
     const after = JSON.parse(readFileSync(configPath, "utf8"));
     expect(after.model_profile).toBe("balanced");
     expect(after.model_overrides["gsd-codebase-mapper"]).toBe("ollama-cloud/gemini-3-flash-preview");
-    expect(after.model_overrides["gsd-planner"]).toBe("openai-codex/gpt-5.5");
-    expect(after.model_overrides["gsd-roadmapper"]).toBe("claude-bridge/claude-opus-4-7");
+    expect(after.model_overrides["gsd-executor"]).toBe("openai-codex/gpt-5.5");
+    expect(after.model_overrides["gsd-planner"]).toBe("claude-bridge/claude-opus-4-7");
     expect(Object.keys(after.model_overrides).length).toBeGreaterThanOrEqual(30);
   });
 
