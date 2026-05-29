@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveOfficialPackage } from "./official.js";
 import { rewriteRuntimeMessageText } from "./runtime-rewrites.js";
-import { runGsdModelsCommand } from "./gsd-models.js";
+import { readEnabledModels, runGsdModelsCommand } from "./gsd-models.js";
 
 export default function piGsdExtension(pi: ExtensionAPI): void {
   let warnedResolveFailure = false;
@@ -54,6 +54,7 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
       await runGsdModelsCommand(args, {
         cwd: ctx.cwd,
         model: modelChoice,
+        enabledModels: readEnabledModels(),
         modelRegistry: {
           getAvailable() {
             return allModels.map((m) => ({ provider: String(m.provider), id: m.id, name: m.name }));

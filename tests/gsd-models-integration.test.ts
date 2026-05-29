@@ -8,6 +8,7 @@ import {
   readJsonObject,
   writeJsonObject,
   buildTierModelOverrides,
+  readEnabledModels,
 } from "../src/gsd-models.js";
 import { describe, expect, it } from "vitest";
 

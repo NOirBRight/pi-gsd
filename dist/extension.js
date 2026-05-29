@@ -97,6 +97,16 @@ function writeJsonObject(filePath, value) {
 function formatModelId(model) {
   return `${model.provider}/${model.id}`;
 }
+function readEnabledModels(homeDir) {
+  const settingsPath = join(homeDir ?? homedir(), ".pi", "agent", "settings.json");
+  try {
+    if (!existsSync(settingsPath)) return [];
+    const parsed = JSON.parse(readFileSync(settingsPath, "utf8"));
+    return Array.isArray(parsed?.enabledModels) ? parsed.enabledModels : [];
+  } catch {
+    return [];
+  }
+}
 async function runGsdModelsCommand(args, ctx) {
   const available = ctx.modelRegistry.getAvailable();
   if (available.length === 0) {
@@ -148,8 +158,27 @@ async function chooseTierModels(available, ctx) {
   return { heavy, standard, light };
 }
 async function chooseModel(title, available, ctx) {
+  const providerGroups = /* @__PURE__ */ new Map();
+  for (const model of available) {
+    const group = providerGroups.get(model.provider);
+    if (group) group.push(model);
+    else providerGroups.set(model.provider, [model]);
+  }
+  const currentProvider = ctx.model.provider;
+  const sortedProviders = [...providerGroups.keys()].sort((a, b) => {
+    if (a === currentProvider) return -1;
+    if (b === currentProvider) return 1;
+    return a.localeCompare(b);
+  });
+  const providerItems = sortedProviders.map((provider) => ({
+    value: provider,
+    label: provider === currentProvider ? `\u25B8 ${provider}` : `  ${provider}`
+  }));
+  const selectedProvider = await ctx.ui.select(`Select provider for: ${title}`, providerItems);
+  if (selectedProvider === void 0) return void 0;
+  const models = providerGroups.get(selectedProvider) ?? [];
   const currentId = formatModelId(ctx.model);
-  const items = available.map((model) => {
+  const modelItems = models.map((model) => {
     const id = formatModelId(model);
     const isCurrent = id === currentId;
     const marker = isCurrent ? "\u25B8 " : "  ";
@@ -159,7 +188,7 @@ async function chooseModel(title, available, ctx) {
       label: `${marker}${id}${suffix}`
     };
   });
-  return ctx.ui.select(title, items);
+  return ctx.ui.select(title, modelItems);
 }
 
 // src/extension.ts
@@ -205,6 +234,7 @@ function piGsdExtension(pi) {
       await runGsdModelsCommand(args, {
         cwd: ctx.cwd,
         model: modelChoice,
+        enabledModels: readEnabledModels(),
         modelRegistry: {
           getAvailable() {
             return allModels.map((m) => ({ provider: String(m.provider), id: m.id, name: m.name }));

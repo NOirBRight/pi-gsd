@@ -126,12 +126,15 @@ export function formatModelId(model: ModelChoiceLike): string {
   return `${model.provider}/${model.id}`;
 }
 
-export function formatModelChoiceLabel(model: ModelChoiceLike, scopedModelIds?: Set<string>): string {
-  const id = formatModelId(model);
-  const inScope = scopedModelIds?.has(id) ?? true;
-  const marker = inScope ? "● " : "○ ";
-  const suffix = model.name && model.name !== model.id ? ` — ${model.name}` : "";
-  return `${marker}${id}${suffix}`;
+export function readEnabledModels(homeDir?: string): string[] {
+  const settingsPath = join(homeDir ?? homedir(), ".pi", "agent", "settings.json");
+  try {
+    if (!existsSync(settingsPath)) return [];
+    const parsed = JSON.parse(readFileSync(settingsPath, "utf8"));
+    return Array.isArray(parsed?.enabledModels) ? parsed.enabledModels : [];
+  } catch {
+    return [];
+  }
 }
 
 // ── Interactive command ──────────────────────────────────────────────
@@ -139,6 +142,7 @@ export function formatModelChoiceLabel(model: ModelChoiceLike, scopedModelIds?: 
 export type GsdModelsCommandContext = {
   cwd: string;
   model: ModelChoiceLike;
+  enabledModels: string[];
   modelRegistry: { getAvailable(): ModelChoiceLike[] };
   ui: {
     select<T>(
@@ -219,8 +223,35 @@ async function chooseModel(
   available: ModelChoiceLike[],
   ctx: GsdModelsCommandContext,
 ): Promise<string | undefined> {
+  // Group models by provider
+  const providerGroups = new Map<string, ModelChoiceLike[]>();
+  for (const model of available) {
+    const group = providerGroups.get(model.provider);
+    if (group) group.push(model);
+    else providerGroups.set(model.provider, [model]);
+  }
+
+  // Step 1: select provider
+  const currentProvider = ctx.model.provider;
+  const sortedProviders = [...providerGroups.keys()].sort((a, b) => {
+    if (a === currentProvider) return -1;
+    if (b === currentProvider) return 1;
+    return a.localeCompare(b);
+  });
+
+  const providerItems = sortedProviders.map((provider) => ({
+    value: provider,
+    label: provider === currentProvider ? `▸ ${provider}` : `  ${provider}`,
+  }));
+
+  const selectedProvider = await ctx.ui.select<string>(`Select provider for: ${title}`, providerItems);
+  if (selectedProvider === undefined) return undefined;
+
+  // Step 2: select model within provider
+  const models = providerGroups.get(selectedProvider) ?? [];
   const currentId = formatModelId(ctx.model);
-  const items = available.map((model) => {
+
+  const modelItems = models.map((model) => {
     const id = formatModelId(model);
     const isCurrent = id === currentId;
     const marker = isCurrent ? "▸ " : "  ";
@@ -231,7 +262,7 @@ async function chooseModel(
     };
   });
 
-  return ctx.ui.select<string>(title, items);
+  return ctx.ui.select<string>(title, modelItems);
 }
 
 // ── Backward-compatible alias for tests ──────────────────────────────

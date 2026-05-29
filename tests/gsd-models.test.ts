@@ -1,13 +1,13 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildBalancedModelOverrides,
   buildTierModelOverrides,
-  formatModelChoiceLabel,
   mergeGsdModelConfig,
   readJsonObject,
+  readEnabledModels,
   writeJsonObject,
   resolveGsdConfigPath,
 } from "../src/gsd-models.js";
@@ -118,29 +118,27 @@ describe("buildBalancedModelOverrides (backward-compat alias)", () => {
   });
 });
 
-describe("formatModelChoiceLabel", () => {
-  it("formats model choices with marker and name", () => {
-    expect(formatModelChoiceLabel({ provider: "openai-codex", id: "gpt-5.5", name: "GPT 5.5" })).toBe(
-      "● openai-codex/gpt-5.5 — GPT 5.5",
-    );
+describe("readEnabledModels", () => {
+  it("returns enabledModels array from settings.json", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "pi-gsd-models-test-"));
+    const settingsDir = join(tmpDir, ".pi", "agent");
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(join(settingsDir, "settings.json"), JSON.stringify({
+      enabledModels: ["openai-codex/gpt-5.5", "ollama/deepseek-v4"],
+    }));
+    expect(readEnabledModels(tmpDir)).toEqual(["openai-codex/gpt-5.5", "ollama/deepseek-v4"]);
   });
 
-  it("omits name when same as id", () => {
-    expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3", name: "llama3" })).toBe("● ollama/llama3");
+  it("returns empty array when settings file is missing", () => {
+    expect(readEnabledModels(join(tmpdir(), "nonexistent"))).toEqual([]);
   });
 
-  it("omits name when undefined", () => {
-    expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3" })).toBe("● ollama/llama3");
-  });
-
-  it("shows out-of-scope marker", () => {
-    const scopedIds = new Set(["openai-codex/gpt-5.5"]);
-    expect(formatModelChoiceLabel({ provider: "openai-codex", id: "gpt-5.5" }, scopedIds)).toBe(
-      "● openai-codex/gpt-5.5",
-    );
-    expect(formatModelChoiceLabel({ provider: "ollama", id: "llama3" }, scopedIds)).toBe(
-      "○ ollama/llama3",
-    );
+  it("returns empty array when enabledModels is not present", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "pi-gsd-models-test-"));
+    const settingsDir = join(tmpDir, ".pi", "agent");
+    mkdirSync(settingsDir, { recursive: true });
+    writeFileSync(join(settingsDir, "settings.json"), JSON.stringify({ defaultModel: "gpt-5.5" }));
+    expect(readEnabledModels(tmpDir)).toEqual([]);
   });
 });
 
