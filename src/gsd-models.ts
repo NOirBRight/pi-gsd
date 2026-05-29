@@ -147,7 +147,18 @@ export function mergeGsdModelConfig(
 
 export function readJsonObject(filePath: string): Record<string, unknown> {
   if (!existsSync(filePath)) return {};
-  const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch (err) {
+    throw new Error(`Failed to read ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse JSON in ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${filePath} must contain a JSON object.`);
   }
@@ -341,12 +352,13 @@ export async function runGsdModelsCommand(
   if (profile === "clear") {
     // Delete project config to fall back to global
     if (existsSync(configPath)) {
-      const fs = await import("node:fs");
-      fs.unlinkSync(configPath);
+      const { unlinkSync } = await import("node:fs");
+      unlinkSync(configPath);
     }
     ctx.ui.notify(`✓ Cleared project config → using global defaults`, "info");
     return;
   }
+
 
   // 5. Pick models for required tiers
   const requiredTiers = getRequiredTiers(profile);
@@ -487,8 +499,6 @@ async function chooseTierModel(
   const currentLabel = currentModelId ?? "(none)";
   const statusLine = `${tierLabels[tier].label.toUpperCase()} tier — agents: ${agentSummary}`;
 
-  // Pre-filter scoped models by enabledModels if not already done
-  const scopedIds = new Set(scoped.map(m => formatModelId(m)));
 
   return await ctx.ui.custom<string | undefined>((tui, theme, _kb, done) => {
     let mode: "scoped" | "all" = scoped.length > 0 ? "scoped" : "all";
@@ -566,11 +576,4 @@ async function chooseTierModel(
   });
 }
 
-// ── Backward-compatible alias ─────────────────────────────────────────
-
-export const buildBalancedModelOverrides = (tiers: { haiku: string; sonnet: string; opus: string }): Record<string, string> => {
-  // Legacy alias — not profile-aware, for backward compat only
-  const overrides: Record<string, string> = {};
-  // This is a rough approximation; prefer buildTierModelOverrides with catalog
-  return overrides;
-};
+// ── End of module ─────────────────────────────────────────────────────
