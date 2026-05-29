@@ -189,8 +189,8 @@ describe("runGsdModelsCommand", () => {
       gsdPackageRoot: GSD_ROOT,
       modelRegistry: { getAvailable: () => [] },
       ui: {
-        select: async () => undefined,
-        custom: async () => undefined,
+        select: async () => undefined as any,
+        custom: async () => undefined as any,
         notify: (message: string, type?: string) => {
           notifies.push(`${type ?? "info"}: ${message}`);
         },
