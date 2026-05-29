@@ -88,6 +88,24 @@ npx pi-gsd-redux doctor --agents --scope user
 
 If project agents have not been synced yet, this check reports missing synced agents. Run `npx pi-gsd-redux sync-agents --scope project` when you want the project-local `.pi/agents` files materialized.
 
+## Configure GSD Subagent Models
+
+Use `/gsd-models` inside Pi to configure how upstream GSD model profiles map to local Pi models.
+
+Recommended default for non-Anthropic Pi setups:
+
+```text
+/gsd-models
+# choose Project → Inherit current Pi model
+```
+
+For more control, choose "Map balanced tiers" and select local Pi models for upstream `haiku`, `sonnet`, and `opus` tiers. The command writes upstream-compatible GSD config to `.planning/config.json` by default, or `~/.gsd/defaults.json` when user scope is selected.
+
+Scope flags:
+
+- `--project` or no argument: write `.planning/config.json` (default, project-level)
+- `--user`: write `~/.gsd/defaults.json` (user-level, applies across projects)
+
 ## Update Official GSD
 
 Maintainers should follow the full publishing runbook in [Publishing and Update Runbook](docs/PUBLISHING.md).
