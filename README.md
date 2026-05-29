@@ -92,26 +92,60 @@ If project agents have not been synced yet, this check reports missing synced ag
 
 Use `/gsd-models` inside Pi to configure how upstream GSD model profiles map to local Pi models.
 
-The command shows your current profile and lets you choose:
+### Flow
 
-1. **Inherit** — all GSD agents use your current Pi model. Best for non-Anthropic providers. No further selection needed.
-2. **Quality** — map the `heavy` tier to a strong model, `standard` and `light` follow automatically.
-3. **Balanced** — pick separate Pi models for `heavy`, `standard`, and `light` tiers.
-4. **Budget** — same tier picker, optimized for cost.
-5. **Adaptive** — same tier picker, role-based optimization.
+1. **Select scope** — `Global` (all projects) or `Project` (this project only)
+2. **Select profile** — choose a GSD model routing strategy
+3. **Pick models** — for each tier the profile requires, choose a Pi model
 
-Scoped models (from your `enabledModels` list) appear first in the model selector. Scope flags:
+### Profiles
 
-- `--project` or no argument: write `.planning/config.json` (default, project-level)
-- `--user`: write `~/.gsd/defaults.json` (user-level, applies across projects)
+| Profile | Tiers to configure | Description |
+|---------|--------------------|-------------|
+| Inherit | None | All agents use Pi's current session model. No further selection needed. |
+| Quality | Heavy + Standard | Strong model for most agents, lighter for verification |
+| Balanced | Heavy + Standard + Light | Separate models for planning, execution, and scanning |
+| Budget | Standard + Light | Cost-optimized — critical agents get standard, rest get light |
+| Adaptive | Heavy + Standard + Light | Role-based routing — heavy for planning/debug, standard for execution, light for audits |
 
-Upstream tier mapping:
+When scope is **Project**, an additional **Clear (use Global)** option removes the project config and falls back to global defaults.
 
-| Tier | Agents | Example |
-|------|--------|---------|
-| heavy | gsd-planner, gsd-roadmapper, gsd-debugger | Planning & architecture |
-| standard | gsd-executor, gsd-verifier, gsd-doc-writer | Execution & research |
-| light | gsd-codebase-mapper, gsd-plan-checker | Mapping, scanning, audits |
+### Model Selector
+
+The model selector displays a flat alphabetical list with **Tab** switching:
+
+- **SCOPED** — models from your `enabledModels` list
+- **ALL** — all models with configured auth
+
+The currently assigned model is marked with `✓`. Press **Esc** at any step to keep the current value.
+
+### Scope Flags
+
+Pass a flag to skip the scope selector:
+
+- `--project` or no argument: write `.planning/config.json` (default)
+- `--global`: write `~/.gsd/defaults.json` (all projects)
+
+### What Gets Written
+
+The command writes an upstream-compatible config:
+
+- **Project**: `.planning/config.json` in the current project
+- **Global**: `~/.gsd/defaults.json` in your home directory
+
+Example `.planning/config.json` for balanced profile:
+
+```json
+{
+  "model_profile": "balanced",
+  "model_overrides": {
+    "gsd-planner": "openai-codex/gpt-5.5",
+    "gsd-eval-planner": "openai-codex/gpt-5.5",
+    "gsd-executor": "ollama-cloud/glm-5.1",
+    "gsd-codebase-mapper": "openai-codex/gpt-5.3-codex-spark"
+  }
+}
+```
 
 ## Update Official GSD
 

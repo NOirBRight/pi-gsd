@@ -12,15 +12,17 @@
 
 ## Phase 2: Model Routing
 
-**Status:** 🔄 In Progress
+**Status:** ✅ Complete
 
 - `/gsd-models` interactive slash command
-  - Project vs user scope selection
-  - Inherit current Pi model mode
-  - Balanced tier mapping (haiku/sonnet/opus → local Pi models)
-  - Per-agent override mode
+  - Global vs Project scope selection
+  - All 5 upstream profiles (Inherit, Quality, Balanced, Budget, Adaptive)
+  - Profile-first flow: select profile → pick models per tier
+  - Tabbed single-level model selector (SCOPED / ALL)
+  - Clear (use Global) option for project scope
+  - ✓ checkmark on current model, alphabetical order preserved
 - Write upstream-compatible `.planning/config.json` and `~/.gsd/defaults.json`
-- README documentation for model routing
+- 180 tests covering pure helpers, UI helpers, command flow, and integration
 
 ## Phase 3: Polish & Release
 
