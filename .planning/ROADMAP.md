@@ -32,12 +32,13 @@
 
 **Requirements:** D-01, D-02, D-03, D-04
 
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 03-01-PLAN.md — Author upstream PR with EPERM catch + fallback and DIRS mutable container
-- [ ] 03-02-PLAN.md — Add interim EPERM guard to pi-gsd-redux extension + ACL check to doctor
-- [ ] 03-03-PLAN.md — Post-fix regression verification + /gsd-models manual test
+
+- [x] 03-01-PLAN.md — Author upstream PR with EPERM catch + fallback and DIRS mutable container
+- [x] 03-02-PLAN.md — Add interim EPERM guard to pi-gsd-redux extension + ACL check to doctor
+- [x] 03-03-PLAN.md — Post-fix regression verification + /gsd-models manual test
 
 - Fix pi-subagents EPERM: `ensureAccessibleDir` doesn't catch `mkdirSync` EPERM, crashing Pi startup on ACL-corrupted temp dirs
 - Work around ES module read-only binding for `RESULTS_DIR`/`ASYNC_DIR` — fallback paths can't propagate to consumer modules
