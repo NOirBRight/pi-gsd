@@ -51,6 +51,31 @@ Body.
     expect(result.markdown).toContain("unsupported official tools omitted: WebFetch");
   });
 
+  it("normalizes official GSD slash command references in agent descriptions and bodies", () => {
+    const described = transformOfficialAgentMarkdown(`---
+name: gsd-planner
+description: Spawned by /gsd:plan-phase orchestrator
+---
+
+Body.
+`);
+
+    expect(described.markdown).toContain("description: Spawned by /gsd-plan-phase orchestrator");
+
+
+    const result = transformOfficialAgentMarkdown(`---
+name: gsd-roadmapper
+description: Creates roadmaps
+---
+
+Next: \`/gsd:plan-phase 1\`
+URL: https://example.com/#/gsd:plan-phase
+`);
+
+    expect(result.markdown).toContain("Next: `/gsd-plan-phase 1`");
+    expect(result.markdown).toContain("URL: https://example.com/#/gsd:plan-phase");
+  });
+
   it("rewrites bare HOME references to official root placeholders", () => {
     const result = transformOfficialAgentMarkdown(`---
 name: gsd-runner

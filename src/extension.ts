@@ -20,17 +20,29 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
   pi.on("context", (event, ctx) => {
     try {
       const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
-      const messages = event.messages.map((message) => rewriteUserMessage(message, officialPackage.packageRoot));
+      const messages = event.messages.map((message) => rewriteMessageForRuntime(message, officialPackage.packageRoot));
 
       return { messages };
     } catch {
       return undefined;
     }
   });
+
+  pi.on("message_end", (event, ctx) => {
+    try {
+      if (!isRecord(event.message) || event.message.role !== "assistant") {
+        return undefined;
+      }
+      const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
+      return { message: rewriteMessageForRuntime(event.message, officialPackage.packageRoot) };
+    } catch {
+      return undefined;
+    }
+  });
 }
 
-function rewriteUserMessage<T>(message: T, officialRoot: string): T {
-  if (!isRecord(message) || message.role !== "user") {
+export function rewriteMessageForRuntime<T>(message: T, officialRoot: string): T {
+  if (!isRecord(message)) {
     return message;
   }
 

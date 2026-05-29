@@ -12,7 +12,7 @@ import {
   syncAgents,
   transformOfficialAgentMarkdown,
   writeFrontmatter
-} from "./chunk-VPL5ONSR.js";
+} from "./chunk-LI4FWH3G.js";
 import {
   rewriteOfficialClaudePaths,
   rewriteRuntimeMessageText

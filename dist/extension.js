@@ -22,15 +22,26 @@ function piGsdExtension(pi) {
   pi.on("context", (event, ctx) => {
     try {
       const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
-      const messages = event.messages.map((message) => rewriteUserMessage(message, officialPackage.packageRoot));
+      const messages = event.messages.map((message) => rewriteMessageForRuntime(message, officialPackage.packageRoot));
       return { messages };
     } catch {
       return void 0;
     }
   });
+  pi.on("message_end", (event, ctx) => {
+    try {
+      if (!isRecord(event.message) || event.message.role !== "assistant") {
+        return void 0;
+      }
+      const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
+      return { message: rewriteMessageForRuntime(event.message, officialPackage.packageRoot) };
+    } catch {
+      return void 0;
+    }
+  });
 }
-function rewriteUserMessage(message, officialRoot) {
-  if (!isRecord(message) || message.role !== "user") {
+function rewriteMessageForRuntime(message, officialRoot) {
+  if (!isRecord(message)) {
     return message;
   }
   const content = message.content;
@@ -64,5 +75,6 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 export {
-  piGsdExtension as default
+  piGsdExtension as default,
+  rewriteMessageForRuntime
 };

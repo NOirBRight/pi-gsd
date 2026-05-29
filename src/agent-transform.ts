@@ -1,4 +1,5 @@
 import { splitFrontmatter, type FrontmatterData } from "./frontmatter.js";
+import { normalizeGsdSlashReferences } from "./prompt-transform.js";
 
 export const OFFICIAL_ROOT_PLACEHOLDER = "__PI_GSD_OFFICIAL_ROOT__";
 
@@ -29,7 +30,7 @@ export function transformOfficialAgentMarkdown(input: string): TransformOfficial
 
   const { mappedTools, unsupportedTools } = mapOfficialTools(parsed.data.tools);
   const body = rewriteOfficialAgentBody(parsed.body, unsupportedTools);
-  const frontmatter: FrontmatterData = { name, description };
+  const frontmatter: FrontmatterData = { name, description: normalizeGsdSlashReferences(description) };
   if (mappedTools.length > 0) {
     frontmatter.tools = mappedTools.join(", ");
   }
@@ -46,7 +47,7 @@ export function materializeOfficialAgentPaths(input: string, officialRoot: strin
 }
 
 function rewriteOfficialAgentBody(body: string, unsupportedTools: string[]): string {
-  const rewritten = body
+  const rewritten = normalizeGsdSlashReferences(body)
     .replace(/@(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `@${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`)
     .replace(/(^|[^@])(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `$1${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`);
 

@@ -106,7 +106,7 @@ function transformOfficialAgentMarkdown(input) {
   }
   const { mappedTools, unsupportedTools } = mapOfficialTools(parsed.data.tools);
   const body = rewriteOfficialAgentBody(parsed.body, unsupportedTools);
-  const frontmatter = { name, description };
+  const frontmatter = { name, description: normalizeGsdSlashReferences(description) };
   if (mappedTools.length > 0) {
     frontmatter.tools = mappedTools.join(", ");
   }
@@ -120,7 +120,7 @@ function materializeOfficialAgentPaths(input, officialRoot) {
   return input.replaceAll(OFFICIAL_ROOT_PLACEHOLDER, posixRoot);
 }
 function rewriteOfficialAgentBody(body, unsupportedTools) {
-  const rewritten = body.replace(/@(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `@${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`).replace(/(^|[^@])(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `$1${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`);
+  const rewritten = normalizeGsdSlashReferences(body).replace(/@(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `@${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`).replace(/(^|[^@])(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `$1${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`);
   if (unsupportedTools.length === 0) {
     return rewritten;
   }

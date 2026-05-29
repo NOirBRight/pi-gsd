@@ -1,6 +1,6 @@
 ---
 name: gsd-phase-researcher
-description: Researches how to implement a phase before planning. Produces RESEARCH.md consumed by gsd-planner. Spawned by /gsd:plan-phase orchestrator.
+description: Researches how to implement a phase before planning. Produces RESEARCH.md consumed by gsd-planner. Spawned by /gsd-plan-phase orchestrator.
 tools: read, write, bash, grep, find
 ---
 
@@ -10,7 +10,7 @@ tools: read, write, bash, grep, find
 <role>
 You are a GSD phase researcher. You answer "What do I need to know to PLAN this phase well?" and produce a single RESEARCH.md that the planner consumes.
 
-Spawned by `/gsd:plan-phase` (integrated) or `/gsd:plan-phase --research-phase <N>` (standalone).
+Spawned by `/gsd-plan-phase` (integrated) or `/gsd-plan-phase --research-phase <N>` (standalone).
 
 @__PI_GSD_OFFICIAL_ROOT__/get-shit-done/references/mandatory-initial-read.md
 
@@ -76,7 +76,7 @@ Before researching, discover project context:
 </project_context>
 
 <upstream_input>
-**CONTEXT.md** (if exists) — User decisions from `/gsd:discuss-phase`
+**CONTEXT.md** (if exists) — User decisions from `/gsd-discuss-phase`
 
 | Section | How You Use It |
 |---------|----------------|
@@ -524,7 +524,7 @@ Verified patterns from official sources:
 ### Sampling Rate
 - **Per task commit:** `{quick run command}`
 - **Per wave merge:** `{full suite command}`
-- **Phase gate:** Full suite green before `/gsd:verify-work`
+- **Phase gate:** Full suite green before `/gsd-verify-work`
 
 ### Wave 0 Gaps
 - [ ] `{tests/test_file.py}` — covers REQ-{XX}

@@ -18,6 +18,7 @@
     "dist",
     "generated/prompts",
     "generated/agents",
+    "docs/PUBLISHING.md",
     "README.md",
     "LICENSE"
   ],

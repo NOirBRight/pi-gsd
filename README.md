@@ -90,6 +90,8 @@ If project agents have not been synced yet, this check reports missing synced ag
 
 ## Update Official GSD
 
+Maintainers should follow the full publishing runbook in [Publishing and Update Runbook](docs/PUBLISHING.md).
+
 ```bash
 npm update @opengsd/get-shit-done-redux
 npm run build
