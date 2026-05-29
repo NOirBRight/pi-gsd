@@ -1,10 +1,11 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync, accessSync, constants as fsConstants } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createOfficialFixture } from "./fixtures.js";
 import { generateAgents } from "../src/agent-generator.js";
 import { syncAgents } from "../src/agent-sync.js";
 import { generatePrompts } from "../src/generator.js";
-import { runDoctor } from "../src/doctor.js";
+import { runDoctor, checkPiSubagentsTempAcl } from "../src/doctor.js";
 
 describe("runDoctor", () => {
   it("reports success for a generated prompt set matching official commands", () => {
@@ -161,5 +162,82 @@ describe("runDoctor", () => {
     expect(result.ok).toBe(false);
     expect(result.messages.join("\n")).toContain("project synced agents: stale or missing");
     expect(result.messages.join("\n")).toContain("stale synced agent: gsd-old.md");
+  });
+});
+
+describe("checkPiSubagentsTempAcl", () => {
+  it("reports 'pi-subagents temp ACL: ok' when dirs exist and are writable", () => {
+    const tempRoot = join(tmpdir(), `pi-gsd-test-acl-ok-${process.pid}-${Date.now()}`);
+    mkdirSync(tempRoot, { recursive: true });
+    for (const subdir of ["async-subagent-results", "async-subagent-runs"]) {
+      mkdirSync(join(tempRoot, subdir), { recursive: true });
+    }
+
+    try {
+      const result = checkPiSubagentsTempAcl({ tempRoot });
+      expect(result.messages).toContain("pi-subagents temp ACL: ok");
+      expect(result.ok).toBe(true);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports 'CORRUPTED' when accessSync throws EACCES", () => {
+    const mockFs = {
+      accessSync: () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); },
+    };
+    const result = checkPiSubagentsTempAcl({ fs: mockFs });
+    expect(result.messages.join("\n")).toContain("CORRUPTED");
+    expect(result.ok).toBe(false);
+  });
+
+  it("reports 'CORRUPTED' when accessSync throws EPERM", () => {
+    const mockFs = {
+      accessSync: () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); },
+    };
+    const result = checkPiSubagentsTempAcl({ fs: mockFs });
+    expect(result.messages.join("\n")).toContain("CORRUPTED");
+    expect(result.ok).toBe(false);
+  });
+
+  it("doctor continues to report other checks even when ACL check fails (non-blocking)", () => {
+    const fixture = createOfficialFixture();
+    const outDir = join(fixture.root, "generated", "prompts");
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const mockCheckAcl = () => ({
+      ok: false,
+      messages: ["pi-subagents temp ACL: CORRUPTED — test dir is inaccessible"],
+    });
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: outDir,
+      aclChecker: mockCheckAcl,
+    });
+
+    // ACL check failed but other checks still ran
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("CORRUPTED");
+    expect(result.messages.join("\n")).toContain("official package:");  // other checks still present
+  });
+
+  it("doctor result has ok: false when ACL corruption is detected", () => {
+    const fixture = createOfficialFixture();
+    const outDir = join(fixture.root, "generated", "prompts");
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const mockCheckAcl = () => ({
+      ok: false,
+      messages: ["pi-subagents temp ACL: CORRUPTED — inaccessible"],
+    });
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: outDir,
+      aclChecker: mockCheckAcl,
+    });
+
+    expect(result.ok).toBe(false);
   });
 });
