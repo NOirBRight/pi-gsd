@@ -215,7 +215,7 @@ export function inferTierModelsFromOverrides(
 // ── Status display ───────────────────────────────────────────────────
 
 /** Format agent names, strip "gsd-" prefix, show top N + count. */
-function formatAgentSummary(agents: string[], maxNames = 3): string {
+export function formatAgentSummary(agents: string[], maxNames = 3): string {
   const names = agents.map((a) => a.replace(/^gsd-/, ""));
   const count = names.length;
   const shown = names.slice(0, maxNames);
@@ -227,12 +227,12 @@ function formatAgentSummary(agents: string[], maxNames = 3): string {
 }
 
 /** Capitalize first letter of a string. */
-function capitalize(s: string): string {
+export function capitalize(s: string): string {
   if (!s) return "";
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
-function buildCurrentStatus(
+export function buildCurrentStatus(
   currentConfig: { profile: string | null; tierModels: TierModelMap | null },
   catalog: ModelCatalog,
   scope: GsdModelScope,
@@ -420,7 +420,7 @@ async function selectScope(
   return selected; // undefined = ESC → terminate
 }
 
-function parseScope(args: string | undefined): GsdModelScope | null {
+export function parseScope(args: string | undefined): GsdModelScope | null {
   const trimmed = args?.trim().toLowerCase() ?? "";
   if (trimmed === "--user" || trimmed === "user" || trimmed === "--global" || trimmed === "global") return "global";
   if (trimmed === "--project" || trimmed === "project") return "project";
@@ -429,7 +429,7 @@ function parseScope(args: string | undefined): GsdModelScope | null {
 
 // ── Profile options ──────────────────────────────────────────────────
 
-function buildProfileOptions(
+export function buildProfileOptions(
   catalog: ModelCatalog,
   scope: GsdModelScope,
   currentConfig: { profile: string | null; tierModels: TierModelMap | null },
