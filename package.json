@@ -23,7 +23,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/cli.ts src/extension.ts src/index.ts --format esm --dts --clean --out-dir dist",
+    "build": "tsup src/cli.ts src/extension.ts src/index.ts --format esm --dts --clean --out-dir dist --external @earendil-works/pi-tui --external @earendil-works/pi-coding-agent",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm test && npm run build && node dist/cli.js doctor --prompts generated/prompts --cwd .",
@@ -49,6 +49,7 @@
   "homepage": "https://github.com/NOirBRight/pi-gsd#readme",
   "license": "MIT",
   "dependencies": {
+    "@earendil-works/pi-tui": "^0.77.0",
     "@opengsd/get-shit-done-redux": "latest",
     "pi-subagents": "^0.25.0"
   },

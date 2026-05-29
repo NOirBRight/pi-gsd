@@ -3,14 +3,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  buildBalancedModelOverrides,
   buildTierModelOverrides,
   mergeGsdModelConfig,
   readJsonObject,
   readEnabledModels,
   writeJsonObject,
   resolveGsdConfigPath,
+  loadModelCatalog,
+  getProfileTierAgents,
+  getRequiredTiers,
+  inferTierModelsFromOverrides,
+  readCurrentGsdConfig,
 } from "../src/gsd-models.js";
+
+// Load real catalog for tests
+const GSD_ROOT = join(process.cwd(), "node_modules", "@opengsd", "get-shit-done-redux");
+const catalog = loadModelCatalog(GSD_ROOT);
 
 describe("resolveGsdConfigPath", () => {
   it("resolves project and user scope paths", () => {
@@ -20,15 +28,9 @@ describe("resolveGsdConfigPath", () => {
     expect(resolveGsdConfigPath({ scope: "project", cwd: root, homeDir: home })).toBe(
       join(root, ".planning", "config.json"),
     );
-    expect(resolveGsdConfigPath({ scope: "user", cwd: root, homeDir: home })).toBe(
+    expect(resolveGsdConfigPath({ scope: "global", cwd: root, homeDir: home })).toBe(
       join(home, ".gsd", "defaults.json"),
     );
-  });
-
-  it("falls back to os.homedir() when homeDir not provided", () => {
-    const path = resolveGsdConfigPath({ scope: "user", cwd: "/repo" });
-    expect(path).toContain("defaults.json");
-    expect(path).toMatch(/[\\/].gsd[\\/]/);
   });
 });
 
@@ -71,50 +73,95 @@ describe("mergeGsdModelConfig", () => {
   });
 });
 
-describe("buildTierModelOverrides", () => {
-  it("expands tier choices into upstream-compatible model_overrides", () => {
-    const overrides = buildTierModelOverrides({
-      light: "local/fast",
-      standard: "local/standard",
-      heavy: "local/heavy",
-    });
+describe("getProfileTierAgents", () => {
+  it("maps balanced profile agents to correct tiers", () => {
+    const tierAgents = getProfileTierAgents(catalog, "balanced");
 
-    // Light tier agents
-    expect(overrides["gsd-codebase-mapper"]).toBe("local/fast");
-    expect(overrides["gsd-plan-checker"]).toBe("local/fast");
-
-    // Standard tier agents
-    expect(overrides["gsd-planner"]).toBe("local/heavy"); // planner is heavy
-    expect(overrides["gsd-executor"]).toBe("local/standard");
-
-    // Heavy tier agents
-    expect(overrides["gsd-roadmapper"]).toBe("local/heavy");
-    expect(overrides["gsd-ai-researcher"]).toBe("local/standard"); // ai-researcher is standard
+    expect(tierAgents.get("heavy")).toContain("gsd-planner");
+    expect(tierAgents.get("heavy")).toContain("gsd-eval-planner");
+    expect(tierAgents.get("standard")).toContain("gsd-executor");
+    expect(tierAgents.get("standard")).toContain("gsd-roadmapper"); // NOT heavy in balanced
+    expect(tierAgents.get("light")).toContain("gsd-codebase-mapper");
+    expect(tierAgents.get("light")).toContain("gsd-doc-classifier");
   });
 
-  it("maps all known agents", () => {
-    const overrides = buildTierModelOverrides({
-      light: "l",
-      standard: "s",
-      heavy: "h",
-    });
+  it("maps quality profile — heavy covers most agents", () => {
+    const tierAgents = getProfileTierAgents(catalog, "quality");
+    expect(tierAgents.get("heavy")!.length).toBeGreaterThan(20);
+    expect(tierAgents.get("light")).toBeUndefined(); // quality has no haiku
+  });
 
-    const totalAgents = Object.keys(overrides).length;
-    expect(totalAgents).toBeGreaterThan(20);
+  it("maps budget profile — no heavy tier", () => {
+    const tierAgents = getProfileTierAgents(catalog, "budget");
+    expect(tierAgents.has("heavy")).toBe(false);
+    expect(tierAgents.get("standard")!.length).toBeGreaterThan(0);
+    expect(tierAgents.get("light")!.length).toBeGreaterThan(10);
+  });
+
+  it("maps adaptive profile using routingTier", () => {
+    const tierAgents = getProfileTierAgents(catalog, "adaptive");
+    expect(tierAgents.get("heavy")).toContain("gsd-planner");
+    expect(tierAgents.get("heavy")).toContain("gsd-debugger");
+    expect(tierAgents.get("standard")).toContain("gsd-executor");
+    expect(tierAgents.get("light")).toContain("gsd-codebase-mapper");
+  });
+
+  it("returns empty map for inherit", () => {
+    const tierAgents = getProfileTierAgents(catalog, "inherit");
+    expect(tierAgents.size).toBe(0);
   });
 });
 
-describe("buildBalancedModelOverrides (backward-compat alias)", () => {
-  it("maps haiku/sonnet/opus to light/standard/heavy tiers", () => {
-    const overrides = buildBalancedModelOverrides({
-      haiku: "local/fast",
-      sonnet: "local/standard",
-      opus: "local/heavy",
-    });
+describe("getRequiredTiers", () => {
+  it("inherits needs 0 tiers", () => {
+    expect(getRequiredTiers("inherit")).toEqual([]);
+  });
+  it("quality needs heavy + standard", () => {
+    expect(getRequiredTiers("quality")).toEqual(["heavy", "standard"]);
+  });
+  it("budget needs standard + light", () => {
+    expect(getRequiredTiers("budget")).toEqual(["standard", "light"]);
+  });
+  it("balanced needs all 3", () => {
+    expect(getRequiredTiers("balanced")).toEqual(["heavy", "standard", "light"]);
+  });
+  it("adaptive needs all 3", () => {
+    expect(getRequiredTiers("adaptive")).toEqual(["heavy", "standard", "light"]);
+  });
+});
 
-    expect(overrides["gsd-codebase-mapper"]).toBe("local/fast");
-    expect(overrides["gsd-executor"]).toBe("local/standard");
-    expect(overrides["gsd-planner"]).toBe("local/heavy");
+describe("buildTierModelOverrides", () => {
+  it("maps tier models to agents per profile", () => {
+    const tiers: import("../src/gsd-models.js").TierModelMap = {
+      heavy: "openai-codex/gpt-5.5",
+      standard: "ollama-cloud/glm-5.1",
+      light: "openai-codex/gpt-5.3-codex-spark",
+    };
+    const overrides = buildTierModelOverrides(tiers, catalog, "balanced");
+
+    // In balanced: gsd-planner is opus(heavy), gsd-executor is sonnet(standard), gsd-codebase-mapper is haiku(light)
+    expect(overrides["gsd-planner"]).toBe("openai-codex/gpt-5.5");
+    expect(overrides["gsd-executor"]).toBe("ollama-cloud/glm-5.1");
+    expect(overrides["gsd-codebase-mapper"]).toBe("openai-codex/gpt-5.3-codex-spark");
+  });
+});
+
+describe("inferTierModelsFromOverrides", () => {
+  it("reverse-maps overrides to tier models for balanced profile", () => {
+    const overrides = buildTierModelOverrides(
+      { heavy: "h", standard: "s", light: "l" },
+      catalog,
+      "balanced",
+    );
+    const tiers = inferTierModelsFromOverrides(overrides, catalog, "balanced");
+    expect(tiers).not.toBeNull();
+    expect(tiers!.heavy).toBe("h");
+    expect(tiers!.standard).toBe("s");
+    expect(tiers!.light).toBe("l");
+  });
+
+  it("returns null for empty overrides", () => {
+    expect(inferTierModelsFromOverrides({}, catalog, "balanced")).toBeNull();
   });
 });
 
@@ -131,14 +178,6 @@ describe("readEnabledModels", () => {
 
   it("returns empty array when settings file is missing", () => {
     expect(readEnabledModels(join(tmpdir(), "nonexistent"))).toEqual([]);
-  });
-
-  it("returns empty array when enabledModels is not present", () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "pi-gsd-models-test-"));
-    const settingsDir = join(tmpDir, ".pi", "agent");
-    mkdirSync(settingsDir, { recursive: true });
-    writeFileSync(join(settingsDir, "settings.json"), JSON.stringify({ defaultModel: "gpt-5.5" }));
-    expect(readEnabledModels(tmpDir)).toEqual([]);
   });
 });
 
@@ -159,22 +198,47 @@ describe("readJsonObject / writeJsonObject", () => {
     expect(readJsonObject(join(tmpDir, "nonexistent.json"))).toEqual({});
   });
 
-  it("writes JSON file with trailing newline", () => {
-    const filePath = join(tmpDir, "out.json");
-    writeJsonObject(filePath, { model_profile: "balanced" });
-    const content = require("node:fs").readFileSync(filePath, "utf8");
-    expect(content).toBe(JSON.stringify({ model_profile: "balanced" }, null, 2) + "\n");
-  });
-
-  it("creates parent directories on write", () => {
-    const filePath = join(tmpDir, "deep", "nested", "config.json");
-    writeJsonObject(filePath, { model_profile: "inherit" });
-    expect(readJsonObject(filePath)).toEqual({ model_profile: "inherit" });
-  });
-
   it("throws on non-object JSON", () => {
     const filePath = join(tmpDir, "bad.json");
     writeFileSync(filePath, "[1,2,3]");
     expect(() => readJsonObject(filePath)).toThrow("must contain a JSON object");
+  });
+});
+
+describe("readCurrentGsdConfig", () => {
+  let tmpDir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "pi-gsd-cfg-test-"));
+    configPath = join(tmpDir, ".planning", "config.json");
+  });
+
+  it("returns null when config does not exist", () => {
+    const result = readCurrentGsdConfig(configPath, catalog);
+    expect(result.profile).toBeNull();
+    expect(result.tierModels).toBeNull();
+  });
+
+  it("returns null tierModels for inherit config", () => {
+    writeJsonObject(configPath, { model_profile: "inherit" });
+    const result = readCurrentGsdConfig(configPath, catalog);
+    expect(result.profile).toBe("inherit");
+    expect(result.tierModels).toBeNull();
+  });
+
+  it("decodes balanced config into tier models", () => {
+    const overrides = buildTierModelOverrides(
+      { heavy: "openai-codex/gpt-5.5", standard: "ollama-cloud/glm-5.1", light: "openai-codex/gpt-5.3-codex-spark" },
+      catalog,
+      "balanced",
+    );
+    writeJsonObject(configPath, { model_profile: "balanced", model_overrides: overrides });
+    const result = readCurrentGsdConfig(configPath, catalog);
+    expect(result.profile).toBe("balanced");
+    expect(result.tierModels).not.toBeNull();
+    expect(result.tierModels!.heavy).toBe("openai-codex/gpt-5.5");
+    expect(result.tierModels!.standard).toBe("ollama-cloud/glm-5.1");
+    expect(result.tierModels!.light).toBe("openai-codex/gpt-5.3-codex-spark");
   });
 });

@@ -45,28 +45,34 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
     description: "Configure GSD model routing for Pi subagents",
     handler: async (args, ctx) => {
       const model = ctx.model;
-      const modelChoice = model
-        ? { provider: String(model.provider), id: model.id, name: model.name }
-        : { provider: "unknown", id: "unknown", name: "unknown" };
-
       const allModels = ctx.modelRegistry.getAvailable();
+
+      let gsdPackageRoot: string;
+      try {
+        const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
+        gsdPackageRoot = officialPackage.packageRoot;
+      } catch {
+        gsdPackageRoot = "";
+      }
 
       await runGsdModelsCommand(args, {
         cwd: ctx.cwd,
-        model: modelChoice,
+        sessionModel: model ? `${model.provider}/${model.id}` : "unknown/unknown",
         enabledModels: readEnabledModels(),
+        gsdPackageRoot,
         modelRegistry: {
           getAvailable() {
             return allModels.map((m) => ({ provider: String(m.provider), id: m.id, name: m.name }));
           },
         },
         ui: {
-          async select<T>(_title: string, items: Array<{ value: T; label: string; description?: string }>): Promise<T | undefined> {
+          select: async <T>(_title: string, items: Array<{ value: T; label: string; description?: string }>): Promise<T | undefined> => {
             const options = items.map((item) => item.label);
             const selectedLabel = await ctx.ui.select(_title, options);
             if (selectedLabel === undefined) return undefined;
             return items.find((item) => item.label === selectedLabel)?.value as T | undefined;
           },
+          custom: (factory, options) => ctx.ui.custom(factory, options),
           notify: (message: string, type?: "info" | "warning" | "error") => ctx.ui.notify(message, type),
         },
       });
