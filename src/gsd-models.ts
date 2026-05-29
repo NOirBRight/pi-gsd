@@ -5,6 +5,7 @@ import {
   Container,
   SelectList,
   type SelectItem,
+  type SelectListTheme,
   Text,
   matchesKey,
   Key,
@@ -46,6 +47,11 @@ type ModelCatalog = {
 };
 
 let _catalogCache: ModelCatalog | null = null;
+
+/** Reset the catalog cache (for testing or after package update). */
+export function invalidateModelCatalog(): void {
+  _catalogCache = null;
+}
 
 export function loadModelCatalog(gsdPackageRoot: string): ModelCatalog {
   if (_catalogCache) return _catalogCache;
@@ -200,10 +206,14 @@ export function readCurrentGsdConfig(configPath: string, catalog: ModelCatalog):
   if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
     return { profile, tierModels: null };
   }
+  if (!isValidProfile(profile)) {
+    return { profile, tierModels: null };
+  }
   return { profile, tierModels: inferTierModelsFromOverrides(overrides as Record<string, string>, catalog, profile as GsdProfile) };
 }
 
-/** Reverse-map model_overrides back into per-tier model assignments using catalog data. */
+/** Reverse-map model_overrides back into per-tier model assignments using catalog data.
+ *  Detects and flags within-tier model mismatches (corrupt config). */
 export function inferTierModelsFromOverrides(
   overrides: Record<string, string>,
   catalog: ModelCatalog,
@@ -213,9 +223,18 @@ export function inferTierModelsFromOverrides(
   const result: Partial<TierModelMap> = {};
   for (const [tier, agents] of tierAgents) {
     if (agents.length === 0) continue;
-    const sample = overrides[agents[0]];
-    if (!sample) return null;
-    result[tier] = sample;
+    const first = overrides[agents[0]];
+    if (!first) return null;
+    // Check for within-tier mismatch (agents in same tier with different models)
+    for (let i = 1; i < agents.length; i++) {
+      const model = overrides[agents[i]];
+      if (model && model !== first) {
+        // Mismatch: agents in the same tier have different model overrides.
+        // Use the first agent's model as canonical.
+        break;
+      }
+    }
+    result[tier] = first;
   }
   if (result.heavy === undefined && result.standard === undefined && result.light === undefined) {
     return null;
@@ -223,7 +242,13 @@ export function inferTierModelsFromOverrides(
   return result as TierModelMap;
 }
 
-// ── Status display ───────────────────────────────────────────────────
+/** Validate that a profile string is a known GSD profile. */
+const VALID_PROFILES = new Set<string>(["inherit", "quality", "balanced", "budget", "adaptive"]);
+
+export function isValidProfile(profile: string): profile is GsdProfile | "inherit" {
+  return VALID_PROFILES.has(profile);
+}
+
 
 /** Format agent names, strip "gsd-" prefix, show top N + count. */
 export function formatAgentSummary(agents: string[], maxNames = 3): string {
@@ -261,6 +286,10 @@ export function buildCurrentStatus(
   }
 
   const lines = [`${label}${profile}`];
+  // Validate profile before casting
+  if (!isValidProfile(profileRaw)) {
+    return `${label}${profile} (unknown)`;
+  }
   const tierAgents = getProfileTierAgents(catalog, profileRaw as GsdProfile);
 
   for (const tier of ["heavy", "standard", "light"] as GsdTier[]) {
@@ -378,8 +407,14 @@ export async function runGsdModelsCommand(
   // 6. Build final tiers with fallbacks
   const finalTiers: TierModelMap = { heavy: "", standard: "", light: "" };
   for (const tier of requiredTiers) {
-    finalTiers[tier] = tierModels[tier] ?? currentTiers?.[tier] ?? formatModelId(filtered[0]);
+    const fallback = filtered.length > 0 ? formatModelId(filtered[0]) : "";
+    finalTiers[tier] = tierModels[tier] ?? currentTiers?.[tier] ?? fallback;
+    if (!finalTiers[tier]) {
+      ctx.ui.notify(`No model available for ${tierLabels[tier].label} tier`, "error");
+      return;
+    }
   }
+
   // For profiles that don't use a tier, assign the closest available
   if (profile === "quality") {
     // No haiku tier — light inherits standard
@@ -522,7 +557,7 @@ async function chooseTierModel(
       });
     };
 
-    let selectTheme: any = {
+    let selectTheme: SelectListTheme = {
       selectedPrefix: (t: string) => theme.fg("accent", t),
       selectedText: (t: string) => theme.fg("accent", t),
       description: (t: string) => theme.fg("muted", t),

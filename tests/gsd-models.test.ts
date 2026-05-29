@@ -10,6 +10,8 @@ import {
   writeJsonObject,
   resolveGsdConfigPath,
   loadModelCatalog,
+  invalidateModelCatalog,
+  isValidProfile,
   getProfileTierAgents,
   getRequiredTiers,
   inferTierModelsFromOverrides,
@@ -240,5 +242,43 @@ describe("readCurrentGsdConfig", () => {
     expect(result.tierModels!.heavy).toBe("openai-codex/gpt-5.5");
     expect(result.tierModels!.standard).toBe("ollama-cloud/glm-5.1");
     expect(result.tierModels!.light).toBe("openai-codex/gpt-5.3-codex-spark");
+  });
+
+  it("returns null tierModels for unknown profile", () => {
+    writeJsonObject(configPath, { model_profile: "custom-unknown", model_overrides: { "gsd-planner": "x/y" } });
+    const result = readCurrentGsdConfig(configPath, catalog);
+    expect(result.profile).toBe("custom-unknown");
+    expect(result.tierModels).toBeNull();
+  });
+});
+
+// ── isValidProfile ──────────────────────────────────────────────────
+
+describe("isValidProfile", () => {
+  it("accepts valid profiles", () => {
+    expect(isValidProfile("inherit")).toBe(true);
+    expect(isValidProfile("quality")).toBe(true);
+    expect(isValidProfile("balanced")).toBe(true);
+    expect(isValidProfile("budget")).toBe(true);
+    expect(isValidProfile("adaptive")).toBe(true);
+  });
+
+  it("rejects invalid profiles", () => {
+    expect(isValidProfile("custom")).toBe(false);
+    expect(isValidProfile("")).toBe(false);
+    expect(isValidProfile("unknown")).toBe(false);
+  });
+});
+
+// ── invalidateModelCatalog ─────────────────────────────────────────
+
+describe("invalidateModelCatalog", () => {
+  it("allows reload after invalidation", () => {
+    const first = loadModelCatalog(GSD_ROOT);
+    invalidateModelCatalog();
+    const second = loadModelCatalog(GSD_ROOT);
+    // Should be different object references after invalidate
+    expect(first).not.toBe(second);
+    expect(second.profiles).toEqual(first.profiles);
   });
 });

@@ -5,40 +5,52 @@ import { readEnabledModels, runGsdModelsCommand } from "./gsd-models.js";
 
 export default function piGsdExtension(pi: ExtensionAPI): void {
   let warnedResolveFailure = false;
+  // Cache the package root after first successful resolution to avoid repeated fs lookups
+  let cachedPackageRoot: string | null = null;
+
+  function getPackageRoot(startDir: string): string | null {
+    if (cachedPackageRoot !== null) return cachedPackageRoot;
+    try {
+      const officialPackage = resolveOfficialPackage({ startDir });
+      cachedPackageRoot = officialPackage.packageRoot;
+      return cachedPackageRoot;
+    } catch {
+      return null;
+    }
+  }
 
   pi.on("session_start", (_event, ctx) => {
-    try {
-      const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
-      notify(ctx, `pi-gsd: using ${officialPackage.packageName}@${officialPackage.version}`, "info");
-    } catch (error) {
-      if (!warnedResolveFailure) {
-        warnedResolveFailure = true;
-        notify(ctx, `pi-gsd: failed to resolve official package: ${errorMessage(error)}`, "warning");
+    const pkgRoot = getPackageRoot(ctx.cwd);
+    if (pkgRoot) {
+      try {
+        const pkg = resolveOfficialPackage({ startDir: ctx.cwd });
+        notify(ctx, `pi-gsd: using ${pkg.packageName}@${pkg.version}`, "info");
+      } catch (error) {
+        if (!warnedResolveFailure) {
+          warnedResolveFailure = true;
+          notify(ctx, `pi-gsd: failed to resolve official package: ${errorMessage(error)}`, "warning");
+        }
       }
+    } else if (!warnedResolveFailure) {
+      warnedResolveFailure = true;
+      notify(ctx, "pi-gsd: failed to resolve official package", "warning");
     }
   });
 
   pi.on("context", (event, ctx) => {
-    try {
-      const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
-      const messages = event.messages.map((message) => rewriteMessageForRuntime(message, officialPackage.packageRoot));
-
-      return { messages };
-    } catch {
-      return undefined;
-    }
+    const pkgRoot = getPackageRoot(ctx.cwd);
+    if (!pkgRoot) return undefined;
+    const messages = event.messages.map((message) => rewriteMessageForRuntime(message, pkgRoot));
+    return { messages };
   });
 
   pi.on("message_end", (event, ctx) => {
-    try {
-      if (!isRecord(event.message) || event.message.role !== "assistant") {
-        return undefined;
-      }
-      const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
-      return { message: rewriteMessageForRuntime(event.message, officialPackage.packageRoot) };
-    } catch {
+    if (!isRecord(event.message) || event.message.role !== "assistant") {
       return undefined;
     }
+    const pkgRoot = getPackageRoot(ctx.cwd);
+    if (!pkgRoot) return undefined;
+    return { message: rewriteMessageForRuntime(event.message, pkgRoot) };
   });
 
   pi.registerCommand("gsd-models", {
@@ -47,13 +59,8 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
       const model = ctx.model;
       const allModels = ctx.modelRegistry.getAvailable();
 
-      let gsdPackageRoot: string;
-      try {
-        const officialPackage = resolveOfficialPackage({ startDir: ctx.cwd });
-        gsdPackageRoot = officialPackage.packageRoot;
-      } catch {
-        gsdPackageRoot = "";
-      }
+      const gsdPackageRoot = getPackageRoot(ctx.cwd) ?? "";
+
 
       await runGsdModelsCommand(args, {
         cwd: ctx.cwd,
