@@ -1,7 +1,96 @@
+import { accessSync, constants as fsConstants, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveOfficialPackage } from "./official.js";
 import { rewriteRuntimeMessageText } from "./runtime-rewrites.js";
 import { readEnabledModels, runGsdModelsCommand } from "./gsd-models.js";
+
+/**
+ * Subdirectories under the pi-subagents temp root that may suffer ACL corruption.
+ * Must mirror pi-subagents' async-subagent-results and async-subagent-runs.
+ */
+export const TEMP_DIR_SUBDIRS = ["async-subagent-results", "async-subagent-runs"] as const;
+
+/**
+ * Builds the pi-subagents temp root path mirroring resolveTempScopeId logic.
+ * Uses the same username sanitization regex as pi-subagents:
+ * trim, replace non-alphanum/dot/dash/underscore with dash, strip leading/trailing dashes.
+ * Falls back to "unknown" if sanitization produces an empty string.
+ */
+export function buildPiSubagentsTempRoot(): string {
+  const username = (() => {
+    for (const key of ["USERNAME", "USER", "LOGNAME"] as const) {
+      const value = process.env[key];
+      if (value) return value;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const os = require("node:os");
+      const info = os.userInfo();
+      if (info.username) return info.username;
+    } catch {
+      // Fall through
+    }
+    return "unknown";
+  })();
+  const sanitized = username.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
+  return join(tmpdir(), `pi-subagents-user-${sanitized}`);
+}
+
+export type GuardFs = {
+  accessSync: typeof accessSync;
+  rmSync: typeof rmSync;
+  mkdirSync: typeof mkdirSync;
+};
+
+export type GuardOptions = {
+  /** Override the temp root path (defaults to buildPiSubagentsTempRoot()) */
+  tempRoot?: string;
+  /** Override filesystem operations (for testing ACL failure scenarios) */
+  fs?: GuardFs;
+};
+
+/**
+ * Best-effort guard that pre-cleans pi-subagents temp directories before
+ * the subagent extension loads. Checks accessibility of each temp subdir;
+ * if inaccessible, attempts rmSync + mkdirSync to repair. If repair also
+ * fails (e.g., ACL corruption too severe for non-elevated repair), sets a
+ * globalThis diagnostic flag.
+ *
+ * IMPORTANT: This guard runs in the session_start handler, which fires
+ * AFTER extensions are loaded. It is a late-stage safety net, not a
+ * pre-load guarantee. Extension load order is NOT controllable — Pi's
+ * discoverAndLoadExtensions loads extensions in filesystem-scanning order,
+ * not in a user-specified priority. See RESEARCH Pitfall 1.
+ *
+ * Wraps all operations in try/catch so it never throws — a best-effort
+ * guard that must not crash Pi.
+ */
+export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
+  try {
+    const fsImpl: GuardFs = options?.fs ?? { accessSync, rmSync, mkdirSync };
+    const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
+
+    for (const subdir of TEMP_DIR_SUBDIRS) {
+      const dirPath = join(tempRoot, subdir);
+      try {
+        fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
+      } catch {
+        // Directory is inaccessible — try to repair
+        try {
+          fsImpl.rmSync(dirPath, { recursive: true, force: true });
+          fsImpl.mkdirSync(dirPath, { recursive: true });
+        } catch {
+          // ACL too corrupted for non-elevated repair — set diagnostic flag
+          (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken = true;
+        }
+      }
+    }
+  } catch {
+    // Top-level catch: guard must never throw. Best-effort, never crashes Pi.
+  }
+}
 
 export default function piGsdExtension(pi: ExtensionAPI): void {
   let warnedResolveFailure = false;
@@ -20,6 +109,11 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", (_event, ctx) => {
+    // Best-effort guard: pre-clean pi-subagents temp dirs before subagent operations.
+    // This runs AFTER extension load, so it's a late-stage safety net — see comment
+    // on guardPiSubagentsTempDirs for limitations.
+    guardPiSubagentsTempDirs();
+
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (pkgRoot) {
       try {
