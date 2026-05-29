@@ -10,7 +10,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 var agentTiers = {
-  // heavy (deep reasoning — planning, debugging, architecture)
   "gsd-planner": "heavy",
   "gsd-roadmapper": "heavy",
   "gsd-debugger": "heavy",
@@ -20,7 +19,6 @@ var agentTiers = {
   "gsd-framework-selector": "heavy",
   "gsd-security-auditor": "heavy",
   "gsd-user-profiler": "heavy",
-  // standard (workhorse — execution, research, writing)
   "gsd-executor": "standard",
   "gsd-phase-researcher": "standard",
   "gsd-project-researcher": "standard",
@@ -34,7 +32,6 @@ var agentTiers = {
   "gsd-doc-synthesizer": "standard",
   "gsd-ai-researcher": "standard",
   "gsd-advisor-researcher": "standard",
-  // light (high-volume, structured output — mappers, scanners, audits)
   "gsd-codebase-mapper": "light",
   "gsd-pattern-mapper": "light",
   "gsd-research-synthesizer": "light",
@@ -47,17 +44,10 @@ var agentTiers = {
   "gsd-doc-classifier": "light",
   "gsd-intel-updater": "light"
 };
-var tierDescriptions = {
-  light: "mapping, scanning, audits (e.g. gsd-codebase-mapper)",
-  standard: "execution, research, writing (e.g. gsd-executor)",
-  heavy: "planning, debugging, architecture (e.g. gsd-planner)"
-};
-var profileDescriptions = {
-  inherit: `All GSD agents use your current model`,
-  quality: "Heavy model for every agent (maximum quality)",
-  balanced: "Heavy for planning, standard for execution, light for mapping",
-  budget: "Standard for execution, light for everything else",
-  adaptive: "Heavy for planning/debugging, standard for execution, light for mapping"
+var tierLabels = {
+  heavy: { short: "H", desc: "planning, debugging, architecture" },
+  standard: { short: "S", desc: "execution, research, writing" },
+  light: { short: "L", desc: "mapping, scanning, audits" }
 };
 function resolveGsdConfigPath(options) {
   if (options.scope === "project") {
@@ -114,34 +104,60 @@ async function runGsdModelsCommand(args, ctx) {
     return;
   }
   const scope = parseScope(args);
-  const currentConfigPath = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
-  const currentConfig = readJsonObject(currentConfigPath);
-  const currentProfile = typeof currentConfig.model_profile === "string" ? currentConfig.model_profile : "(not set)";
-  const mode = await ctx.ui.select(
-    `GSD model routing [${scope}] \u2014 current: ${currentProfile}`,
-    ["inherit", "quality", "balanced", "budget", "adaptive"].map((p) => ({
-      value: p,
-      label: p === "inherit" ? "Inherit" : p.charAt(0).toUpperCase() + p.slice(1),
-      description: profileDescriptions[p]
-    }))
-  );
-  if (!mode) return;
-  if (mode === "inherit") {
-    const configPath2 = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
-    const merged2 = mergeGsdModelConfig(readJsonObject(configPath2), { model_profile: "inherit" });
-    writeJsonObject(configPath2, merged2);
-    ctx.ui.notify(`\u2713 GSD set to inherit (${formatModelId(ctx.model)}) \u2192 ${configPath2}`, "info");
-    return;
-  }
+  const currentModelId = formatModelId(ctx.model);
   const tiers = await chooseTierModels(available, ctx);
   if (!tiers) return;
+  const mode = await ctx.ui.select(
+    `Select GSD profile [${scope}] \u2014 current model: ${currentModelId}`,
+    buildProfileOptions(tiers, ctx.model)
+  );
+  if (!mode) return;
   const configPath = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
-  const merged = mergeGsdModelConfig(readJsonObject(configPath), {
-    model_profile: mode,
-    model_overrides: buildTierModelOverrides(tiers)
-  });
-  writeJsonObject(configPath, merged);
-  ctx.ui.notify(`\u2713 GSD set to ${mode} [L=${tiers.light} S=${tiers.standard} H=${tiers.heavy}] \u2192 ${configPath}`, "info");
+  if (mode === "inherit") {
+    const merged = mergeGsdModelConfig(readJsonObject(configPath), { model_profile: "inherit" });
+    writeJsonObject(configPath, merged);
+    ctx.ui.notify(`\u2713 GSD: inherit (${currentModelId}) \u2192 ${configPath}`, "info");
+  } else {
+    const merged = mergeGsdModelConfig(readJsonObject(configPath), {
+      model_profile: mode,
+      model_overrides: buildTierModelOverrides(tiers)
+    });
+    writeJsonObject(configPath, merged);
+    ctx.ui.notify(`\u2713 GSD: ${mode} [${tierLabels.heavy.short}=${tiers.heavy} ${tierLabels.standard.short}=${tiers.standard} ${tierLabels.light.short}=${tiers.light}] \u2192 ${configPath}`, "info");
+  }
+}
+function buildProfileOptions(tiers, currentModel) {
+  const cur = formatModelId(currentModel);
+  const h = tiers.heavy;
+  const s = tiers.standard;
+  const l = tiers.light;
+  return [
+    {
+      value: "inherit",
+      label: "Inherit",
+      description: `All agents \u2192 ${cur}`
+    },
+    {
+      value: "quality",
+      label: "Quality",
+      description: `All agents \u2192 ${h}`
+    },
+    {
+      value: "balanced",
+      label: "Balanced",
+      description: `${tierLabels.heavy.short}: ${h}  ${tierLabels.standard.short}: ${s}  ${tierLabels.light.short}: ${l}`
+    },
+    {
+      value: "budget",
+      label: "Budget",
+      description: `${tierLabels.heavy.short}: ${s}  ${tierLabels.standard.short}: ${s}  ${tierLabels.light.short}: ${l}`
+    },
+    {
+      value: "adaptive",
+      label: "Adaptive",
+      description: `${tierLabels.heavy.short}: ${h}  ${tierLabels.standard.short}: ${s}  ${tierLabels.light.short}: ${l}`
+    }
+  ];
 }
 function parseScope(args) {
   const trimmed = args?.trim().toLowerCase() ?? "";
@@ -149,11 +165,11 @@ function parseScope(args) {
   return "project";
 }
 async function chooseTierModels(available, ctx) {
-  const heavy = await chooseModel(`Heavy tier (${tierDescriptions.heavy})`, available, ctx);
+  const heavy = await chooseModel(`Heavy tier (${tierLabels.heavy.desc})`, available, ctx);
   if (heavy === void 0) return void 0;
-  const standard = await chooseModel(`Standard tier (${tierDescriptions.standard})`, available, ctx);
+  const standard = await chooseModel(`Standard tier (${tierLabels.standard.desc})`, available, ctx);
   if (standard === void 0) return void 0;
-  const light = await chooseModel(`Light tier (${tierDescriptions.light})`, available, ctx);
+  const light = await chooseModel(`Light tier (${tierLabels.light.desc})`, available, ctx);
   if (light === void 0) return void 0;
   return { heavy, standard, light };
 }
@@ -172,13 +188,20 @@ async function chooseModel(title, available, ctx) {
   });
   const providerItems = sortedProviders.map((provider) => ({
     value: provider,
-    label: provider === currentProvider ? `\u25B8 ${provider}` : `  ${provider}`
+    label: provider === currentProvider ? `\u25B8 ${provider}` : provider
   }));
-  const selectedProvider = await ctx.ui.select(`Select provider for: ${title}`, providerItems);
+  const selectedProvider = await ctx.ui.select(`Provider: ${title}`, providerItems);
   if (selectedProvider === void 0) return void 0;
   const models = providerGroups.get(selectedProvider) ?? [];
   const currentId = formatModelId(ctx.model);
-  const modelItems = models.map((model) => {
+  const sortedModels = [...models].sort((a, b) => {
+    const aId = formatModelId(a);
+    const bId = formatModelId(b);
+    if (aId === currentId) return -1;
+    if (bId === currentId) return 1;
+    return aId.localeCompare(bId);
+  });
+  const modelItems = sortedModels.map((model) => {
     const id = formatModelId(model);
     const isCurrent = id === currentId;
     const marker = isCurrent ? "\u25B8 " : "  ";

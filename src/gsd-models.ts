@@ -19,10 +19,9 @@ export type ModelChoiceLike = {
   name?: string;
 };
 
-// ── Upstream agent tier assignments (from GSD model-catalog) ────────
+// ── Tier definitions ─────────────────────────────────────────────────
 
 const agentTiers: Record<string, GsdTier> = {
-  // heavy (deep reasoning — planning, debugging, architecture)
   "gsd-planner": "heavy",
   "gsd-roadmapper": "heavy",
   "gsd-debugger": "heavy",
@@ -32,7 +31,6 @@ const agentTiers: Record<string, GsdTier> = {
   "gsd-framework-selector": "heavy",
   "gsd-security-auditor": "heavy",
   "gsd-user-profiler": "heavy",
-  // standard (workhorse — execution, research, writing)
   "gsd-executor": "standard",
   "gsd-phase-researcher": "standard",
   "gsd-project-researcher": "standard",
@@ -46,7 +44,6 @@ const agentTiers: Record<string, GsdTier> = {
   "gsd-doc-synthesizer": "standard",
   "gsd-ai-researcher": "standard",
   "gsd-advisor-researcher": "standard",
-  // light (high-volume, structured output — mappers, scanners, audits)
   "gsd-codebase-mapper": "light",
   "gsd-pattern-mapper": "light",
   "gsd-research-synthesizer": "light",
@@ -60,18 +57,10 @@ const agentTiers: Record<string, GsdTier> = {
   "gsd-intel-updater": "light",
 };
 
-const tierDescriptions: Record<GsdTier, string> = {
-  light: "mapping, scanning, audits (e.g. gsd-codebase-mapper)",
-  standard: "execution, research, writing (e.g. gsd-executor)",
-  heavy: "planning, debugging, architecture (e.g. gsd-planner)",
-};
-
-const profileDescriptions: Record<GsdProfile | "inherit", string> = {
-  inherit: `All GSD agents use your current model`,
-  quality: "Heavy model for every agent (maximum quality)",
-  balanced: "Heavy for planning, standard for execution, light for mapping",
-  budget: "Standard for execution, light for everything else",
-  adaptive: "Heavy for planning/debugging, standard for execution, light for mapping",
+const tierLabels: Record<GsdTier, { short: string; desc: string }> = {
+  heavy: { short: "H", desc: "planning, debugging, architecture" },
+  standard: { short: "S", desc: "execution, research, writing" },
+  light: { short: "L", desc: "mapping, scanning, audits" },
 };
 
 // ── Pure helpers ─────────────────────────────────────────────────────
@@ -96,12 +85,10 @@ export function mergeGsdModelConfig(
   patch: GsdModelConfigPatch,
 ): Record<string, unknown> {
   const next: Record<string, unknown> = { ...existing, model_profile: patch.model_profile };
-
   if (patch.model_profile === "inherit") {
     delete next.model_overrides;
     return next;
   }
-
   next.model_overrides = { ...(patch.model_overrides ?? {}) };
   return next;
 }
@@ -119,8 +106,6 @@ export function writeJsonObject(filePath: string, value: Record<string, unknown>
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
-
-// ── Formatting helpers ──────────────────────────────────────────────
 
 export function formatModelId(model: ModelChoiceLike): string {
   return `${model.provider}/${model.id}`;
@@ -164,40 +149,73 @@ export async function runGsdModelsCommand(
   }
 
   const scope = parseScope(args);
-  const currentConfigPath = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
-  const currentConfig = readJsonObject(currentConfigPath);
-  const currentProfile = typeof currentConfig.model_profile === "string" ? currentConfig.model_profile : "(not set)";
+  const currentModelId = formatModelId(ctx.model);
 
-  const mode = await ctx.ui.select<GsdProfile | "inherit">(
-    `GSD model routing [${scope}] — current: ${currentProfile}`,
-    (["inherit", "quality", "balanced", "budget", "adaptive"] as const).map((p) => ({
-      value: p,
-      label: p === "inherit" ? "Inherit" : p.charAt(0).toUpperCase() + p.slice(1),
-      description: profileDescriptions[p],
-    })),
-  );
-  if (!mode) return;
-
-  if (mode === "inherit") {
-    const configPath = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
-    const merged = mergeGsdModelConfig(readJsonObject(configPath), { model_profile: "inherit" });
-    writeJsonObject(configPath, merged);
-    ctx.ui.notify(`✓ GSD set to inherit (${formatModelId(ctx.model)}) → ${configPath}`, "info");
-    return;
-  }
-
-  // For non-inherit profiles, user picks a Pi model for each tier
+  // Step 1: Pick tier models
   const tiers = await chooseTierModels(available, ctx);
   if (!tiers) return;
 
+  // Step 2: Pick profile — show concrete assignments
+  const mode = await ctx.ui.select<GsdProfile | "inherit">(
+    `Select GSD profile [${scope}] — current model: ${currentModelId}`,
+    buildProfileOptions(tiers, ctx.model),
+  );
+  if (!mode) return;
+
+  // Step 3: Write config
   const configPath = resolveGsdConfigPath({ scope, cwd: ctx.cwd });
-  const merged = mergeGsdModelConfig(readJsonObject(configPath), {
-    model_profile: mode,
-    model_overrides: buildTierModelOverrides(tiers),
-  });
-  writeJsonObject(configPath, merged);
-  ctx.ui.notify(`✓ GSD set to ${mode} [L=${tiers.light} S=${tiers.standard} H=${tiers.heavy}] → ${configPath}`, "info");
+  if (mode === "inherit") {
+    const merged = mergeGsdModelConfig(readJsonObject(configPath), { model_profile: "inherit" });
+    writeJsonObject(configPath, merged);
+    ctx.ui.notify(`✓ GSD: inherit (${currentModelId}) → ${configPath}`, "info");
+  } else {
+    const merged = mergeGsdModelConfig(readJsonObject(configPath), {
+      model_profile: mode,
+      model_overrides: buildTierModelOverrides(tiers),
+    });
+    writeJsonObject(configPath, merged);
+    ctx.ui.notify(`✓ GSD: ${mode} [${tierLabels.heavy.short}=${tiers.heavy} ${tierLabels.standard.short}=${tiers.standard} ${tierLabels.light.short}=${tiers.light}] → ${configPath}`, "info");
+  }
 }
+
+function buildProfileOptions(
+  tiers: TierModelMap,
+  currentModel: ModelChoiceLike,
+): Array<{ value: GsdProfile | "inherit"; label: string; description: string }> {
+  const cur = formatModelId(currentModel);
+  const h = tiers.heavy;
+  const s = tiers.standard;
+  const l = tiers.light;
+  return [
+    {
+      value: "inherit" as const,
+      label: "Inherit",
+      description: `All agents → ${cur}`,
+    },
+    {
+      value: "quality" as const,
+      label: "Quality",
+      description: `All agents → ${h}`,
+    },
+    {
+      value: "balanced" as const,
+      label: "Balanced",
+      description: `${tierLabels.heavy.short}: ${h}  ${tierLabels.standard.short}: ${s}  ${tierLabels.light.short}: ${l}`,
+    },
+    {
+      value: "budget" as const,
+      label: "Budget",
+      description: `${tierLabels.heavy.short}: ${s}  ${tierLabels.standard.short}: ${s}  ${tierLabels.light.short}: ${l}`,
+    },
+    {
+      value: "adaptive" as const,
+      label: "Adaptive",
+      description: `${tierLabels.heavy.short}: ${h}  ${tierLabels.standard.short}: ${s}  ${tierLabels.light.short}: ${l}`,
+    },
+  ];
+}
+
+// ── Scope & tier picking ─────────────────────────────────────────────
 
 function parseScope(args: string | undefined): GsdModelScope {
   const trimmed = args?.trim().toLowerCase() ?? "";
@@ -209,11 +227,11 @@ async function chooseTierModels(
   available: ModelChoiceLike[],
   ctx: GsdModelsCommandContext,
 ): Promise<TierModelMap | undefined> {
-  const heavy = await chooseModel(`Heavy tier (${tierDescriptions.heavy})`, available, ctx);
+  const heavy = await chooseModel(`Heavy tier (${tierLabels.heavy.desc})`, available, ctx);
   if (heavy === undefined) return undefined;
-  const standard = await chooseModel(`Standard tier (${tierDescriptions.standard})`, available, ctx);
+  const standard = await chooseModel(`Standard tier (${tierLabels.standard.desc})`, available, ctx);
   if (standard === undefined) return undefined;
-  const light = await chooseModel(`Light tier (${tierDescriptions.light})`, available, ctx);
+  const light = await chooseModel(`Light tier (${tierLabels.light.desc})`, available, ctx);
   if (light === undefined) return undefined;
   return { heavy, standard, light };
 }
@@ -223,7 +241,7 @@ async function chooseModel(
   available: ModelChoiceLike[],
   ctx: GsdModelsCommandContext,
 ): Promise<string | undefined> {
-  // Group models by provider
+  // Group by provider
   const providerGroups = new Map<string, ModelChoiceLike[]>();
   for (const model of available) {
     const group = providerGroups.get(model.provider);
@@ -231,7 +249,7 @@ async function chooseModel(
     else providerGroups.set(model.provider, [model]);
   }
 
-  // Step 1: select provider
+  // Step 1: select provider (alphabetical, current provider first)
   const currentProvider = ctx.model.provider;
   const sortedProviders = [...providerGroups.keys()].sort((a, b) => {
     if (a === currentProvider) return -1;
@@ -241,17 +259,25 @@ async function chooseModel(
 
   const providerItems = sortedProviders.map((provider) => ({
     value: provider,
-    label: provider === currentProvider ? `▸ ${provider}` : `  ${provider}`,
+    label: provider === currentProvider ? `▸ ${provider}` : provider,
   }));
 
-  const selectedProvider = await ctx.ui.select<string>(`Select provider for: ${title}`, providerItems);
+  const selectedProvider = await ctx.ui.select<string>(`Provider: ${title}`, providerItems);
   if (selectedProvider === undefined) return undefined;
 
-  // Step 2: select model within provider
+  // Step 2: select model within provider (current model first, then alphabetical)
   const models = providerGroups.get(selectedProvider) ?? [];
   const currentId = formatModelId(ctx.model);
 
-  const modelItems = models.map((model) => {
+  const sortedModels = [...models].sort((a, b) => {
+    const aId = formatModelId(a);
+    const bId = formatModelId(b);
+    if (aId === currentId) return -1;
+    if (bId === currentId) return 1;
+    return aId.localeCompare(bId);
+  });
+
+  const modelItems = sortedModels.map((model) => {
     const id = formatModelId(model);
     const isCurrent = id === currentId;
     const marker = isCurrent ? "▸ " : "  ";
@@ -265,12 +291,8 @@ async function chooseModel(
   return ctx.ui.select<string>(title, modelItems);
 }
 
-// ── Backward-compatible alias for tests ──────────────────────────────
+// ── Backward-compatible alias ─────────────────────────────────────────
 
 export const buildBalancedModelOverrides = (tiers: { haiku: string; sonnet: string; opus: string }): Record<string, string> => {
-  return buildTierModelOverrides({
-    light: tiers.haiku,
-    standard: tiers.sonnet,
-    heavy: tiers.opus,
-  });
+  return buildTierModelOverrides({ light: tiers.haiku, standard: tiers.sonnet, heavy: tiers.opus });
 };
