@@ -40,6 +40,20 @@ describe("syncAgents", () => {
     expect(targetContent.indexOf("<!-- pi-gsd generated agent -->")).toBeGreaterThan(firstClosingFrontmatter);
   });
 
+  it("keeps CRLF frontmatter first when inserting ownership marker", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-sync-"));
+    const generatedDir = join(root, "generated", "agents");
+    mkdirSync(generatedDir, { recursive: true });
+    writeFileSync(join(generatedDir, "gsd-planner.md"), "---\r\nname: gsd-planner\r\ndescription: Plans\r\n---\r\nBody\r\n", "utf8");
+
+    const result = syncAgents({ generatedAgentsDir: generatedDir, cwd: root, officialRoot: root, scope: "project" });
+
+    const targetContent = readFileSync(join(root, ".pi", "agents", "gsd-planner.md"), "utf8");
+    expect(result.ok).toBe(true);
+    expect(targetContent.startsWith("---\r\n")).toBe(true);
+    expect(targetContent).toContain("---\r\n<!-- pi-gsd generated agent -->\nBody");
+  });
+
   it("refuses to overwrite unowned target files", () => {
     const root = mkdtempSync(join(tmpdir(), "pi-gsd-sync-"));
     const generatedDir = join(root, "generated", "agents");

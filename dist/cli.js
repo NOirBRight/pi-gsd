@@ -4,7 +4,7 @@ import {
   generatePrompts,
   runDoctor,
   syncAgents
-} from "./chunk-3C6DISIM.js";
+} from "./chunk-VPL5ONSR.js";
 import {
   resolveOfficialPackage
 } from "./chunk-ZNIYZQO4.js";

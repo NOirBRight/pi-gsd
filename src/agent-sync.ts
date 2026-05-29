@@ -98,16 +98,18 @@ function readGeneratedAgentFileNames(generatedAgentsDir: string): string[] {
 }
 
 function withGeneratedMarker(markdown: string): string {
-  if (!markdown.startsWith("---\n")) {
+  const opening = /^---\r?\n/.exec(markdown);
+  if (!opening) {
     return `${generatedMarker}\n${markdown}`;
   }
 
-  const closingFrontmatter = markdown.indexOf("\n---\n", 4);
-  if (closingFrontmatter === -1) {
+  const restStart = opening[0].length;
+  const closing = /\r?\n---\r?\n/.exec(markdown.slice(restStart));
+  if (!closing) {
     return `${generatedMarker}\n${markdown}`;
   }
 
-  const insertAt = closingFrontmatter + "\n---\n".length;
+  const insertAt = restStart + closing.index + closing[0].length;
   return `${markdown.slice(0, insertAt)}${generatedMarker}\n${markdown.slice(insertAt)}`;
 }
 

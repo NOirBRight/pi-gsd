@@ -241,16 +241,18 @@ function readGeneratedAgentFileNames(generatedAgentsDir) {
   }
 }
 function withGeneratedMarker(markdown) {
-  if (!markdown.startsWith("---\n")) {
+  const opening = /^---\r?\n/.exec(markdown);
+  if (!opening) {
     return `${generatedMarker}
 ${markdown}`;
   }
-  const closingFrontmatter = markdown.indexOf("\n---\n", 4);
-  if (closingFrontmatter === -1) {
+  const restStart = opening[0].length;
+  const closing = /\r?\n---\r?\n/.exec(markdown.slice(restStart));
+  if (!closing) {
     return `${generatedMarker}
 ${markdown}`;
   }
-  const insertAt = closingFrontmatter + "\n---\n".length;
+  const insertAt = restStart + closing.index + closing[0].length;
   return `${markdown.slice(0, insertAt)}${generatedMarker}
 ${markdown.slice(insertAt)}`;
 }
