@@ -51,7 +51,10 @@
   "dependencies": {
     "@earendil-works/pi-tui": "^0.77.0",
     "@opengsd/get-shit-done-redux": "latest",
-    "pi-subagents": "^0.25.0"
+    "pi-subagents": "github:NOirBRight/pi-subagents#ec7bfe8ac129f658008d508925e81baf3c32c41c"
+  },
+  "overrides": {
+    "pi-subagents": "github:NOirBRight/pi-subagents#ec7bfe8ac129f658008d508925e81baf3c32c41c"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",

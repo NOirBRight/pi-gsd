@@ -222,6 +222,59 @@ describe("checkPiSubagentsTempAcl", () => {
     expect(result.messages.join("\n")).toContain("official package:");  // other checks still present
   });
 
+  it("reports ok:false when temp directory is missing (ENOENT)", () => {
+    const mockFs = {
+      accessSync: () => {
+        const err = new Error("ENOENT: no such file or directory") as Error & { code: string };
+        err.code = "ENOENT";
+        throw err;
+      },
+    };
+    const result = checkPiSubagentsTempAcl({ tempRoot: "/tmp/test", fs: mockFs });
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("MISSING");
+  });
+
+  it("escapes username with special characters in PowerShell repair command", () => {
+    const originalUsername = process.env.USERNAME;
+    process.env.USERNAME = "user with spaces & special <chars>";
+    try {
+      const mockFs = {
+        accessSync: () => {
+          const err = new Error("EACCES: permission denied") as Error & { code: string };
+          err.code = "EACCES";
+          throw err;
+        },
+      };
+      const result = checkPiSubagentsTempAcl({ tempRoot: "/tmp/test", fs: mockFs });
+      expect(result.ok).toBe(false);
+      // The username in the repair command should be single-quoted in PowerShell
+      expect(result.messages.join("\n")).toContain("'user with spaces & special <chars>'");
+    } finally {
+      process.env.USERNAME = originalUsername;
+    }
+  });
+
+  it("escapes embedded single quotes in username for PowerShell", () => {
+    const originalUsername = process.env.USERNAME;
+    process.env.USERNAME = "O'Brien";
+    try {
+      const mockFs = {
+        accessSync: () => {
+          const err = new Error("EACCES: permission denied") as Error & { code: string };
+          err.code = "EACCES";
+          throw err;
+        },
+      };
+      const result = checkPiSubagentsTempAcl({ tempRoot: "/tmp/test", fs: mockFs });
+      expect(result.ok).toBe(false);
+      // Embedded single quotes should be doubled per PowerShell escaping rules
+      expect(result.messages.join("\n")).toContain("'O''Brien'");
+    } finally {
+      process.env.USERNAME = originalUsername;
+    }
+  });
+
   it("doctor result has ok: false when ACL corruption is detected", () => {
     const fixture = createOfficialFixture();
     const outDir = join(fixture.root, "generated", "prompts");

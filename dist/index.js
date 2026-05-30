@@ -1,6 +1,7 @@
 import {
   OFFICIAL_ROOT_PLACEHOLDER,
   PI_SUBAGENTS_PACKAGE_NAME,
+  checkPiSubagentsTempAcl,
   generateAgents,
   generateAll,
   generatePrompts,
@@ -12,25 +13,24 @@ import {
   syncAgents,
   transformOfficialAgentMarkdown,
   writeFrontmatter
-} from "./chunk-LI4FWH3G.js";
-import {
-  rewriteOfficialClaudePaths,
-  rewriteRuntimeMessageText
-} from "./chunk-YKDNLLJM.js";
+} from "./chunk-GJ3YICDN.js";
 import {
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
   addPiSubagentGuidance,
   commandFileToPiPromptName,
   normalizeGsdSlashReferences,
-  resolveOfficialPackage
-} from "./chunk-ZNIYZQO4.js";
+  resolveOfficialPackage,
+  rewriteOfficialClaudePaths,
+  rewriteRuntimeMessageText
+} from "./chunk-B2VKK3BZ.js";
 export {
   OFFICIAL_PACKAGE_NAME,
   OFFICIAL_ROOT_PLACEHOLDER,
   OfficialPackageError,
   PI_SUBAGENTS_PACKAGE_NAME,
   addPiSubagentGuidance,
+  checkPiSubagentsTempAcl,
   commandFileToPiPromptName,
   generateAgents,
   generateAll,

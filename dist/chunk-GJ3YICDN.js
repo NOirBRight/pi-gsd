@@ -1,9 +1,11 @@
 import {
+  TEMP_DIR_SUBDIRS,
   addPiSubagentGuidance,
+  buildPiSubagentsTempRoot,
   commandFileToPiPromptName,
   normalizeGsdSlashReferences,
   resolveOfficialPackage
-} from "./chunk-ZNIYZQO4.js";
+} from "./chunk-B2VKK3BZ.js";
 
 // src/frontmatter.ts
 var supportedPromptKeys = ["description", "argument-hint"];
@@ -360,9 +362,48 @@ function resolvePiSubagentsPackage(options = {}) {
 }
 
 // src/doctor.ts
-import { mkdtempSync, readdirSync as readdirSync5, readFileSync as readFileSync5, rmSync as rmSync3 } from "fs";
+import { accessSync, constants as fsConstants, mkdtempSync, readdirSync as readdirSync5, readFileSync as readFileSync5, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
 import { basename, join as join4 } from "path";
+function checkPiSubagentsTempAcl(options) {
+  const messages = [];
+  let ok = true;
+  try {
+    const fsImpl = options?.fs ?? { accessSync };
+    const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
+    for (const subdir of TEMP_DIR_SUBDIRS) {
+      const dirPath = join4(tempRoot, subdir);
+      try {
+        fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
+      } catch (accessError) {
+        const errorCode = typeof accessError === "object" && accessError !== null && "code" in accessError ? accessError.code : "";
+        if (errorCode === "EACCES" || errorCode === "EPERM") {
+          ok = false;
+          const rawUsername = process.env.USERNAME ?? "$USERNAME";
+          const psEscapedUsername = `'${rawUsername.replace(/'/g, "''")}'`;
+          messages.push(
+            `pi-subagents temp ACL: CORRUPTED \u2014 directory ${dirPath} is inaccessible. Run this from elevated PowerShell: takeown /f "${dirPath}" /r /d Y; icacls "${dirPath}" /grant ${psEscapedUsername}:F /t; Remove-Item -Recurse -Force "${dirPath}"`
+          );
+        } else if (errorCode === "ENOENT") {
+          ok = false;
+          messages.push(`pi-subagents temp ACL: MISSING \u2014 directory ${dirPath} does not exist. Subagents may fail until it is created.`);
+        } else {
+          ok = false;
+          messages.push(`pi-subagents temp ACL: check error (${errorCode}): ${dirPath}`);
+        }
+      }
+    }
+    if (ok && messages.length === 0) {
+      messages.push("pi-subagents temp ACL: ok");
+    }
+  } catch (error) {
+    ok = false;
+    messages.push(
+      `pi-subagents temp ACL: check failed (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+  return { ok, messages };
+}
 function runDoctor(options) {
   const officialPackage = resolveOfficialPackage({ startDir: options.startDir });
   const messages = [
@@ -378,6 +419,10 @@ function runDoctor(options) {
     ok = false;
     messages.push(`pi-subagents package: missing (${error instanceof Error ? error.message : String(error)})`);
   }
+  const aclChecker = options.aclChecker ?? checkPiSubagentsTempAcl;
+  const aclResult = aclChecker();
+  ok = ok && aclResult.ok;
+  messages.push(...aclResult.messages);
   const tempDir = mkdtempSync(join4(tmpdir(), "pi-gsd-doctor-"));
   try {
     const expectedDir = join4(tempDir, "prompts");
@@ -473,5 +518,6 @@ export {
   generateAll,
   PI_SUBAGENTS_PACKAGE_NAME,
   resolvePiSubagentsPackage,
+  checkPiSubagentsTempAcl,
   runDoctor
 };

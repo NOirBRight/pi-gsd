@@ -85,6 +85,25 @@ describe("guardPiSubagentsTempDirs", () => {
 		expect((globalThis as Record<string, unknown>).__piSubagentsTempAclBroken).toBe(true);
 	});
 
+	it("does not attempt rmSync for non-ACL errors like ENOENT", () => {
+		delete (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken;
+		const rmCalls: string[] = [];
+		const mockFs = {
+			accessSync: () => {
+				const err = new Error("ENOENT: no such file or directory") as Error & { code: string };
+				err.code = "ENOENT";
+				throw err;
+			},
+			rmSync: (...args: any[]) => { rmCalls.push(args[0]); },
+			mkdirSync: () => undefined as string | undefined,
+		};
+
+		guardPiSubagentsTempDirs({ tempRoot: "/tmp/test", fs: mockFs });
+
+		expect(rmCalls).toHaveLength(0);
+		expect((globalThis as Record<string, unknown>).__piSubagentsTempAclBroken).toBeUndefined();
+	});
+
 	it("does not throw when ACL repair fails (best-effort, never crashes Pi)", () => {
 		const mockFs = {
 			accessSync: () => {

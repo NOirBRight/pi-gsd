@@ -26,13 +26,13 @@
 
 ## Phase 3: Subagent Stability
 
-**Status:** 🔲 Planning Complete
+**Status:** ✅ Complete
 
-**Goal:** Fix pi-subagents EPERM crash on Windows ACL-corrupted temp dirs and ensure fallback paths propagate to all consumer modules
+**Goal:** Fix pi-subagents EPERM crash on Windows ACL-corrupted temp dirs, ensure fallback paths propagate, and eliminate shared-directory race conditions between concurrent Pi processes
 
 **Requirements:** D-01, D-02, D-03, D-04
 
-**Plans:** 3/3 plans complete
+**Plans:** 3/3 plans complete + follow-up fixes
 
 Plans:
 
@@ -40,10 +40,22 @@ Plans:
 - [x] 03-02-PLAN.md — Add interim EPERM guard to pi-gsd-redux extension + ACL check to doctor
 - [x] 03-03-PLAN.md — Post-fix regression verification + /gsd-models manual test
 
-- Fix pi-subagents EPERM: `ensureAccessibleDir` doesn't catch `mkdirSync` EPERM, crashing Pi startup on ACL-corrupted temp dirs
-- Work around ES module read-only binding for `RESULTS_DIR`/`ASYNC_DIR` — fallback paths can't propagate to consumer modules
-- Evaluate fork vs upstream PR for structural fix vs monkey-patch vs startup cleanup
-- Verify `/gsd-models` and agent sync work correctly after subagent fix
+Follow-up fixes (Phase 3.5):
+
+- [x] Switch dependency to fork via npm overrides (PR #232 still open/unmerged)
+- [x] WR-01: Guard only repairs on EACCES/EPERM, not all accessSync errors
+- [x] WR-02: Consume `__piSubagentsTempAclBroken` flag and warn user on session_start
+- [x] WR-03: Doctor reports ok:false for missing temp dirs (ENOENT)
+- [x] WR-04: Escape PowerShell username in ACL repair command
+- [x] Document timing gap resolution via fork EPERM fallback
+- [x] Deduplicate guard tests into eperm-guard.test.ts
+- [x] Session-scoped temp directories (fork: `feat/session-scoped-temp-dirs`) — eliminates cross-process race conditions
+
+- Fix pi-subagents EPERM: fork's `ensureAccessibleDir` catches EPERM/EACCES with pid-scoped fallback
+- ES module read-only binding: solved via DIRS mutable container in fork
+- Shared-directory race conditions: solved via session-scoped temp directories (`updateDirsForSession`)
+- 4 code review warnings (WR-01 to WR-04) fixed
+- `/gsd-models` and agent sync verified working after all fixes
 
 ## Phase 4: Workflow Fidelity
 

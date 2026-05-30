@@ -1,0 +1,265 @@
+## GSD Models Command - Interactive Flow
+## 用法: 用 REST Client (VS Code) 或 IntelliJ HTTP Client 执行
+## 注意: 这是流程文档，URL 为虚拟的，不可直接执行
+
+### ═══════════════════════════════════════════
+### 0. 初始化数据（命令触发时一次性获取）
+### ═══════════════════════════════════════════
+
+### 0.1 读取当前 GSD 配置
+GET /projects/pi-gsd/.planning/config.json
+
+> {%
+client.test("config exists", function() {
+  var profile = response.body.model_profile;
+  var overrides = response.body.model_overrides;
+  // 如果 profile === "inherit" 或文件不存在 → tierModels = null
+  // 否则从 overrides 反解出 tierModels
+});
+%}
+
+### 0.2 获取已启用模型列表
+GET /api/models/enabled
+
+> {%
+client.global.set("enabledModels", JSON.stringify(response.body));
+%}
+
+### 0.3 获取所有有认证的模型
+GET /api/models/available
+
+> {%
+client.global.set("allModels", JSON.stringify(response.body));
+%}
+
+### 0.4 取交集：只保留 enabledModels 中的模型
+# POST /api/models/filtered
+# 如果 enabledModels 为空，fallback 到全量 available
+
+### 0.5 获取 Pi 主会话模型（仅用于 inherit 描述）
+GET /api/session-model
+
+> {%
+client.global.set("sessionModel", response.body.sessionModel);
+%}
+
+
+### ═══════════════════════════════════════════
+### 1. Step 1: 选 Heavy Tier Provider
+### ═══════════════════════════════════════════
+
+### 1.1 选择 Heavy Tier 的 Provider
+# 排序: 当前 heavy tier provider 最前，其余 alpha
+# 当前配置 heavy = "openai-codex/gpt-5.5" → provider = "openai-codex"
+
+POST /gsd-models/tier/heavy/provider
+Content-Type: application/json
+
+{
+  "currentTierModel": "openai-codex/gpt-5.5",
+  "providers": [
+    { "id": "openai-codex", "modelCount": 3 },
+    { "id": "claude-bridge", "modelCount": 2 },
+    { "id": "ollama-cloud", "modelCount": 6 }
+  ]
+}
+
+###
+
+### 1.2 选择 Heavy Tier 的 Model
+# 排序: 当前 heavy model 最前，其余 alpha
+
+POST /gsd-models/tier/heavy/model
+Content-Type: application/json
+
+{
+  "provider": "openai-codex",
+  "currentTierModel": "openai-codex/gpt-5.5"
+}
+
+> {%
+client.global.set("heavy", "openai-codex/gpt-5.5");
+%}
+
+###
+
+
+### ═══════════════════════════════════════════
+### 2. Step 2: 选 Standard Tier Provider + Model
+### ═══════════════════════════════════════════
+
+### 2.1 选择 Standard Tier 的 Provider
+# 当前配置 standard = "ollama-cloud/glm-5.1" → provider = "ollama-cloud"
+
+POST /gsd-models/tier/standard/provider
+Content-Type: application/json
+
+{
+  "currentTierModel": "ollama-cloud/glm-5.1",
+  "providers": [
+    { "id": "ollama-cloud", "modelCount": 6 },
+    { "id": "claude-bridge", "modelCount": 2 },
+    { "id": "openai-codex", "modelCount": 3 }
+  ]
+}
+
+###
+
+### 2.2 选择 Standard Tier 的 Model
+
+POST /gsd-models/tier/standard/model
+Content-Type: application/json
+
+{
+  "provider": "ollama-cloud",
+  "currentTierModel": "ollama-cloud/glm-5.1"
+}
+
+> {%
+client.global.set("standard", "ollama-cloud/glm-5.1");
+%}
+
+###
+
+
+### ═══════════════════════════════════════════
+### 3. Step 3: 选 Light Tier Provider + Model
+### ═══════════════════════════════════════════
+
+### 3.1 选择 Light Tier 的 Provider
+# 当前配置 light = "openai-codex/gpt-5.3-codex-spark"
+
+POST /gsd-models/tier/light/provider
+Content-Type: application/json
+
+{
+  "currentTierModel": "openai-codex/gpt-5.3-codex-spark",
+  "providers": [
+    { "id": "openai-codex", "modelCount": 3 },
+    { "id": "claude-bridge", "modelCount": 2 },
+    { "id": "ollama-cloud", "modelCount": 6 }
+  ]
+}
+
+###
+
+### 3.2 选择 Light Tier 的 Model
+
+POST /gsd-models/tier/light/model
+Content-Type: application/json
+
+{
+  "provider": "openai-codex",
+  "currentTierModel": "openai-codex/gpt-5.3-codex-spark"
+}
+
+> {%
+client.global.set("light", "openai-codex/gpt-5.3-codex-spark");
+%}
+
+###
+
+
+### ═══════════════════════════════════════════
+### 4. Step 4: 选 Profile
+### ═══════════════════════════════════════════
+
+POST /gsd-models/profile
+Content-Type: application/json
+
+{
+  "heavy": "openai-codex/gpt-5.5",
+  "standard": "ollama-cloud/glm-5.1",
+  "light": "openai-codex/gpt-5.3-codex-spark",
+  "sessionModel": "ollama-cloud/glm-5.1"
+}
+
+> {%
+client.global.set("profile", "balanced");
+%}
+
+###
+
+
+### ═══════════════════════════════════════════
+### 5. Step 5: 写入配置
+### ═══════════════════════════════════════════
+
+PUT /gsd-models/config
+Content-Type: application/json
+
+{
+  "scope": "project",
+  "profile": "balanced",
+  "tierModels": {
+    "heavy": "openai-codex/gpt-5.5",
+    "standard": "ollama-cloud/glm-5.1",
+    "light": "openai-codex/gpt-5.3-codex-spark"
+  }
+}
+
+> {%
+client.test("config written", function() {
+  client.assert(response.status === 200, "Config write succeeded");
+});
+%}
+
+###
+
+
+### ═══════════════════════════════════════════
+### EDGE CASES
+### ═══════════════════════════════════════════
+
+### E1. Config 不存在或 profile=inherit
+
+# GET /.planning/config.json 返回 {} 或 { "model_profile": "inherit" }
+# → tierModels = null
+# → provider/model 无预选，纯 alpha 排序
+# → 标题显示: "Current: inherit (uses Pi session model)"
+
+GET /projects/pi-gsd/.planning/config.json-when-empty
+
+###
+
+### E2. enabledModels 为空
+
+# GET /api/models/enabled 返回 []
+# → 不过滤，fallback 全量
+# → NOTIFY warning: "No enabledModels filter; showing all configured models"
+
+GET /api/models/enabled-when-empty
+
+###
+
+### E3. 用户取消 (ESC)
+
+# 任何 select 返回 undefined → 立即终止流程，不写入任何配置
+
+###
+
+
+### ═══════════════════════════════════════════
+### PROFILE 描述生成规则
+### ═══════════════════════════════════════════
+
+# inherit:  "All agents → (Pi session model)"
+# quality:  "All agents → {heavy}"
+# balanced: "H={heavy}  S={standard}  L={light}"
+# budget:   "H={standard}  S={standard}  L={light}"
+# adaptive: "H={heavy}  S={standard}  L={light}"
+
+###
+
+
+### ═══════════════════════════════════════════
+### PROXY IMPLEMENTATION 映射
+### ═══════════════════════════════════════════
+
+# "GET config"           → readJsonObject(resolveGsdConfigPath(...))
+# "GET enabled"          → readEnabledModels()
+# "GET available"        → ctx.modelRegistry.getAvailable()
+# "POST filtered"        → available.filter(m => enabledIds.has(`${m.provider}/${m.id}`))
+# "GET current-tiers"    → inferTierModelsFromOverrides(config.model_overrides)
+# "GET session-model"    → formatModelId(ctx.model)
+# "PUT config"           → mergeGsdModelConfig() + writeJsonObject()

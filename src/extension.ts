@@ -52,22 +52,30 @@ export type GuardOptions = {
 };
 
 /**
- * Best-effort guard that pre-cleans pi-subagents temp directories before
- * the subagent extension loads. Checks accessibility of each temp subdir;
- * if inaccessible, attempts rmSync + mkdirSync to repair. If repair also
- * fails (e.g., ACL corruption too severe for non-elevated repair), sets a
- * globalThis diagnostic flag.
+ * Best-effort guard that pre-cleans pi-subagents temp directories.
+ * Checks accessibility of each temp subdir; if ACL-corrupted (EACCES/EPERM),
+ * attempts rmSync + mkdirSync to repair. If repair also fails (ACL too severe
+ * for non-elevated repair), sets a globalThis diagnostic flag.
  *
- * IMPORTANT: This guard runs in the session_start handler, which fires
- * AFTER extensions are loaded. It is a late-stage safety net, not a
- * pre-load guarantee. Extension load order is NOT controllable — Pi's
- * discoverAndLoadExtensions loads extensions in filesystem-scanning order,
- * not in a user-specified priority. See RESEARCH Pitfall 1.
+ * TIMING: This guard runs in the session_start handler, which fires AFTER
+ * extensions are loaded. Pi's discoverAndLoadExtensions loads extensions in
+ * filesystem-scanning order, not in a user-specified priority. This means
+ * pi-subagents' own ensureAccessibleDir() has already run by the time this
+ * guard executes.
+ *
+ * This is mitigated: pi-subagents (fork version) now catches EPERM/EACCES
+ * in ensureAccessibleDir and falls back to pid-scoped paths. Our guard
+ * serves as a cleanup step — repairing corrupted dirs for the current
+ * session's file-watching, and preventing the corruption from blocking
+ * the next session.
  *
  * Wraps all operations in try/catch so it never throws — a best-effort
  * guard that must not crash Pi.
  */
 export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
+  // Reset ACL diagnostic flag at the start of each guard run.
+  // Without this, hot reload or session resume would carry over stale true from a previous run.
+  delete (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken;
   try {
     const fsImpl: GuardFs = options?.fs ?? { accessSync, rmSync, mkdirSync };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
@@ -76,8 +84,16 @@ export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
       const dirPath = join(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
-      } catch {
-        // Directory is inaccessible — try to repair
+      } catch (accessError: unknown) {
+        const errorCode = typeof accessError === "object" && accessError !== null && "code" in accessError
+          ? (accessError as { code: string }).code
+          : "";
+        // Only repair for ACL corruption (EACCES/EPERM).
+        // Non-ACL errors (ENOENT, EBUSY, etc.) are not corruption — skip repair.
+        if (errorCode !== "EACCES" && errorCode !== "EPERM") {
+          continue;
+        }
+        // Directory has ACL corruption — try to repair
         try {
           fsImpl.rmSync(dirPath, { recursive: true, force: true });
           fsImpl.mkdirSync(dirPath, { recursive: true });
@@ -113,6 +129,11 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
     // This runs AFTER extension load, so it's a late-stage safety net — see comment
     // on guardPiSubagentsTempDirs for limitations.
     guardPiSubagentsTempDirs();
+
+    // If ACL repair failed, warn the user so they can take action
+    if ((globalThis as Record<string, unknown>).__piSubagentsTempAclBroken) {
+      notify(ctx, "pi-gsd: pi-subagents temp directories have ACL corruption that could not be auto-repaired. Run 'pi gsd doctor' for repair instructions.", "warning");
+    }
 
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (pkgRoot) {
