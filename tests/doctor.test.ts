@@ -13,7 +13,7 @@ describe("runDoctor", () => {
     const outDir = join(fixture.root, "generated", "prompts");
     generatePrompts({ officialRoot: fixture.packageRoot, outDir });
 
-    const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: outDir });
+    const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: outDir, aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }) });
 
     expect(result.ok).toBe(true);
     expect(result.messages).toContain("official package: @opengsd/get-shit-done-redux@1.2.3");
@@ -39,7 +39,7 @@ describe("runDoctor", () => {
     const prompt = readFileSync(promptPath, "utf8");
     writeFileSync(promptPath, prompt.replace(/\n/g, "\r\n"), "utf8");
 
-    const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: outDir });
+    const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: outDir, aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }) });
 
     expect(result.ok).toBe(true);
   });
@@ -123,7 +123,7 @@ describe("runDoctor", () => {
     generateAgents({ officialRoot: fixture.packageRoot, outDir: agentsDir });
     syncAgents({ generatedAgentsDir: agentsDir, cwd: fixture.root, officialRoot: fixture.packageRoot, scope: "project" });
 
-    const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: promptsDir, generatedAgentsDir: agentsDir });
+    const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: promptsDir, generatedAgentsDir: agentsDir, aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }) });
 
     expect(result.ok).toBe(true);
     expect(result.messages.join("\n")).toContain("generated agents: ok");
