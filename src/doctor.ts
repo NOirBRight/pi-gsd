@@ -58,10 +58,13 @@ export function checkPiSubagentsTempAcl(options?: AclCheckOptions): AclCheckResu
           : "";
         if (errorCode === "EACCES" || errorCode === "EPERM") {
           ok = false;
+          // Escape username for PowerShell: wrap in single quotes and double any embedded single quotes
+          const rawUsername = process.env.USERNAME ?? "$USERNAME";
+          const psEscapedUsername = `'${rawUsername.replace(/'/g, "''")}'`;
           messages.push(
             `pi-subagents temp ACL: CORRUPTED — directory ${dirPath} is inaccessible. ` +
             `Run this from elevated PowerShell: takeown /f "${dirPath}" /r /d Y; ` +
-            `icacls "${dirPath}" /grant ${process.env.USERNAME ?? "$USERNAME"}:F /t; ` +
+            `icacls "${dirPath}" /grant ${psEscapedUsername}:F /t; ` +
             `Remove-Item -Recurse -Force "${dirPath}"`,
           );
         } else if (errorCode === "ENOENT") {
