@@ -47,10 +47,21 @@ Plans:
 
 ## Phase 4: Workflow Fidelity
 
-**Status:** 🔲 Not Started
+**Status:** 🔲 Planning Complete
+
+**Goal:** Ensure GSD workflow slash commands execute correctly in Pi by adapting AskUserQuestion, Skill(), and subagent dispatch to Pi runtime conventions
+
+**Requirements:** D-01, D-02, D-03, D-04, D-05
+
+**Plans:** 2 plans
+
+Plans:
+
+- [ ] 04-01-PLAN.md — Add AskUserQuestion, Skill(), and subagent_type transformations with tests
+- [ ] 04-02-PLAN.md — Add rpiv-ask-user-question doctor check and peer dependency
 
 - Diagnose and fix GSD workflow execution fidelity — `--chain`/`--auto` and plan-check/code-review revision loops don't execute fully
-- Integrate `@juicesharp/rpiv-ask-user-question` to provide AskUserQuestion tool that GSD workflows depend on
+- Integrate `@juicesharp/rpiv-ask-user-question` dependency verification into doctor command
 - Verify ask-user-question API compatibility with GSD's AskUserQuestion calling conventions
 
 ## Phase 5: Polish & Ship
