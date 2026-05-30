@@ -51,7 +51,10 @@
   "dependencies": {
     "@earendil-works/pi-tui": "^0.77.0",
     "@opengsd/get-shit-done-redux": "latest",
-    "pi-subagents": "^0.25.0"
+    "pi-subagents": "github:NOirBRight/pi-subagents#fix/eperm-ensure-accessible-dir"
+  },
+  "overrides": {
+    "pi-subagents": "github:NOirBRight/pi-subagents#fix/eperm-ensure-accessible-dir"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",
