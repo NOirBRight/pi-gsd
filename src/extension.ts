@@ -76,8 +76,16 @@ export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
       const dirPath = join(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
-      } catch {
-        // Directory is inaccessible — try to repair
+      } catch (accessError: unknown) {
+        const errorCode = typeof accessError === "object" && accessError !== null && "code" in accessError
+          ? (accessError as { code: string }).code
+          : "";
+        // Only repair for ACL corruption (EACCES/EPERM).
+        // Non-ACL errors (ENOENT, EBUSY, etc.) are not corruption — skip repair.
+        if (errorCode !== "EACCES" && errorCode !== "EPERM") {
+          continue;
+        }
+        // Directory has ACL corruption — try to repair
         try {
           fsImpl.rmSync(dirPath, { recursive: true, force: true });
           fsImpl.mkdirSync(dirPath, { recursive: true });

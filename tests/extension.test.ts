@@ -1,4 +1,4 @@
-import { accessSync, constants as fsConstants, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rewriteMessageForRuntime, guardPiSubagentsTempDirs, buildPiSubagentsTempRoot, TEMP_DIR_SUBDIRS } from "../src/extension.js";
@@ -91,24 +91,23 @@ describe("guardPiSubagentsTempDirs", () => {
     expect((globalThis as Record<string, unknown>).__piSubagentsTempAclBroken).toBeUndefined();
   });
 
-  it("attempts rmSync+mkdirSync when accessSync fails on a temp dir", () => {
-    // Create a subdirectory that exists but we'll make inaccessible by removing it
-    // and creating a scenario where access fails
-    // We can't easily make a dir inaccessible on CI, but we CAN test the repair
-    // path by starting with dirs that DON'T exist (so accessSync fails)
-    // and verifying guardPiSubagentsTempDirs creates them successfully
+  it("attempts rmSync+mkdirSync when accessSync fails with EACCES", () => {
+    const rmCalls: string[] = [];
+    const mkdirCalls: string[] = [];
+    const mockFs = {
+      accessSync: () => {
+        const err = new Error("EACCES: permission denied") as Error & { code: string };
+        err.code = "EACCES";
+        throw err;
+      },
+      rmSync: (...args: any[]) => { rmCalls.push(args[0]); },
+      mkdirSync: (...args: any[]) => { mkdirCalls.push(args[0]); return args[0]; },
+    };
 
-    // Don't create subdirectories — accessSync will fail on missing dirs
-    // but the guard should attempt mkdirSync which succeeds
-    expect(() => guardPiSubagentsTempDirs({ tempRoot })).not.toThrow();
+    guardPiSubagentsTempDirs({ tempRoot, fs: mockFs });
 
-    // After guard runs, directories should exist
-    for (const subdir of TEMP_DIR_SUBDIRS) {
-      const dirPath = join(tempRoot, subdir);
-      expect(() => accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK)).not.toThrow();
-    }
-
-    // Should NOT set the broken flag since mkdir succeeded
+    expect(rmCalls.length).toBe(2); // one per subdir
+    expect(mkdirCalls.length).toBe(2);
     expect((globalThis as Record<string, unknown>).__piSubagentsTempAclBroken).toBeUndefined();
   });
 
