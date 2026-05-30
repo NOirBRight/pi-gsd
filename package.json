@@ -51,10 +51,10 @@
   "dependencies": {
     "@earendil-works/pi-tui": "^0.77.0",
     "@opengsd/get-shit-done-redux": "latest",
-    "pi-subagents": "github:NOirBRight/pi-subagents#fix/eperm-ensure-accessible-dir"
+    "pi-subagents": "github:NOirBRight/pi-subagents#feat/session-scoped-temp-dirs"
   },
   "overrides": {
-    "pi-subagents": "github:NOirBRight/pi-subagents#fix/eperm-ensure-accessible-dir"
+    "pi-subagents": "github:NOirBRight/pi-subagents#feat/session-scoped-temp-dirs"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",
