@@ -73,6 +73,9 @@ export type GuardOptions = {
  * guard that must not crash Pi.
  */
 export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
+  // Reset ACL diagnostic flag at the start of each guard run.
+  // Without this, hot reload or session resume would carry over stale true from a previous run.
+  delete (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken;
   try {
     const fsImpl: GuardFs = options?.fs ?? { accessSync, rmSync, mkdirSync };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();

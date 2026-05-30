@@ -71,6 +71,7 @@ export function checkPiSubagentsTempAcl(options?: AclCheckOptions): AclCheckResu
           ok = false;
           messages.push(`pi-subagents temp ACL: MISSING — directory ${dirPath} does not exist. Subagents may fail until it is created.`);
         } else {
+          ok = false;
           messages.push(`pi-subagents temp ACL: check error (${errorCode}): ${dirPath}`);
         }
       }

@@ -4,10 +4,10 @@ import {
   generatePrompts,
   runDoctor,
   syncAgents
-} from "./chunk-LI4FWH3G.js";
+} from "./chunk-GJ3YICDN.js";
 import {
   resolveOfficialPackage
-} from "./chunk-ZNIYZQO4.js";
+} from "./chunk-B2VKK3BZ.js";
 
 // src/cli.ts
 import { spawnSync } from "child_process";

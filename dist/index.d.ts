@@ -1,3 +1,5 @@
+import { accessSync } from 'node:fs';
+
 declare const OFFICIAL_PACKAGE_NAME = "@opengsd/get-shit-done-redux";
 interface OfficialPaths {
     commandsDir: string;
@@ -101,20 +103,41 @@ declare function resolvePiSubagentsPackage(options?: {
     startDir?: string;
 }): PiSubagentsPackage;
 
+type AclCheckOptions = {
+    /** Override the temp root path (defaults to buildPiSubagentsTempRoot()) */
+    tempRoot?: string;
+    /** Override filesystem operations (for testing ACL failure scenarios) */
+    fs?: {
+        accessSync: typeof accessSync;
+    };
+};
+type AclCheckResult = {
+    ok: boolean;
+    messages: string[];
+};
 type DoctorOptions = {
     startDir?: string;
     generatedPromptsDir: string;
     generatedAgentsDir?: string;
     agentSyncScope?: AgentSyncScope;
     piSubagentsResolver?: typeof resolvePiSubagentsPackage;
+    /** Override ACL checker (for testing) — defaults to checkPiSubagentsTempAcl */
+    aclChecker?: () => AclCheckResult;
 };
 type DoctorResult = {
     ok: boolean;
     messages: string[];
 };
+/**
+ * Checks ACL integrity of pi-subagents temp directories.
+ * For each subdir in TEMP_DIR_SUBDIRS: verifies read/write access via accessSync.
+ * If any throws EACCES/EPERM, reports CORRUPTED with repair instructions.
+ * If all accessible, reports ok. Never throws — wraps in try/catch.
+ */
+declare function checkPiSubagentsTempAcl(options?: AclCheckOptions): AclCheckResult;
 declare function runDoctor(options: DoctorOptions): DoctorResult;
 
 declare function rewriteOfficialClaudePaths(input: string, officialRoot: string): string;
 declare function rewriteRuntimeMessageText(input: string, officialRoot: string): string;
 
-export { type AgentSyncScope, type DoctorOptions, type DoctorResult, type FrontmatterData, type FrontmatterValue, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, addPiSubagentGuidance, commandFileToPiPromptName, generateAgents, generateAll, generatePrompts, materializeOfficialAgentPaths, normalizeGsdSlashReferences, resolveAgentTargetDir, resolveOfficialPackage, resolvePiSubagentsPackage, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitFrontmatter, syncAgents, transformOfficialAgentMarkdown, writeFrontmatter };
+export { type AclCheckOptions, type AclCheckResult, type AgentSyncScope, type DoctorOptions, type DoctorResult, type FrontmatterData, type FrontmatterValue, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, addPiSubagentGuidance, checkPiSubagentsTempAcl, commandFileToPiPromptName, generateAgents, generateAll, generatePrompts, materializeOfficialAgentPaths, normalizeGsdSlashReferences, resolveAgentTargetDir, resolveOfficialPackage, resolvePiSubagentsPackage, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitFrontmatter, syncAgents, transformOfficialAgentMarkdown, writeFrontmatter };
