@@ -222,6 +222,19 @@ describe("checkPiSubagentsTempAcl", () => {
     expect(result.messages.join("\n")).toContain("official package:");  // other checks still present
   });
 
+  it("reports ok:false when temp directory is missing (ENOENT)", () => {
+    const mockFs = {
+      accessSync: () => {
+        const err = new Error("ENOENT: no such file or directory") as Error & { code: string };
+        err.code = "ENOENT";
+        throw err;
+      },
+    };
+    const result = checkPiSubagentsTempAcl({ tempRoot: "/tmp/test", fs: mockFs });
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("MISSING");
+  });
+
   it("doctor result has ok: false when ACL corruption is detected", () => {
     const fixture = createOfficialFixture();
     const outDir = join(fixture.root, "generated", "prompts");

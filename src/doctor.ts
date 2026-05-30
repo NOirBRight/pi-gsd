@@ -64,9 +64,11 @@ export function checkPiSubagentsTempAcl(options?: AclCheckOptions): AclCheckResu
             `icacls "${dirPath}" /grant ${process.env.USERNAME ?? "$USERNAME"}:F /t; ` +
             `Remove-Item -Recurse -Force "${dirPath}"`,
           );
+        } else if (errorCode === "ENOENT") {
+          ok = false;
+          messages.push(`pi-subagents temp ACL: MISSING — directory ${dirPath} does not exist. Subagents may fail until it is created.`);
         } else {
-          // Non-ACL error (e.g., ENOENT — directory doesn't exist yet, not corruption)
-          messages.push(`pi-subagents temp ACL: ok (dir not found: ${dirPath})`);
+          messages.push(`pi-subagents temp ACL: check error (${errorCode}): ${dirPath}`);
         }
       }
     }
