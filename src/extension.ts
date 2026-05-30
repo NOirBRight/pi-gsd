@@ -122,6 +122,11 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
     // on guardPiSubagentsTempDirs for limitations.
     guardPiSubagentsTempDirs();
 
+    // If ACL repair failed, warn the user so they can take action
+    if ((globalThis as Record<string, unknown>).__piSubagentsTempAclBroken) {
+      notify(ctx, "pi-gsd: pi-subagents temp directories have ACL corruption that could not be auto-repaired. Run 'pi gsd doctor' for repair instructions.", "warning");
+    }
+
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (pkgRoot) {
       try {

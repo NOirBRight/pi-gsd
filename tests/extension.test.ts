@@ -154,3 +154,88 @@ describe("TEMP_DIR_SUBDIRS", () => {
     expect(TEMP_DIR_SUBDIRS).toContain("async-subagent-runs");
   });
 });
+
+describe("ACL corruption warning on session_start", () => {
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken;
+  });
+
+  it("warns user via notify when __piSubagentsTempAclBroken is set", () => {
+    // Set the ACL broken flag
+    (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken = true;
+
+    // Capture notifications
+    const notifications: Array<{ message: string; type: string }> = [];
+    const mockCtx = {
+      ui: {
+        notify: (message: string, type?: string) => {
+          notifications.push({ message, type: type ?? "info" });
+        },
+      },
+      cwd: process.cwd(),
+    };
+
+    // Find the session_start handler
+    const sessionStartHandlers: Array<(event: any, ctx: any) => void> = [];
+    const pi = {
+      on: vi.fn((event: string, handler: any) => {
+        if (event === "session_start") {
+          sessionStartHandlers.push(handler);
+        }
+      }),
+      registerCommand: vi.fn(),
+    };
+
+    piGsdExtension(pi as never);
+
+    // Simulate session_start event
+    for (const handler of sessionStartHandlers) {
+      handler({ type: "session_start", reason: "startup" }, mockCtx);
+    }
+
+    expect(notifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining("ACL corruption"),
+          type: "warning",
+        }),
+      ]),
+    );
+
+    delete (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken;
+  });
+
+  it("does not warn when __piSubagentsTempAclBroken is not set", () => {
+    // Ensure flag is not set
+    delete (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken;
+
+    const notifications: Array<{ message: string; type: string }> = [];
+    const mockCtx = {
+      ui: {
+        notify: (message: string, type?: string) => {
+          notifications.push({ message, type: type ?? "info" });
+        },
+      },
+      cwd: process.cwd(),
+    };
+
+    const sessionStartHandlers: Array<(event: any, ctx: any) => void> = [];
+    const pi = {
+      on: vi.fn((event: string, handler: any) => {
+        if (event === "session_start") {
+          sessionStartHandlers.push(handler);
+        }
+      }),
+      registerCommand: vi.fn(),
+    };
+
+    piGsdExtension(pi as never);
+
+    for (const handler of sessionStartHandlers) {
+      handler({ type: "session_start", reason: "startup" }, mockCtx);
+    }
+
+    const aclWarnings = notifications.filter(n => n.message.includes("ACL corruption"));
+    expect(aclWarnings).toHaveLength(0);
+  });
+});
