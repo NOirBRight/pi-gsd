@@ -578,6 +578,34 @@ describe("state reconciliation drift catalog", () => {
     expect(JSON.stringify(drift.blockers)).not.toMatch(/retry|pause|self-heal|stop/);
   });
 
+  it("stale worker detector ignores the currently dispatching active unit", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-active-worker-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(
+      join(root, ".planning", "orchestration-state.json"),
+      JSON.stringify({
+        version: 1,
+        snapshot: {
+          status: "running",
+          currentUnit: { id: "09:plan", type: "plan", phase: "09" },
+          remainingUnits: [],
+        },
+        events: [],
+      }),
+      "utf8",
+    );
+    const journal = readJournalState(root);
+    const snapshot = {
+      phasesPath: join(root, ".planning", "phases"),
+      phases: [],
+      totals: { plans: 0, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 0 },
+    };
+
+    const drift = classifyDrift({ snapshot, journal, activeUnitId: "09:plan" });
+
+    expect(drift.blockers.filter((blocker) => blocker.reasonCode === "stale-worker")).toEqual([]);
+  });
+
   it("unregistered milestone blocks rather than creating milestone prose", () => {
     const root = mkdtempSync(join(tmpdir(), "pi-gsd-unregistered-milestone-"));
     mkdirSync(join(root, ".planning"), { recursive: true });

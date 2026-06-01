@@ -8,8 +8,9 @@ import { createDispatchAdapter } from "../../src/orchestrator/dispatch.js";
 function writeFixture(root: string) {
   mkdirSync(join(root, ".planning", "phases", "09-fixture"), { recursive: true });
   writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: true, ui_phase: false, ui_review: false } }), "utf8");
-  writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |\n", "utf8");
-  writeFileSync(join(root, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
+  writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 0/0 | Executing | — |\n", "utf8");
+  writeFileSync(join(root, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (executing)\n", "utf8");
+  writeFileSync(join(root, ".planning", "phases", "09-fixture", "09-PLAN-CHECK.md"), "noncanonical plan-like evidence\n", "utf8");
   const promptsDir = join(root, "generated", "prompts");
   const agentsDir = join(root, "generated", "agents");
   mkdirSync(promptsDir, { recursive: true });
@@ -38,7 +39,11 @@ describe("orchestrator chain e2e", () => {
           if (unit.type === "plan") { const path = join(phaseDir, "09-PLAN.md"); writeFileSync(path, "plan\n", "utf8"); written.push(path); }
           if (unit.type === "execute") { const path = join(phaseDir, "09-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
           if (unit.type === "verify") { const path = join(phaseDir, "09-VERIFICATION.md"); writeFileSync(path, "verification\n", "utf8"); written.push(path); }
-          if (unit.type === "closeout") { written.push(join(cwd, ".planning", "ROADMAP.md"), join(cwd, ".planning", "STATE.md")); }
+          if (unit.type === "closeout") {
+            writeFileSync(join(cwd, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\n", "utf8");
+            writeFileSync(join(cwd, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
+            written.push(join(cwd, ".planning", "ROADMAP.md"), join(cwd, ".planning", "STATE.md"));
+          }
           return { ok: true, messages: [`dispatched ${unit.type}`], written };
         },
       }),
@@ -49,7 +54,7 @@ describe("orchestrator chain e2e", () => {
 
     for (let guard = 0; guard < 10 && orchestrator.getStatus().status === "running"; guard += 1) {
       const result = orchestrator.advance();
-      expect(result.ok).toBe(true);
+      expect(result.ok, result.messages.join("\n")).toBe(true);
     }
 
     expect(orchestrator.getStatus().status).toBe("completed");
@@ -58,5 +63,38 @@ describe("orchestrator chain e2e", () => {
     expect(journal.snapshot.status).toBe("completed");
     expect(JSON.stringify(journal)).not.toContain("AUTO_MODE_CHECKLIST");
     expect(JSON.stringify(journal)).not.toContain("pi_auto_mode_fidelity");
+  });
+
+  it("pauses before dispatch when native reconciliation reports summary-count-mismatch", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-chain-blocked-"));
+    writeFixture(cwd);
+    const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
+    writeFileSync(join(phaseDir, "09-01-PLAN.md"), "RAW_MARKDOWN_BODY_SHOULD_NOT_PERSIST\n", "utf8");
+    writeFileSync(join(cwd, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 0/1 | Executing | — |\n", "utf8");
+    const dispatched: string[] = [];
+    const orchestrator = createAutoOrchestrator({
+      journal: createJournalAdapter({ cwd }),
+      dispatch: createDispatchAdapter({
+        cwd,
+        runner: ({ unit }) => {
+          dispatched.push(unit.type);
+          return { ok: true, messages: ["should not dispatch"] };
+        },
+      }),
+    });
+
+    expect(orchestrator.start({ phase: "09", mode: "chain", cwd }).ok).toBe(true);
+    const result = orchestrator.advance();
+
+    expect(result.ok).toBe(false);
+    expect(dispatched).toEqual([]);
+    expect(orchestrator.getStatus().status).toBe("paused");
+    expect(orchestrator.getStatus().lastEvent).toEqual(expect.objectContaining({
+      reason: "summary-count-mismatch",
+      evidence: expect.arrayContaining([
+        "reason:summary-count-mismatch",
+        expect.stringContaining("path:"),
+      ]),
+    }));
   });
 });

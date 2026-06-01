@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendJournalEvent, createJournalAdapter, readJournal, redactJournalEvent, writeJournalSnapshot } from "../src/orchestrator/journal.js";
+import { createAutoOrchestrator } from "../src/orchestrator/index.js";
 import { writeStateDigestPointer } from "../src/orchestrator/state-digest.js";
 import type { OrchestrationSnapshot, OrchestrationUnit, ResolvedWorkflowSettings } from "../src/orchestrator/types.js";
 
@@ -182,6 +183,30 @@ describe("orchestrator journal", () => {
 
     expect(result.ok).toBe(true);
     expect(result.written).toEqual([join(cwd, ".planning", "orchestration-state.json")]);
+  });
+
+  it("persists bounded reconciliation gate evidence without raw markdown body text", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-journal-reconcile-"));
+    const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "09-01-PLAN.md"), "RAW_MARKDOWN_BODY_SHOULD_NOT_PERSIST\n", "utf8");
+    writeFileSync(join(cwd, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 0/1 | Executing | — |\n", "utf8");
+    writeFileSync(join(cwd, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (executing)\n", "utf8");
+    const orchestrator = createAutoOrchestrator({
+      settingsResolver: () => settings,
+      queueBuilder: () => ({ decision: "dispatch", settings, units: [unit("09:plan")] }),
+      journal: createJournalAdapter({ cwd }),
+      dispatch: () => ({ ok: true, messages: ["should not dispatch"] }),
+    });
+
+    expect(orchestrator.start({ phase: "09", mode: "chain", cwd }).ok).toBe(true);
+    const result = orchestrator.advance();
+
+    expect(result.ok).toBe(false);
+    const serialized = readFileSync(join(cwd, ".planning", "orchestration-state.json"), "utf8");
+    expect(serialized).toContain("reason:summary-count-mismatch");
+    expect(serialized).toContain("path:");
+    expect(serialized).not.toContain("RAW_MARKDOWN_BODY_SHOULD_NOT_PERSIST");
   });
 });
 
