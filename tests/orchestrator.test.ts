@@ -1,5 +1,6 @@
 import type { GateName, GateResult, OrchestrationUnit } from "../src/orchestrator/types.js";
 import { runPostDispatchGate } from "../src/orchestrator/gates.js";
+import { reconcileBeforeDispatch } from "../src/orchestrator/reconciliation.js";
 import { advanceOrchestration, startOrchestration } from "../src/orchestrator/state-machine.js";
 import { advance, createAutoOrchestrator, getStatus, resume, start, stop } from "../src/orchestrator/index.js";
 import { createDispatchAdapter, resolveUnitDispatchTarget } from "../src/orchestrator/dispatch.js";
@@ -55,21 +56,56 @@ describe("orchestrator state machine", () => {
     let snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute")] });
     const gate = () => ({ ok: false, gate: "prepareUnitRoot", reason: "gate-failed", retryable: true, resumeHint: "repair root" }) satisfies GateResult;
 
-    const first = advanceOrchestration(snapshot, { gates: { prepareUnitRoot: gate } });
+    const first = advanceOrchestration(snapshot, { gates: { reconcileBeforeDispatch: passReconcile, prepareUnitRoot: gate } });
     expect(first.snapshot?.status).toBe("running");
     expect(first.snapshot?.attempt).toBe(1);
     snapshot = first.snapshot!;
 
-    const second = advanceOrchestration(snapshot, { gates: { prepareUnitRoot: gate } });
+    const second = advanceOrchestration(snapshot, { gates: { reconcileBeforeDispatch: passReconcile, prepareUnitRoot: gate } });
     expect(second.snapshot?.status).toBe("running");
     expect(second.snapshot?.attempt).toBe(2);
     snapshot = second.snapshot!;
 
-    const third = advanceOrchestration(snapshot, { gates: { prepareUnitRoot: gate } });
+    const third = advanceOrchestration(snapshot, { gates: { reconcileBeforeDispatch: passReconcile, prepareUnitRoot: gate } });
     expect(third.ok).toBe(false);
     expect(third.snapshot?.status).toBe("paused");
     expect(third.snapshot?.attempt).toBe(2);
     expect(third.snapshot?.lastEvent?.reason).toBe("retry-budget-exhausted");
+  });
+
+  it("native reconciliation blockers pause before dispatch", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-reconcile-blocker-"));
+    const phaseDir = join(cwd, ".planning", "phases", "09-auto-orchestration-native-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "09-01-PLAN.md"), "plan without summary\n", "utf8");
+    const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("plan")], cwd });
+    let dispatchCount = 0;
+
+    const result = advanceOrchestration(snapshot, {
+      dispatch: () => {
+        dispatchCount += 1;
+        return { ok: true, messages: ["should not dispatch"] };
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(dispatchCount).toBe(0);
+    expect(result.snapshot?.status).toBe("paused");
+    expect(result.snapshot?.lastEvent).toEqual(expect.objectContaining({
+      type: "pause",
+      reason: "summary-count-mismatch",
+      evidence: expect.arrayContaining([
+        "reason:summary-count-mismatch",
+        expect.stringContaining("path:"),
+      ]),
+    }));
+  });
+
+  it("reconcileBeforeDispatch preserves old snapshot ambiguity checks", () => {
+    const running = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("plan"), unit("execute")] });
+
+    expect(reconcileBeforeDispatch({ ...running, status: "paused" }, running.currentUnit!).ok).toBe(false);
+    expect(reconcileBeforeDispatch({ ...running, currentUnit: unit("execute") }, running.currentUnit!).ok).toBe(false);
   });
 
   it("emits unit-start, per-gate pass, and completion lifecycle events", () => {
@@ -102,6 +138,7 @@ describe("orchestrator state machine", () => {
   it("post-dispatch artifact gate failure prevents advancing and records evidence", () => {
     const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute"), unit("verify")] });
     const result = advanceOrchestration(snapshot, {
+      gates: { reconcileBeforeDispatch: passReconcile },
       dispatch: () => ({ ok: true, messages: ["dispatched"] }),
       postDispatchGate: () => ({ ok: false, gate: "artifact", reason: "gate-failed", retryable: false, resumeHint: "create SUMMARY.md", evidence: ["missing SUMMARY"] }),
     });
@@ -115,7 +152,7 @@ describe("orchestrator state machine", () => {
 
   it("successful transition completes current unit and advances to next unit", () => {
     const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("plan"), unit("execute")] });
-    const result = advanceOrchestration(snapshot, { dispatch: () => ({ ok: true, messages: ["dispatched"] }), postDispatchGate: () => ({ ok: true, gate: "artifact", evidence: ["current-run-artifact"] }) });
+    const result = advanceOrchestration(snapshot, { gates: { reconcileBeforeDispatch: passReconcile }, dispatch: () => ({ ok: true, messages: ["dispatched"] }), postDispatchGate: () => ({ ok: true, gate: "artifact", evidence: ["current-run-artifact"] }) });
 
     expect(result.ok).toBe(true);
     expect(result.snapshot?.currentUnit?.type).toBe("execute");
@@ -286,6 +323,7 @@ describe("orchestrator facade", () => {
     const orchestrator = createAutoOrchestrator({
       settingsResolver: () => settings,
       queueBuilder: () => ({ decision: "dispatch", settings, units: [unit("plan"), unit("execute")] }),
+      gates: { reconcileBeforeDispatch: passReconcile },
       dispatch: (dispatchUnit) => {
         received.push(dispatchUnit);
         return { ok: true, messages: ["ok"] };
@@ -331,6 +369,7 @@ describe("orchestrator facade", () => {
       queueBuilder: () => ({ decision: "dispatch", settings, units: [unit("execute")] }),
       journal: { append: (event, snapshot) => { events.push(event.type); return { ok: true, messages: ["journaled"], snapshot }; } },
       gates: {
+        reconcileBeforeDispatch: passReconcile,
         prepareUnitRoot: () => ({ ok: false, gate: "prepareUnitRoot", reason: "gate-failed", retryable: false, resumeHint: "repair root" }),
       },
     });
@@ -354,6 +393,7 @@ describe("orchestrator facade", () => {
 
     const orchestrator = createAutoOrchestrator({
       journal: createJournalAdapter({ cwd }),
+      gates: { reconcileBeforeDispatch: passReconcile },
       dispatch: (dispatchUnit) => {
         dispatched.push(dispatchUnit);
         return { ok: true, messages: ["dispatched"] };
@@ -374,4 +414,8 @@ function pass(gate: GateName, calls: GateName[]) {
     calls.push(gate);
     return { ok: true, gate, evidence: [gate] } satisfies GateResult;
   };
+}
+
+function passReconcile() {
+  return { ok: true, gate: "reconcileBeforeDispatch", evidence: ["test-reconciliation-pass"] } satisfies GateResult;
 }
