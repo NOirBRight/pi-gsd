@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyDrift, KNOWN_DRIFT_KINDS } from "../src/state-reconciliation/catalog.js";
 import { classifyArtifactName } from "../src/state-reconciliation/artifacts.js";
-import { applyRepairs, reconcileBeforeDispatch } from "../src/state-reconciliation/index.js";
+import { applyRepairs, ReconciliationFailedError, reconcileBeforeDispatch } from "../src/state-reconciliation/index.js";
 import { readJournalState } from "../src/state-reconciliation/journal.js";
 import { readRoadmapState } from "../src/state-reconciliation/roadmap.js";
 import { scanPlanningArtifacts } from "../src/state-reconciliation/scan.js";
@@ -57,6 +57,58 @@ describe("state reconciliation contracts", () => {
     expect(reasonCodes).toContain("unknown-drift");
     expect(reasonCodes).toContain("partial-write");
     expect(RECONCILIATION_REASON_CODES).toEqual(reasonCodes);
+  });
+
+  it("ReconciliationFailedError preserves structured handoff context", () => {
+    const blocker = {
+      reasonCode: "summary-count-mismatch" as const,
+      message: "Phase 10 has a missing summary.",
+      artifact: "summary" as const,
+      evidence: [{
+        reasonCode: "summary-count-mismatch" as const,
+        path: ".planning/phases/10-state-reconciliation-module/10-04-PLAN.md",
+        message: "Plan exists without matching summary.",
+      }],
+      suggestedNextAction: "manual-review" as const,
+    };
+    const repair = {
+      reasonCode: "roadmap-divergence" as const,
+      action: "update-roadmap-row",
+      description: "Update ROADMAP derived metadata.",
+      evidence: blocker.evidence,
+    };
+
+    const error = new ReconciliationFailedError({
+      ok: false,
+      snapshot: {
+        phasesPath: ".planning/phases",
+        phases: [],
+        totals: { plans: 1, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 0 },
+      },
+      blockers: [blocker],
+      repairs: [repair],
+      written: [],
+      evidence: blocker.evidence,
+    });
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.reasonCode).toBe("summary-count-mismatch");
+    expect(error.blockers).toEqual([blocker]);
+    expect(error.repairPlan).toEqual([repair]);
+    expect(error.evidence).toEqual(blocker.evidence);
+    expect(error.suggestedNextAction).toBe("manual-review");
+    expect(error.message).toContain("summary-count-mismatch");
+  });
+
+  it("suggested next action values remain category-level only", () => {
+    expect(ReconciliationFailedError.suggestedNextActions).toEqual([
+      "manual-review",
+      "rerun-reconcile",
+      "requires-recovery-classification",
+    ]);
+    expect(ReconciliationFailedError.suggestedNextActions).not.toContain("retry");
+    expect(ReconciliationFailedError.suggestedNextActions).not.toContain("self-heal");
+    expect(ReconciliationFailedError.suggestedNextActions).not.toContain("stop");
   });
 });
 
