@@ -33,7 +33,7 @@ export type ReconciliationEvidence = {
   paths?: string[];
   phase?: string;
   plan?: string;
-  artifact?: CanonicalArtifactKind | "noncanonical";
+  artifact?: CanonicalArtifactKind | "roadmap" | "state" | "journal" | "noncanonical";
   message: string;
   metadata?: Record<string, string | number | boolean>;
 };

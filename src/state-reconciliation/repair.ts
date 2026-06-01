@@ -64,7 +64,7 @@ function applyRepairContent(content: string, repair: ReconciliationRepair): stri
   return content;
 }
 
-function checkPreconditions(basePath: string, repair: ReconciliationRepair, fs: RepairFileSystem): ReconciliationBlocker | undefined {
+function checkPreconditions(basePath: string, repair: ReconciliationRepair, fs: ReconciliationFileSystem): ReconciliationBlocker | undefined {
   if (!repair.path) return repairBlocker("Repair target path is missing.", repair);
   if (!isInsidePlanning(basePath, repair.path)) return repairBlocker(`Repair target is outside .planning: ${repair.path}`, repair);
   if (!fs.exists(repair.path)) return repairBlocker(`Repair target does not exist: ${repair.path}`, repair);

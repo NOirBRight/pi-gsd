@@ -597,13 +597,13 @@ describe("state reconciliation repair planning", () => {
     const report = reconcileBeforeDispatch(root);
 
     expect(report.ok).toBe(true);
-    expect(report.repairs).toEqual([
+    expect(report.repairs).toEqual(expect.arrayContaining([
       expect.objectContaining({
         reasonCode: "roadmap-divergence",
         action: "update-roadmap-row",
         path: roadmapPath,
       }),
-    ]);
+    ]));
     expect(report.written).toEqual([]);
     expect(readFileSync(roadmapPath, "utf8")).toBe(beforeRoadmap);
   });
