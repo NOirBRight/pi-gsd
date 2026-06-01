@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyDrift, KNOWN_DRIFT_KINDS } from "../src/state-reconciliation/catalog.js";
 import { classifyArtifactName } from "../src/state-reconciliation/artifacts.js";
-import { reconcileBeforeDispatch } from "../src/state-reconciliation/index.js";
+import { applyRepairs, reconcileBeforeDispatch } from "../src/state-reconciliation/index.js";
 import { readJournalState } from "../src/state-reconciliation/journal.js";
 import { readRoadmapState } from "../src/state-reconciliation/roadmap.js";
 import { scanPlanningArtifacts } from "../src/state-reconciliation/scan.js";
@@ -625,6 +625,67 @@ describe("state reconciliation repair planning", () => {
     ]);
     expect(report.repairs).toEqual([]);
     expect(report.written).toEqual([]);
+  });
+});
+
+describe("state reconciliation apply repairs", () => {
+  it("apply writes repairable metadata and records written paths", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-apply-repairs-"));
+    const { roadmapPath } = writeCompletePhaseWithRoadmapDrift(root);
+
+    const report = reconcileBeforeDispatch(root, { apply: true });
+
+    expect(report.ok).toBe(true);
+    expect(report.written).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        reasonCode: "roadmap-divergence",
+        path: roadmapPath,
+        action: "update",
+      }),
+      expect.objectContaining({
+        reasonCode: "completion-timestamp-drift",
+        path: roadmapPath,
+        action: "update",
+      }),
+    ]));
+    expect(readFileSync(roadmapPath, "utf8")).toContain("| 10. State Reconciliation Module | v2.0 | 2/2 | Complete | 2026-06-01 |");
+  });
+
+  it("apply is idempotent on second run and produces no additional writes", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-apply-idempotent-"));
+    const { roadmapPath } = writeCompletePhaseWithRoadmapDrift(root);
+
+    const first = reconcileBeforeDispatch(root, { apply: true });
+    const afterFirst = readFileSync(roadmapPath, "utf8");
+    const second = reconcileBeforeDispatch(root, { apply: true });
+
+    expect(first.written.length).toBeGreaterThan(0);
+    expect(second.ok).toBe(true);
+    expect(second.repairs).toEqual([]);
+    expect(second.written).toEqual([]);
+    expect(readFileSync(roadmapPath, "utf8")).toBe(afterFirst);
+  });
+
+  it("apply refuses repair targets outside .planning", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-apply-confined-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+
+    const result = applyRepairs(root, [{
+      reasonCode: "roadmap-divergence",
+      action: "update-roadmap-row",
+      description: "Attempt to repair a source file.",
+      path: join(root, "src", "index.ts"),
+      evidence: [],
+    }]);
+
+    expect(result.ok).toBe(false);
+    expect(result.written).toEqual([]);
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "unknown-drift",
+        message: expect.stringContaining("outside .planning"),
+      }),
+    ]);
   });
 });
 
