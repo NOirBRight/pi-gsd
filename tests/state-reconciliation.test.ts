@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { classifyArtifactName } from "../src/state-reconciliation/artifacts.js";
 import { reconcileBeforeDispatch } from "../src/state-reconciliation/index.js";
+import { readJournalState } from "../src/state-reconciliation/journal.js";
+import { readRoadmapState } from "../src/state-reconciliation/roadmap.js";
 import { scanPlanningArtifacts } from "../src/state-reconciliation/scan.js";
+import { readStateDigest } from "../src/state-reconciliation/state.js";
 import { RECONCILIATION_REASON_CODES } from "../src/state-reconciliation/types.js";
 import type { ReconciledStateSnapshot, ReconciliationReasonCode, ReconciliationReport } from "../src/state-reconciliation/types.js";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -147,5 +150,128 @@ describe("state reconciliation structured report", () => {
     expect(report.repairs).toEqual([]);
     expect(report.written).toEqual([]);
     expect(report.snapshot.totals.plans).toBe(1);
+  });
+});
+
+describe("state reconciliation derived metadata readers", () => {
+  it("roadmap phase rows parse plan counts, status, and timestamp", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-roadmap-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(
+      join(root, ".planning", "ROADMAP.md"),
+      [
+        "# Roadmap",
+        "",
+        "Narrative says Phase 99 is Complete with 9/9 plans, but it is not in the table.",
+        "",
+        "## Progress",
+        "",
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 10. State Reconciliation Module | v2.0 | 1/4 | Executing | 2026-06-01 |",
+        "| 11. Worktree Safety | v2.0 | 0/2 | Not started | — |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const roadmap = readRoadmapState(root);
+
+    expect(roadmap.blockers).toEqual([]);
+    expect(roadmap.phases).toEqual([
+      expect.objectContaining({
+        phase: "10",
+        title: "State Reconciliation Module",
+        milestone: "v2.0",
+        plansComplete: 1,
+        totalPlans: 4,
+        status: "Executing",
+        completed: "2026-06-01",
+      }),
+      expect.objectContaining({
+        phase: "11",
+        plansComplete: 0,
+        totalPlans: 2,
+        completed: undefined,
+      }),
+    ]);
+    expect(roadmap.phases.map((phase) => phase.phase)).not.toContain("99");
+  });
+
+  it("state digest parses frontmatter and current-position metadata without treating prose as truth", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-state-digest-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(
+      join(root, ".planning", "STATE.md"),
+      [
+        "---",
+        "gsd_state_version: 1.0",
+        "status: Executing Phase 10",
+        "last_updated: \"2026-06-01T13:52:57.431Z\"",
+        "progress:",
+        "  total_phases: 7",
+        "  completed_phases: 3",
+        "  total_plans: 12",
+        "  completed_plans: 8",
+        "  percent: 43",
+        "---",
+        "",
+        "# Project State",
+        "",
+        "## Current Position",
+        "",
+        "Historical note: Phase 99 is complete in old prose.",
+        "",
+        "Phase: 10 (State Reconciliation Module) — EXECUTING",
+        "Plan: 1 of 4",
+        "Progress: [#########-----------] 43% (3/7 phases completed, 8/12 completed plans)",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const state = readStateDigest(root);
+
+    expect(state.blockers).toEqual([]);
+    expect(state.frontmatter).toEqual(expect.objectContaining({
+      gsd_state_version: "1.0",
+      status: "Executing Phase 10",
+      last_updated: "2026-06-01T13:52:57.431Z",
+    }));
+    expect(state.frontmatter.progress).toEqual({
+      total_phases: 7,
+      completed_phases: 3,
+      total_plans: 12,
+      completed_plans: 8,
+      percent: 43,
+    });
+    expect(state.currentPosition).toEqual(expect.objectContaining({
+      phase: "10",
+      phaseName: "State Reconciliation Module",
+      phaseStatus: "EXECUTING",
+      plan: 1,
+      totalPlans: 4,
+      percent: 43,
+    }));
+    expect(JSON.stringify(state.currentPosition)).not.toContain("99");
+  });
+
+  it("journal reader fails closed on corrupt orchestration-state data without overwriting content", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-journal-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    const journalPath = join(root, ".planning", "orchestration-state.json");
+    writeFileSync(journalPath, "{ definitely not json", "utf8");
+
+    const journal = readJournalState(root);
+
+    expect(journal.ok).toBe(false);
+    expect(journal.journal).toBeUndefined();
+    expect(journal.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "unknown-drift",
+        artifact: "journal",
+        message: expect.stringContaining("orchestration-state.json"),
+        evidence: [expect.objectContaining({ path: journalPath })],
+      }),
+    ]);
+    expect(readFileSync(journalPath, "utf8")).toBe("{ definitely not json");
   });
 });
