@@ -689,6 +689,47 @@ describe("state reconciliation apply repairs", () => {
   });
 });
 
+describe("state reconciliation partial-write reporting", () => {
+  it("partial-write returns ok false and preserves already-written paths", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-partial-write-"));
+    const { roadmapPath } = writeCompletePhaseWithRoadmapDrift(root);
+    const originalRoadmap = readFileSync(roadmapPath, "utf8");
+    const memory = new Map<string, string>([[roadmapPath, originalRoadmap]]);
+    let writeCount = 0;
+
+    const report = reconcileBeforeDispatch(root, {
+      apply: true,
+      fileSystem: {
+        exists: (path) => memory.has(path),
+        readFile: (path) => {
+          const content = memory.get(path);
+          if (content === undefined) throw new Error(`missing ${path}`);
+          return content;
+        },
+        writeFile: (path, content) => {
+          if (writeCount++ === 1) throw new Error("simulated write failure");
+          memory.set(path, content);
+        },
+      },
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "partial-write",
+        message: expect.stringContaining("simulated write failure"),
+      }),
+    ]);
+    expect(report.written).toEqual([
+      expect.objectContaining({
+        path: roadmapPath,
+        action: "update",
+      }),
+    ]);
+    expect(readFileSync(roadmapPath, "utf8")).toBe(originalRoadmap);
+  });
+});
+
 function writeCompletePhaseWithRoadmapDrift(root: string): { roadmapPath: string } {
   const planningDir = join(root, ".planning");
   const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
