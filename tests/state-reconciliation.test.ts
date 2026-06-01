@@ -463,4 +463,126 @@ describe("state reconciliation drift catalog", () => {
       }),
     ]));
   });
+
+  it("sketch flag drift blocks when correct sketch metadata is not mechanically provable", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-sketch-flag-"));
+    const sketchManifest = join(root, ".planning", "sketches", "MANIFEST.md");
+    const snapshot = {
+      phasesPath: join(root, ".planning", "phases"),
+      phases: [],
+      totals: { plans: 0, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 0 },
+    };
+
+    const drift = classifyDrift({
+      snapshot,
+      sketch: { phase: "10", expectedEnabled: true, evidencePaths: [sketchManifest] },
+    });
+
+    expect(drift.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "sketch-flag-drift",
+        phase: "10",
+        artifact: "roadmap",
+        message: expect.stringContaining("not mechanically provable"),
+        evidence: [expect.objectContaining({ path: sketchManifest })],
+      }),
+    ]);
+  });
+
+  it("stale worker blocks with category-level evidence and does not choose a recovery action", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-stale-worker-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(
+      join(root, ".planning", "orchestration-state.json"),
+      JSON.stringify({
+        version: 1,
+        snapshot: {
+          status: "running",
+          currentUnit: { id: "execute-10-02", type: "execute", phase: "10" },
+          remainingUnits: [],
+        },
+        events: [{ type: "unit-started", ts: "2026-06-01T12:00:00Z", phase: "10", unitId: "execute-10-02" }],
+      }),
+      "utf8",
+    );
+    const journal = readJournalState(root);
+    const snapshot = {
+      phasesPath: join(root, ".planning", "phases"),
+      phases: [],
+      totals: { plans: 0, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 0 },
+    };
+
+    const drift = classifyDrift({ snapshot, journal });
+
+    expect(drift.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "stale-worker",
+        artifact: "journal",
+        suggestedNextAction: "requires-recovery-classification",
+        evidence: [expect.objectContaining({ path: join(root, ".planning", "orchestration-state.json") })],
+      }),
+    ]);
+    expect(JSON.stringify(drift.blockers)).not.toMatch(/retry|pause|self-heal|stop/);
+  });
+
+  it("unregistered milestone blocks rather than creating milestone prose", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-unregistered-milestone-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(
+      join(root, ".planning", "ROADMAP.md"),
+      [
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 10. State Reconciliation Module | v2.0 | 0/4 | Not started | - |",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      join(root, ".planning", "STATE.md"),
+      "---\nmilestone: v3.0\nstatus: Planning\n---\n\n## Current Position\n\nPhase: 10 (State Reconciliation Module)\n",
+      "utf8",
+    );
+    const roadmap = readRoadmapState(root);
+    const state = readStateDigest(root);
+    const snapshot = {
+      phasesPath: join(root, ".planning", "phases"),
+      phases: [],
+      totals: { plans: 0, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 0 },
+    };
+
+    const drift = classifyDrift({ snapshot, roadmap, state });
+
+    expect(drift.repairs.filter((repair) => repair.reasonCode === "unregistered-milestone")).toEqual([]);
+    expect(drift.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "unregistered-milestone",
+        artifact: "roadmap",
+        message: expect.stringContaining("v3.0"),
+      }),
+    ]);
+  });
+
+  it("unsupported mismatches become unknown drift blockers", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-unknown-drift-"));
+    const evidencePath = join(root, ".planning", "STATE.md");
+    const snapshot = {
+      phasesPath: join(root, ".planning", "phases"),
+      phases: [],
+      totals: { plans: 0, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 0 },
+    };
+
+    const drift = classifyDrift({
+      snapshot,
+      unsupportedMismatches: [{ path: evidencePath, message: "STATE progress format is unsupported." }],
+    });
+
+    expect(drift.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "unknown-drift",
+        artifact: "state",
+        message: expect.stringContaining("unsupported"),
+        evidence: [expect.objectContaining({ path: evidencePath })],
+      }),
+    ]);
+  });
 });
