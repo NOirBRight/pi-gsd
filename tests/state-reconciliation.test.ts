@@ -144,6 +144,7 @@ describe("state reconciliation structured report", () => {
     const phaseDir = join(root, ".planning", "phases", "10-state-reconciliation-module");
     mkdirSync(phaseDir, { recursive: true });
     writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan\n", "utf8");
+    writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "summary\n", "utf8");
 
     const report = reconcileBeforeDispatch(root);
 
@@ -586,3 +587,64 @@ describe("state reconciliation drift catalog", () => {
     ]);
   });
 });
+
+describe("state reconciliation repair planning", () => {
+  it("dry-run plan repairs reports repairable metadata drift without writing", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-plan-repairs-dry-run-"));
+    const { roadmapPath } = writeCompletePhaseWithRoadmapDrift(root);
+    const beforeRoadmap = readFileSync(roadmapPath, "utf8");
+
+    const report = reconcileBeforeDispatch(root);
+
+    expect(report.ok).toBe(true);
+    expect(report.repairs).toEqual([
+      expect.objectContaining({
+        reasonCode: "roadmap-divergence",
+        action: "update-roadmap-row",
+        path: roadmapPath,
+      }),
+    ]);
+    expect(report.written).toEqual([]);
+    expect(readFileSync(roadmapPath, "utf8")).toBe(beforeRoadmap);
+  });
+
+  it("dry-run plan repairs omits repair records for blocking drift", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-plan-repairs-blocking-"));
+    const planningDir = join(root, ".planning");
+    const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan 1\n", "utf8");
+    writeFileSync(join(phaseDir, "10-02-PLAN.md"), "plan 2\n", "utf8");
+    writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "summary 1\n", "utf8");
+
+    const report = reconcileBeforeDispatch(root);
+
+    expect(report.ok).toBe(false);
+    expect(report.blockers).toEqual([
+      expect.objectContaining({ reasonCode: "summary-count-mismatch" }),
+    ]);
+    expect(report.repairs).toEqual([]);
+    expect(report.written).toEqual([]);
+  });
+});
+
+function writeCompletePhaseWithRoadmapDrift(root: string): { roadmapPath: string } {
+  const planningDir = join(root, ".planning");
+  const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
+  mkdirSync(phaseDir, { recursive: true });
+  writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan 1\n", "utf8");
+  writeFileSync(join(phaseDir, "10-02-PLAN.md"), "plan 2\n", "utf8");
+  writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "---\ncompleted: 2026-06-01\n---\nsummary 1\n", "utf8");
+  writeFileSync(join(phaseDir, "10-02-SUMMARY.md"), "---\ncompleted: 2026-06-01\n---\nsummary 2\n", "utf8");
+  const roadmapPath = join(planningDir, "ROADMAP.md");
+  writeFileSync(
+    roadmapPath,
+    [
+      "| Phase | Milestone | Plans Complete | Status | Completed |",
+      "|---|---|---|---|---|",
+      "| 10. State Reconciliation Module | v2.0 | 0/4 | Not started | - |",
+    ].join("\n"),
+    "utf8",
+  );
+  return { roadmapPath };
+}
