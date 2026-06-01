@@ -11,6 +11,7 @@ export const RECONCILIATION_REASON_CODES = [
 ] as const;
 
 export type ReconciliationReasonCode = (typeof RECONCILIATION_REASON_CODES)[number];
+export type ReconciliationSuggestedNextAction = "manual-review" | "rerun-reconcile" | "requires-recovery-classification";
 
 export type CanonicalArtifactKind = "plan" | "summary" | "verification" | "review" | "context";
 
@@ -66,7 +67,7 @@ export type ReconciliationBlocker = {
   artifact?: CanonicalArtifactKind | "state" | "roadmap" | "journal" | "noncanonical";
   repairPlan?: ReconciliationRepair[];
   written?: ReconciliationWrite[];
-  suggestedNextAction?: "manual-review" | "rerun-reconcile" | "requires-recovery-classification";
+  suggestedNextAction?: ReconciliationSuggestedNextAction;
 };
 
 export type CanonicalPhaseArtifacts = {
@@ -110,4 +111,13 @@ export type ReconciliationReport = {
   blockers: ReconciliationBlocker[];
   written: ReconciliationWrite[];
   evidence: ReconciliationEvidence[];
+};
+
+export type ReconciliationFailureContext = {
+  reasonCode: ReconciliationReasonCode;
+  blockers: ReconciliationBlocker[];
+  repairPlan: ReconciliationRepair[];
+  evidence: ReconciliationEvidence[];
+  suggestedNextAction: ReconciliationSuggestedNextAction;
+  report: ReconciliationReport;
 };

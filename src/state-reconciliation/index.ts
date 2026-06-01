@@ -10,6 +10,7 @@ import type { ReconciliationOptions, ReconciliationReport } from "./types.js";
 
 export { classifyDrift, KNOWN_DRIFT_KINDS } from "./catalog.js";
 export { classifyArtifactName } from "./artifacts.js";
+export { ReconciliationFailedError } from "./errors.js";
 export { readJournalState } from "./journal.js";
 export { applyRepairs, planRepairs } from "./repair.js";
 export { readRoadmapState } from "./roadmap.js";
