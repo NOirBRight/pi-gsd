@@ -278,6 +278,34 @@ describe("runCli", () => {
     expect(statusOut.join("")).toContain("status: completed");
   });
 
+  it("rejects invalid orchestrate phase ids before dispatch", async () => {
+    const stderr: string[] = [];
+    const code = await runCli(["orchestrate", "--chain", "--phase", "../../x"], {
+      stdout: () => undefined,
+      stderr: (text) => stderr.push(text),
+    });
+
+    expect(code).toBe(2);
+    expect(stderr.join("")).toContain("Invalid --phase");
+  });
+
+  it("fails closed when orchestrate dispatch command is not configured", async () => {
+    const fixture = createOfficialFixture();
+    writeOrchestratorFixture(fixture.root);
+    const oldDispatchCommand = process.env.PI_GSD_DISPATCH_COMMAND;
+    delete process.env.PI_GSD_DISPATCH_COMMAND;
+    const stdout: string[] = [];
+
+    const code = await runCli(["orchestrate", "--chain", "--phase", "09", "--cwd", fixture.root], {
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    });
+    if (oldDispatchCommand !== undefined) process.env.PI_GSD_DISPATCH_COMMAND = oldDispatchCommand;
+
+    expect(code).toBe(1);
+    expect(stdout.join("")).toContain("PI_GSD_DISPATCH_COMMAND is required");
+  });
+
   it("returns usage for unknown commands", async () => {
     const stderr: string[] = [];
 

@@ -169,6 +169,21 @@ describe("Unit dispatch target", () => {
     }
   });
 
+  it("validates dispatch resources from resourceRoot while using project cwd for execution", () => {
+    const projectCwd = mkdtempSync(join(tmpdir(), "pi-gsd-project-no-generated-"));
+    const resourceRoot = mkdtempSync(join(tmpdir(), "pi-gsd-resource-root-"));
+    mkdirSync(join(resourceRoot, "generated", "prompts"), { recursive: true });
+    mkdirSync(join(resourceRoot, "generated", "agents"), { recursive: true });
+    writeFileSync(join(resourceRoot, "generated", "prompts", "gsd-plan-phase.md"), "prompt body", "utf8");
+    writeFileSync(join(resourceRoot, "generated", "agents", "gsd-planner.md"), "agent body", "utf8");
+    const adapter = createDispatchAdapter({ cwd: projectCwd, resourceRoot, runner: () => ({ ok: true, messages: ["ran"] }) });
+
+    const result = adapter(unit("plan"), startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("plan")], cwd: projectCwd }));
+
+    expect(result.ok).toBe(true);
+    expect(existsSync(join(projectCwd, "generated"))).toBe(false);
+  });
+
   it("dispatch adapter sends typed Unit payloads with scoped GSD_AUDIT and no raw prompt text", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-dispatch-"));
     mkdirSync(join(cwd, "generated", "prompts"), { recursive: true });

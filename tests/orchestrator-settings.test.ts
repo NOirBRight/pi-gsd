@@ -51,6 +51,39 @@ describe("orchestrator settings", () => {
     expect(result.resumeHint).toContain("Cannot start at verify");
   });
 
+  it("reads explicit configPath files even when named settings.json", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-explicit-settings-"));
+    const settingsPath = join(root, "settings.json");
+    writeFileSync(settingsPath, JSON.stringify({ workflow: { verifier: false, code_review: false } }), "utf8");
+
+    const settings = resolveWorkflowSettings({ cwd: root, configPath: settingsPath });
+
+    expect(settings.workflow.verifier).toBe(false);
+    expect(settings.workflow.code_review).toBe(false);
+    expect(settings.sources).toMatchObject({ verifier: "config", code_review: "config" });
+  });
+
+  it("prefers .planning/config.json over root config.json when configPath is omitted", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-config-precedence-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(join(root, "config.json"), JSON.stringify({ workflow: { verifier: false } }), "utf8");
+    writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { verifier: true, code_review: false } }), "utf8");
+
+    const settings = resolveWorkflowSettings({ cwd: root });
+
+    expect(settings.workflow.verifier).toBe(true);
+    expect(settings.workflow.code_review).toBe(false);
+  });
+
+  it("falls back to root config.json when .planning/config.json is absent", () => {
+    const cwd = writeConfig({ verifier: false, plan_check: false });
+
+    const settings = resolveWorkflowSettings({ cwd });
+
+    expect(settings.workflow.verifier).toBe(false);
+    expect(settings.workflow.plan_check).toBe(false);
+  });
+
   it("normalizes workflow defaults and config overrides", () => {
     const cwd = writeConfig({
       research: false,

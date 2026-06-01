@@ -57,6 +57,21 @@ describe("piGsdExtension command registration", () => {
     expect(pi.on).toHaveBeenCalledWith("input", expect.any(Function));
   });
 
+  it("continues normal GSD slash prompts and handles only native auto/chain input", () => {
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: vi.fn(),
+    };
+    piGsdExtension(pi as never);
+    const inputHandler = pi.on.mock.calls.find(([name]) => name === "input")?.[1] as (event: unknown, ctx: { cwd: string; ui: { notify: (...args: unknown[]) => void } }) => unknown;
+    const ctx = { cwd: process.cwd(), ui: { notify: vi.fn() } };
+
+    expect(inputHandler({ text: "/gsd-execute-phase 09" }, ctx)).toEqual({ action: "continue" });
+    expect(inputHandler({ text: "/gsd-execute-phase 09 --auto" }, ctx)).toEqual({ action: "handled" });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("PI_GSD_DISPATCH_COMMAND"), "warning");
+  });
+
   it("registers the gsd-models command", () => {
     const commands: Record<string, unknown> = {};
     const pi = {
