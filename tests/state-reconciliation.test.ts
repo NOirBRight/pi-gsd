@@ -687,6 +687,72 @@ describe("state reconciliation apply repairs", () => {
       }),
     ]);
   });
+
+  it("applyRepairs writes ROADMAP STATE and journal metadata repair kinds", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-apply-metadata-kinds-"));
+    const planningDir = join(root, ".planning");
+    mkdirSync(planningDir, { recursive: true });
+    const roadmapPath = join(planningDir, "ROADMAP.md");
+    const statePath = join(planningDir, "STATE.md");
+    const journalPath = join(planningDir, "orchestration-state.json");
+    writeFileSync(
+      roadmapPath,
+      [
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 10. State Reconciliation Module | v2.0 | 0/1 | Not started | - |",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(statePath, "---\nstatus: stale\n---\n\n## Current Position\n\nPlan: 0 of 1\n", "utf8");
+    writeFileSync(journalPath, JSON.stringify({ version: 1, snapshot: { reconciliation: { status: "stale" } }, events: [] }, null, 2), "utf8");
+
+    const result = applyRepairs(root, [
+      {
+        kind: "roadmap",
+        reasonCode: "roadmap-divergence",
+        action: "update-roadmap-row",
+        description: "Update ROADMAP row.",
+        path: roadmapPath,
+        evidence: [{
+          reasonCode: "roadmap-divergence",
+          path: roadmapPath,
+          message: "ROADMAP metadata drift.",
+          metadata: { line: 3, canonicalSummaries: 1, canonicalPlans: 1 },
+        }],
+      },
+      {
+        kind: "state",
+        reasonCode: "roadmap-divergence",
+        action: "update-state-metadata",
+        description: "Update STATE metadata.",
+        path: statePath,
+        before: "status: stale",
+        after: "status: fresh",
+        evidence: [],
+      },
+      {
+        kind: "journal",
+        reasonCode: "stale-worker",
+        action: "update-journal-metadata",
+        description: "Update journal metadata.",
+        path: journalPath,
+        before: '"status": "stale"',
+        after: '"status": "fresh"',
+        evidence: [],
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.written).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "roadmap", path: roadmapPath }),
+      expect.objectContaining({ kind: "state", path: statePath }),
+      expect.objectContaining({ kind: "journal", path: journalPath }),
+    ]));
+    expect(readFileSync(roadmapPath, "utf8")).toContain("| 10. State Reconciliation Module | v2.0 | 1/1 | Complete | - |");
+    expect(readFileSync(statePath, "utf8")).toContain("status: fresh");
+    expect(readFileSync(journalPath, "utf8")).toContain('"status": "fresh"');
+  });
 });
 
 describe("state reconciliation partial-write reporting", () => {
