@@ -335,4 +335,132 @@ describe("state reconciliation drift catalog", () => {
       "unknown-drift",
     ]);
   });
+
+  it("roadmap divergence emits repair candidates only when canonical artifacts prove the metadata", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-roadmap-divergence-"));
+    const planningDir = join(root, ".planning");
+    const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan 1\n", "utf8");
+    writeFileSync(join(phaseDir, "10-02-PLAN.md"), "plan 2\n", "utf8");
+    writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "summary 1\n", "utf8");
+    writeFileSync(join(phaseDir, "10-02-SUMMARY.md"), "summary 2\n", "utf8");
+    writeFileSync(
+      join(planningDir, "ROADMAP.md"),
+      [
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 10. State Reconciliation Module | v2.0 | 0/4 | Not started | - |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const scan = scanPlanningArtifacts(root);
+    const roadmap = readRoadmapState(root);
+    const drift = classifyDrift({ snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals }, roadmap });
+
+    expect(drift.repairs).toEqual([
+      expect.objectContaining({
+        reasonCode: "roadmap-divergence",
+        action: "update-roadmap-row",
+        phase: "10",
+        description: expect.stringContaining("2/2"),
+      }),
+    ]);
+    expect(drift.blockers.filter((blocker) => blocker.reasonCode === "roadmap-divergence")).toEqual([]);
+  });
+
+  it("roadmap divergence blocks when canonical artifacts do not prove the metadata value", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-roadmap-divergence-block-"));
+    const planningDir = join(root, ".planning");
+    const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan 1\n", "utf8");
+    writeFileSync(join(phaseDir, "10-02-PLAN.md"), "plan 2\n", "utf8");
+    writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "summary 1\n", "utf8");
+    writeFileSync(
+      join(planningDir, "ROADMAP.md"),
+      [
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 10. State Reconciliation Module | v2.0 | 2/2 | Complete | 2026-06-01 |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const scan = scanPlanningArtifacts(root);
+    const roadmap = readRoadmapState(root);
+    const drift = classifyDrift({ snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals }, roadmap });
+
+    expect(drift.blockers).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        reasonCode: "roadmap-divergence",
+        phase: "10",
+        artifact: "roadmap",
+        message: expect.stringContaining("cannot be mechanically proven"),
+      }),
+    ]));
+  });
+
+  it("completion timestamp drift repairs only when canonical summaries prove the timestamp", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-completion-timestamp-"));
+    const planningDir = join(root, ".planning");
+    const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan\n", "utf8");
+    writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "---\ncompleted: 2026-06-01\n---\nsummary\n", "utf8");
+    writeFileSync(
+      join(planningDir, "ROADMAP.md"),
+      [
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 10. State Reconciliation Module | v2.0 | 1/1 | Complete | - |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const scan = scanPlanningArtifacts(root);
+    const roadmap = readRoadmapState(root);
+    const drift = classifyDrift({ snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals }, roadmap });
+
+    expect(drift.repairs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        reasonCode: "completion-timestamp-drift",
+        action: "update-roadmap-completed",
+        phase: "10",
+        description: expect.stringContaining("2026-06-01"),
+      }),
+    ]));
+  });
+
+  it("completion timestamp drift blocks when canonical summaries do not prove the timestamp", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-completion-timestamp-block-"));
+    const planningDir = join(root, ".planning");
+    const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan\n", "utf8");
+    writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "summary without completed frontmatter\n", "utf8");
+    writeFileSync(
+      join(planningDir, "ROADMAP.md"),
+      [
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 10. State Reconciliation Module | v2.0 | 1/1 | Complete | - |",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const scan = scanPlanningArtifacts(root);
+    const roadmap = readRoadmapState(root);
+    const drift = classifyDrift({ snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals }, roadmap });
+
+    expect(drift.blockers).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        reasonCode: "completion-timestamp-drift",
+        phase: "10",
+        artifact: "roadmap",
+        message: expect.stringContaining("canonical summaries do not prove"),
+      }),
+    ]));
+  });
 });
