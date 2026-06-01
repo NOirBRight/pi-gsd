@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ReconciliationBlocker } from "./types.js";
+import type { ReconciliationBlocker, ReconciliationRepair } from "./types.js";
 
 export type JournalState = {
   ok: boolean;
@@ -29,6 +29,19 @@ export function readJournalState(basePath: string): JournalState {
     const detail = error instanceof Error ? error.message : String(error);
     return blocked(path, `Failed to parse orchestration-state.json: ${detail}`);
   }
+}
+
+export function applyJournalMetadataRepair(content: string, repair: ReconciliationRepair): string {
+  if (repair.action !== "update-journal-metadata") return content;
+  if (!repair.before || !repair.after) throw new Error("Journal metadata repair requires before and after text.");
+  const parsed = JSON.parse(content) as unknown;
+  if (!isJournal(parsed)) throw new Error("Journal metadata repair target has an invalid journal shape.");
+  if (!content.includes(repair.before)) return content;
+
+  const next = content.replace(repair.before, repair.after);
+  const reparsed = JSON.parse(next) as unknown;
+  if (!isJournal(reparsed)) throw new Error("Journal metadata repair would create an invalid journal shape.");
+  return next;
 }
 
 function isJournal(value: unknown): value is NonNullable<JournalState["journal"]> {

@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { DriftDetection } from "./catalog.js";
+import { applyJournalMetadataRepair } from "./journal.js";
 import { applyRoadmapRepair } from "./roadmap.js";
+import { applyStateMetadataRepair } from "./state.js";
 import type { ReconciliationBlocker, ReconciliationFileSystem, ReconciliationRepair, ReconciliationWrite } from "./types.js";
 
 export type RepairApplicationResult = {
@@ -61,6 +63,8 @@ function applyRepairContent(content: string, repair: ReconciliationRepair): stri
   if (repair.action === "update-roadmap-row" || repair.action === "update-roadmap-completed") {
     return applyRoadmapRepair(content, repair);
   }
+  if (repair.action === "update-state-metadata") return applyStateMetadataRepair(content, repair);
+  if (repair.action === "update-journal-metadata") return applyJournalMetadataRepair(content, repair);
   return content;
 }
 

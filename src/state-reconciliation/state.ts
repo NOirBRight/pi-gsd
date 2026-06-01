@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ReconciliationBlocker } from "./types.js";
+import type { ReconciliationBlocker, ReconciliationRepair } from "./types.js";
 
 export interface StateFrontmatter {
   [key: string]: string | number | StateFrontmatter;
@@ -42,6 +42,14 @@ export function readStateDigest(basePath: string): StateDigest {
   };
 }
 
+export function applyStateMetadataRepair(content: string, repair: ReconciliationRepair): string {
+  if (repair.action !== "update-state-metadata") return content;
+  if (!repair.before || !repair.after) throw new Error("STATE metadata repair requires before and after text.");
+  assertStateMetadataOnly(repair.before);
+  assertStateMetadataOnly(repair.after);
+  return content.includes(repair.before) ? content.replace(repair.before, repair.after) : content;
+}
+
 function parseFrontmatter(content: string): StateFrontmatter {
   const match = /^---\r?\n(?<body>[\s\S]*?)\r?\n---/.exec(content);
   if (!match?.groups) return {};
@@ -72,6 +80,15 @@ function parseFrontmatter(content: string): StateFrontmatter {
   }
 
   return root;
+}
+
+function assertStateMetadataOnly(text: string): void {
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    if (/^(status|last_updated|last_activity|Phase|Plan|Progress):/.test(line.trim())) continue;
+    if (/^ {2}(total_phases|completed_phases|total_plans|completed_plans|percent):/.test(line)) continue;
+    throw new Error(`STATE metadata repair may not change non-metadata line: ${line}`);
+  }
 }
 
 function parseCurrentPosition(content: string): StateCurrentPosition {
