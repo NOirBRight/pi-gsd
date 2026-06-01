@@ -37,7 +37,7 @@ export function reconcileBeforeDispatch(basePath: string, options: Reconciliatio
   ];
   const repairs = planRepairs(detection);
   const application = options.apply && blockers.length === 0
-    ? applyRepairs(basePath, repairs)
+    ? applyRepairs(basePath, repairs, options.fileSystem)
     : { ok: true, blockers: [], written: [] };
 
   return {

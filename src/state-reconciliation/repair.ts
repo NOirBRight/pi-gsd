@@ -2,13 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { DriftDetection } from "./catalog.js";
 import { applyRoadmapRepair } from "./roadmap.js";
-import type { ReconciliationBlocker, ReconciliationRepair, ReconciliationWrite } from "./types.js";
-
-export type RepairFileSystem = {
-  exists(path: string): boolean;
-  readFile(path: string): string;
-  writeFile(path: string, content: string): void;
-};
+import type { ReconciliationBlocker, ReconciliationFileSystem, ReconciliationRepair, ReconciliationWrite } from "./types.js";
 
 export type RepairApplicationResult = {
   ok: boolean;
@@ -23,7 +17,7 @@ export function planRepairs(detection: Pick<DriftDetection, "repairs">): Reconci
 export function applyRepairs(
   basePath: string,
   repairs: ReconciliationRepair[],
-  fs: RepairFileSystem = defaultFileSystem,
+  fs: ReconciliationFileSystem = defaultFileSystem,
 ): RepairApplicationResult {
   const written: ReconciliationWrite[] = [];
   const blockers: ReconciliationBlocker[] = [];
@@ -42,7 +36,7 @@ export function applyRepairs(
       if (after === before) continue;
 
       fs.writeFile(path, after);
-      written.push({ reasonCode: repair.reasonCode, path, action: "update" });
+      written.push({ kind: repairKind(path), reasonCode: repair.reasonCode, path, action: "update" });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       blockers.push(partialWriteBlocker(`Failed to apply repair: ${detail}`, repair, written));
@@ -105,7 +99,14 @@ function partialWriteBlocker(message: string, repair: ReconciliationRepair, writ
   };
 }
 
-const defaultFileSystem: RepairFileSystem = {
+function repairKind(path: string): ReconciliationWrite["kind"] {
+  if (path.endsWith("ROADMAP.md")) return "roadmap";
+  if (path.endsWith("STATE.md")) return "state";
+  if (path.endsWith("orchestration-state.json")) return "journal";
+  return undefined;
+}
+
+const defaultFileSystem: ReconciliationFileSystem = {
   exists: existsSync,
   readFile: (path) => readFileSync(path, "utf8"),
   writeFile: (path, content) => writeFileSync(path, content, "utf8"),

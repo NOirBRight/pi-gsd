@@ -18,6 +18,13 @@ export type ReconciliationOptions = {
   apply?: boolean;
   phase?: string;
   now?: () => string;
+  fileSystem?: ReconciliationFileSystem;
+};
+
+export type ReconciliationFileSystem = {
+  exists(path: string): boolean;
+  readFile(path: string): string;
+  writeFile(path: string, content: string): void;
 };
 
 export type ReconciliationEvidence = {
@@ -32,16 +39,20 @@ export type ReconciliationEvidence = {
 };
 
 export type ReconciliationRepair = {
+  kind?: "roadmap" | "state" | "journal";
   reasonCode: ReconciliationReasonCode;
   action: string;
   description: string;
   path?: string;
+  before?: string;
+  after?: string;
   phase?: string;
   plan?: string;
   evidence: ReconciliationEvidence[];
 };
 
 export type ReconciliationWrite = {
+  kind?: "roadmap" | "state" | "journal";
   reasonCode: ReconciliationReasonCode;
   path: string;
   action: "create" | "update" | "delete";
