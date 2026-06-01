@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { classifyDrift, KNOWN_DRIFT_KINDS } from "../src/state-reconciliation/catalog.js";
 import { classifyArtifactName } from "../src/state-reconciliation/artifacts.js";
 import { reconcileBeforeDispatch } from "../src/state-reconciliation/index.js";
 import { readJournalState } from "../src/state-reconciliation/journal.js";
@@ -273,5 +274,65 @@ describe("state reconciliation derived metadata readers", () => {
       }),
     ]);
     expect(readFileSync(journalPath, "utf8")).toBe("{ definitely not json");
+  });
+});
+
+describe("state reconciliation drift catalog", () => {
+  it("summary-count blockers are emitted when canonical plans are missing summaries", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-summary-count-"));
+    const phaseDir = join(root, ".planning", "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan 1\n", "utf8");
+    writeFileSync(join(phaseDir, "10-02-PLAN.md"), "plan 2\n", "utf8");
+    writeFileSync(join(phaseDir, "10-01-SUMMARY.md"), "summary 1\n", "utf8");
+
+    const scan = scanPlanningArtifacts(root);
+    const drift = classifyDrift({ snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals } });
+
+    expect(drift.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "summary-count-mismatch",
+        phase: "10",
+        artifact: "summary",
+        message: expect.stringContaining("10-02-SUMMARY.md"),
+        evidence: [expect.objectContaining({ path: join(phaseDir, "10-02-PLAN.md") })],
+      }),
+    ]);
+    expect(drift.repairs).toEqual([]);
+  });
+
+  it("noncanonical plan-like files produce evidence and never count as plans", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-noncanonical-catalog-"));
+    const phaseDir = join(root, ".planning", "phases", "09-auto-orchestration-native-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "09-01-PLAN.md"), "plan\n", "utf8");
+    writeFileSync(join(phaseDir, "09-PLAN-CHECK.md"), "check\n", "utf8");
+
+    const scan = scanPlanningArtifacts(root);
+    const drift = classifyDrift({ snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals } });
+
+    expect(scan.totals.plans).toBe(1);
+    expect(drift.evidence).toEqual([
+      expect.objectContaining({
+        reasonCode: "noncanonical-plan-like-file",
+        path: join(phaseDir, "09-PLAN-CHECK.md"),
+      }),
+    ]);
+    expect(drift.blockers).toEqual([
+      expect.objectContaining({ reasonCode: "summary-count-mismatch" }),
+    ]);
+  });
+
+  it("KNOWN_DRIFT_KINDS includes the D-10 minimum catalog and fallback", () => {
+    expect(KNOWN_DRIFT_KINDS).toEqual([
+      "sketch-flag-drift",
+      "completion-timestamp-drift",
+      "roadmap-divergence",
+      "stale-worker",
+      "unregistered-milestone",
+      "summary-count-mismatch",
+      "noncanonical-plan-like-file",
+      "unknown-drift",
+    ]);
   });
 });
