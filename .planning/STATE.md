@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.0
-milestone_name: runtime-refactor
-status: Executing
-last_updated: "2026-05-31T16:25:00.000Z"
-last_activity: 2026-06-01 -- Phase 09 native auto orchestration completed with plan-check gap closure, code review, and verification green
+milestone_name: Runtime Refactor
+status: Ready to plan
+last_updated: "2026-06-01T15:05:04.452Z"
+last_activity: 2026-06-01 -- Phase 10 state reconciliation completed; verification passed; Phase 11 ready to plan
 progress:
   total_phases: 7
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 43
+  completed_phases: 4
+  total_plans: 12
+  completed_plans: 12
+  percent: 57
 ---
 
 # Project State
@@ -20,16 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-31 after Phase 08 migration)
 
 **Core value:** Pi adapter for Get Shit Done (GSD) — transparent upstream compatibility on content axis; native Pi orchestration on runtime axis (v2.0 direction)
-**Current focus:** v2.0 Runtime Refactor — Phase 10 planning next (State Reconciliation)
+**Current focus:** Phase 11 — Worktree Safety + Recovery Classification
 
 ## Current Position
 
 Milestone: v2.0 Runtime Refactor (executing)
-Phase: 9 — Auto Orchestration Native Module (**completed**)
-Plan: 09-01, 09-02, 09-03 completed; retroactive plan-check gaps closed
-Last activity: 2026-06-01 -- Phase 09 native orchestrator implemented; plan-check blockers closed; code review/verification passed; `npm run check` green with 315 tests passing
+Phase: 11 — Worktree Safety + Recovery Classification (ready to plan)
+Plan: Not started
+Last activity: 2026-06-01 -- Phase 10 state reconciliation completed; verification passed; Phase 11 ready to plan
 
-Progress: [█████████░░░░░░░░░░░] 43% (3/7 phases completed, 8/8 completed plans so far) — Phase 10 is next
+Progress: [███████████░░░░░░░░░] 57% (4/7 phases completed, 12/12 completed plans so far) — Phase 11 is next
 
 ## Accumulated Context
 

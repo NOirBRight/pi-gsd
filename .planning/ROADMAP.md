@@ -1,4 +1,4 @@
-# pi-gsd-redux Roadmap
+# pi-gsd-core Roadmap
 
 ## Milestones
 
@@ -45,7 +45,7 @@ Full details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md) · Phase 
 
 Plans:
 
-- [ ] 07-01-PLAN.md — Three spike artifacts: pi-argv.md (verified $ARGUMENTS contract), gsd-pi-module-map.md (5-module mapping with mirror decisions), upstream-1.2.0-impact.md (API surface catalog for Phase 8 migration)
+- [x] 07-01-PLAN.md — Three spike artifacts: pi-argv.md (verified $ARGUMENTS contract), gsd-pi-module-map.md (5-module mapping with mirror decisions), upstream-1.2.0-impact.md (API surface catalog for Phase 8 migration)
 
 #### Phase 8: Upstream 1.2.0 Upgrade + Package Rename
 
@@ -65,10 +65,10 @@ Plans:
 
 Plans:
 
-- [ ] 08-01-PLAN.md — Rename project `pi-gsd-redux` → `pi-gsd-core` across package.json, README, CLAUDE.md, CLI usage, CI workflow
-- [ ] 08-02-PLAN.md — Migrate upstream dependency `@opengsd/get-shit-done-redux@1.1.0` → `@opengsd/gsd-core@1.2.0`, update all fixtures, comments, and constants
-- [ ] 08-03-PLAN.md — Retire `$GSD_SDK` Pi-tool bridge: delete `src/gsd-query-tool.ts`, remove `transformGsdSdkCommands` + tests, update CLAUDE.md
-- [ ] 08-04-PLAN.md — Add `transformGsdRunLauncher` pure transform for Pi runtime, regenerate 1.2.0 artifacts, add doctor `GSD_AUDIT=1` tip and release notes
+- [x] 08-01-PLAN.md — Rename project `pi-gsd-redux` → `pi-gsd-core` across package.json, README, CLAUDE.md, CLI usage, CI workflow
+- [x] 08-02-PLAN.md — Migrate upstream dependency `@opengsd/get-shit-done-redux@1.1.0` → `@opengsd/gsd-core@1.2.0`, update all fixtures, comments, and constants
+- [x] 08-03-PLAN.md — Retire `$GSD_SDK` Pi-tool bridge: delete `src/gsd-query-tool.ts`, remove `transformGsdSdkCommands` + tests, update CLAUDE.md
+- [x] 08-04-PLAN.md — Add `transformGsdRunLauncher` pure transform for Pi runtime, regenerate 1.2.0 artifacts, add doctor `GSD_AUDIT=1` tip and release notes
 
 #### Phase 9: Auto Orchestration Native Module
 
@@ -100,7 +100,23 @@ Plans:
 - `ReconciliationFailedError` flows to Recovery Classification (Phase 11)
 - Auto Orchestration (Phase 9) calls `reconcileBeforeDispatch` before every dispatch — no more direct `gsd_query` from orchestration code
 
-**Plans:** 2
+**Plans:** 4/4 plans complete
+Plans:
+**Wave 1**
+
+- [x] 10-01-PLAN.md — Contracts, canonical artifact scanner, noncanonical evidence, and initial dry-run API
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 10-02-PLAN.md — Drift catalog, ROADMAP/STATE/journal parsers, detector fixtures, and unknown-drift fallback
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 10-03-PLAN.md — Repair engine, explicit apply mode, idempotence, and partial-write safety
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 10-04-PLAN.md — Orchestrator adapter integration, ReconciliationFailedError handoff, e2e gate coverage, and final verification
 
 #### Phase 11: Worktree Safety + Recovery Classification
 
@@ -166,7 +182,7 @@ Plans:
 | 7. Pi Runtime Spike + Module Mapping | v2.0 | 1/1 | Complete | 2026-05-31 |
 | 8. Upstream 1.2.0 Upgrade + Package Rename | v2.0 | 4/4 | Complete | 2026-06-01 |
 | 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |
-| 10. State Reconciliation Module | v2.0 | 0/2 | Not started | — |
+| 10. State Reconciliation Module | v2.0 | 4/4 | Complete    | 2026-06-01 |
 | 11. Worktree Safety + Recovery Classification | v2.0 | 0/2 | Not started | — |
 | 12. Tool Contract + Settings Bridge | v2.0 | 0/2 | Not started | — |
 | 13. SDK Retirement + v2.0 Release | v2.0 | 0/2 | Not started | — |
