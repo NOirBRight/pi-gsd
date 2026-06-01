@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createOfficialFixture } from "./fixtures.js";
 import { runCli } from "../src/cli.js";
@@ -249,6 +249,7 @@ describe("runCli", () => {
   it("runs orchestrate --chain through the full native queue and persists status", async () => {
     const fixture = createOfficialFixture();
     writeOrchestratorFixture(fixture.root);
+    rmSync(join(fixture.root, "generated"), { recursive: true, force: true });
     const dispatchScript = writeDispatchScript(fixture.root);
     const oldDispatchCommand = process.env.PI_GSD_DISPATCH_COMMAND;
     process.env.PI_GSD_DISPATCH_COMMAND = `"${process.execPath}" "${dispatchScript}"`;
@@ -367,6 +368,8 @@ function writeAgent(packageRoot: string) {
 function writeOrchestratorFixture(root: string) {
   mkdirSync(join(root, ".planning", "phases", "09-fixture"), { recursive: true });
   writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: true, ui_phase: false, ui_review: false } }), "utf8");
+  writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |\n", "utf8");
+  writeFileSync(join(root, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
 
   const promptsDir = join(root, "generated", "prompts");
   const agentsDir = join(root, "generated", "agents");
@@ -388,9 +391,12 @@ const path = require('node:path');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const phaseDir = path.join(process.cwd(), '.planning', 'phases', '09-fixture');
 fs.mkdirSync(phaseDir, { recursive: true });
-if (input.unit.type === 'plan') fs.writeFileSync(path.join(phaseDir, '09-PLAN.md'), 'plan\\n');
-if (input.unit.type === 'execute') fs.writeFileSync(path.join(phaseDir, '09-SUMMARY.md'), 'summary\\n');
-if (input.unit.type === 'verify') fs.writeFileSync(path.join(phaseDir, '09-VERIFICATION.md'), 'verification\\n');
+const written = [];
+if (input.unit.type === 'plan') { const file = path.join(phaseDir, '09-PLAN.md'); fs.writeFileSync(file, 'plan\\n'); written.push(file); }
+if (input.unit.type === 'execute') { const file = path.join(phaseDir, '09-SUMMARY.md'); fs.writeFileSync(file, 'summary\\n'); written.push(file); }
+if (input.unit.type === 'verify') { const file = path.join(phaseDir, '09-VERIFICATION.md'); fs.writeFileSync(file, 'verification\\n'); written.push(file); }
+if (input.unit.type === 'closeout') { written.push(path.join(process.cwd(), '.planning', 'ROADMAP.md'), path.join(process.cwd(), '.planning', 'STATE.md')); }
+console.log(JSON.stringify({ written }));
 `, "utf8");
   return script;
 }

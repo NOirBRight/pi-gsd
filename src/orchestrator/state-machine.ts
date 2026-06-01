@@ -48,6 +48,7 @@ export function advanceOrchestration(snapshot: OrchestrationSnapshot, options: A
   }
 
   const unit = snapshot.currentUnit;
+  const unitStarted = eventOf(snapshot, unit, "unit_started", "running", options.now);
   const preGate = runPreDispatchGates(snapshot, unit, options.gates);
   if (!preGate.ok) return handleGateFailure(snapshot, unit, preGate, options.now);
 
@@ -55,10 +56,10 @@ export function advanceOrchestration(snapshot: OrchestrationSnapshot, options: A
   const dispatchResult = dispatch(unit, snapshot);
   if (!dispatchResult.ok) {
     const paused = pause(snapshot, unit, "dispatch-failed", dispatchResult.messages[0] ?? "Dispatch failed; inspect adapter output.", options.now, dispatchResult.messages);
-    return { ok: false, messages: dispatchResult.messages, snapshot: paused, status: getSnapshotStatus(paused), dispatched: unit };
+    return { ok: false, messages: dispatchResult.messages, snapshot: paused, status: getSnapshotStatus(paused), dispatched: unit, events: [unitStarted, paused.lastEvent].filter((event): event is OrchestrationEvent => Boolean(event)) };
   }
 
-  const postGate = options.postDispatchGate ? options.postDispatchGate(snapshot, unit) : runPostDispatchGate(snapshot, unit, { cwd: snapshot.cwd });
+  const postGate = options.postDispatchGate ? options.postDispatchGate(snapshot, unit) : runPostDispatchGate(snapshot, unit, { cwd: snapshot.cwd, written: dispatchResult.written });
   if (!postGate.ok) return handleGateFailure(snapshot, unit, postGate, options.now);
 
   const [nextUnit, ...remainingUnits] = snapshot.remainingUnits;
@@ -80,17 +81,18 @@ export function advanceOrchestration(snapshot: OrchestrationSnapshot, options: A
     evidence: [...evidenceOf(preGate), ...evidenceOf(postGate)],
   });
 
-  const gatePassed: OrchestrationEvent = {
-    type: "gate_passed",
+  const gatePassed = [...evidenceOf(preGate), ...evidenceOf(postGate)].map((evidence) => ({
+    type: "gate_passed" as const,
     ts: timestamp(options.now),
     phase: snapshot.phase,
     unitId: unit.id,
-    status: "completed",
+    status: "completed" as const,
     attempt: snapshot.attempt,
-    evidence: [...evidenceOf(preGate), ...evidenceOf(postGate)],
-  };
+    evidence: [evidence],
+  }));
+  const completed = status === "completed" ? eventOf({ ...advanced, currentUnit: unit }, unit, "orchestration_completed", "completed", options.now) : undefined;
 
-  return { ok: true, messages: dispatchResult.messages, snapshot: advanced, status: getSnapshotStatus(advanced), dispatched: unit, events: [gatePassed, advanced.lastEvent].filter((event): event is OrchestrationEvent => Boolean(event)) };
+  return { ok: true, messages: dispatchResult.messages, snapshot: completed ? withEvent(advanced, completed) : advanced, status: getSnapshotStatus(completed ? withEvent(advanced, completed) : advanced), dispatched: unit, events: [unitStarted, ...gatePassed, advanced.lastEvent, completed].filter((event): event is OrchestrationEvent => Boolean(event)) };
 }
 
 export function resumeOrchestration(snapshot: OrchestrationSnapshot, now?: () => string): OrchestratorResult {
@@ -184,6 +186,10 @@ function pause(snapshot: OrchestrationSnapshot, unit: OrchestrationUnit, reason:
     resumeHint,
     evidence,
   });
+}
+
+function eventOf(snapshot: OrchestrationSnapshot, unit: OrchestrationUnit, type: OrchestrationEvent["type"], status: OrchestrationEvent["status"], now?: () => string): OrchestrationEvent {
+  return { type, ts: timestamp(now), phase: snapshot.phase, unitId: unit.id, status, attempt: snapshot.attempt };
 }
 
 function withEvent(snapshot: OrchestrationSnapshot, event: OrchestrationEvent): OrchestrationSnapshot {

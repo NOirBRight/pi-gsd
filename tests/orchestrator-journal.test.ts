@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendJournalEvent, createJournalAdapter, readJournal, redactJournalEvent, writeJournalSnapshot } from "../src/orchestrator/journal.js";
@@ -157,6 +157,18 @@ describe("orchestrator journal", () => {
     expect(result.ok).toBe(false);
     expect(result.messages.join("\n")).toContain("outside .planning");
     expect(existsSync(join(cwd, "outside.json"))).toBe(false);
+  });
+
+  it("fails closed instead of overwriting corrupt journals", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-journal-"));
+    const journalPath = join(cwd, ".planning", "orchestration-state.json");
+    mkdirSync(join(cwd, ".planning"), { recursive: true });
+    writeFileSync(journalPath, "{ corrupt", "utf8");
+
+    const result = appendJournalEvent({ cwd, snapshot: snapshot(), event: { type: "pause", ts: "2026-06-01T00:00:00.000Z", phase: "09", status: "paused", attempt: 1 } });
+
+    expect(result.ok).toBe(false);
+    expect(readFileSync(journalPath, "utf8")).toBe("{ corrupt");
   });
 
   it("redactJournalEvent removes unsafe fields", () => {

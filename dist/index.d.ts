@@ -230,7 +230,7 @@ declare function runDoctor(options: DoctorOptions): DoctorResult;
 declare function rewriteOfficialClaudePaths(input: string, officialRoot: string): string;
 declare function rewriteRuntimeMessageText(input: string, officialRoot: string): string;
 
-type UnitType = "discuss" | "research" | "plan" | "plan-check" | "execute" | "code-review" | "verify" | "ui-review" | "closeout" | "settings-gate" | "pause-for-user";
+type UnitType = "discuss" | "research" | "plan" | "plan-check" | "execute" | "code-review" | "verify" | "ui-review" | "security-review" | "nyquist-validation" | "ai-integration" | "ui-safety-gate" | "closeout" | "settings-gate" | "pause-for-user";
 type UnitStatus = "pending" | "running" | "completed" | "failed" | "paused" | "stopped";
 type WorkflowSettingSource = "default" | "config" | "override";
 type OrchestrationMode = "auto" | "chain";
@@ -256,10 +256,18 @@ type ResolvedWorkflowSettings = {
         ui_phase: boolean;
         ui_review: boolean;
         code_review: boolean;
+        security_enforcement?: boolean;
+        nyquist_validation?: boolean;
+        ai_integration_phase?: boolean;
+        ui_safety_gate?: boolean;
+        auto_prune_state?: boolean;
+        research_before_questions?: boolean;
         skip_discuss: boolean;
         worktrees: boolean;
         node_repair: boolean;
         node_repair_budget: number;
+        subagent_timeout?: number;
+        inline_plan_threshold?: number;
     };
     sources?: Partial<Record<keyof ResolvedWorkflowSettings["workflow"], WorkflowSettingSource>>;
 };
@@ -268,10 +276,14 @@ type QueueBuildInput = {
     phase: string;
     cwd?: string;
     configPath?: string;
+    startAt?: UnitType;
     settings?: ResolvedWorkflowSettings;
     phaseSignals?: {
         isUiPhase?: boolean;
         requiresUiReview?: boolean;
+        requiresSecurityReview?: boolean;
+        requiresNyquistValidation?: boolean;
+        isAiPhase?: boolean;
     };
 };
 type QueueBuildResult = {
@@ -311,7 +323,7 @@ type StateDigestAdapter = {
     write: (snapshot: OrchestrationSnapshot) => OrchestratorResult;
 };
 type OrchestrationEvent = {
-    type: "orchestration_started" | "settings_resolved" | "unit_started" | "unit_ended" | "gate_passed" | "gate_failed" | "retry_scheduled" | "pause" | "resume" | "stop" | "start" | "unit-start" | "unit-end" | "gate-pass" | "gate-fail" | "retry";
+    type: "orchestration_started" | "settings_resolved" | "unit_started" | "unit_ended" | "gate_passed" | "gate_failed" | "retry_scheduled" | "pause" | "resume" | "stop" | "orchestration_completed" | "start" | "unit-start" | "unit-end" | "gate-pass" | "gate-fail" | "retry";
     ts: string;
     phase: string;
     unitId?: string;
@@ -340,6 +352,7 @@ type OrchestratorSessionContext = {
     mode: OrchestrationMode;
     cwd?: string;
     configPath?: string;
+    startAt?: UnitType;
 };
 type OrchestratorResult = {
     ok: boolean;
@@ -372,6 +385,7 @@ type AdvanceOptions = {
 type AutoOrchestratorDependencies = {
     settingsResolver?: (context: OrchestratorSessionContext) => ResolvedWorkflowSettings;
     queueBuilder?: (input: QueueBuildInput) => QueueBuildResult;
+    phaseSignalResolver?: (context: OrchestratorSessionContext) => QueueBuildInput["phaseSignals"];
     dispatch?: DispatchAdapter;
     journal?: JournalAdapter;
     stateDigest?: StateDigestAdapter;

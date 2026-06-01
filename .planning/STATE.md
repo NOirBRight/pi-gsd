@@ -4,13 +4,13 @@ milestone: v2.0
 milestone_name: runtime-refactor
 status: Executing
 last_updated: "2026-05-31T16:25:00.000Z"
-last_activity: 2026-05-31 -- Phase 08 execution, review, and review-fix integration complete; npm run check green
+last_activity: 2026-06-01 -- Phase 09 native auto orchestration completed with plan-check gap closure, code review, and verification green
 progress:
   total_phases: 7
-  completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
-  percent: 29
+  completed_phases: 3
+  total_plans: 8
+  completed_plans: 8
+  percent: 43
 ---
 
 # Project State
@@ -20,16 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-31 after Phase 08 migration)
 
 **Core value:** Pi adapter for Get Shit Done (GSD) — transparent upstream compatibility on content axis; native Pi orchestration on runtime axis (v2.0 direction)
-**Current focus:** v2.0 Runtime Refactor — Phase 09 planning next (Auto Orchestration)
+**Current focus:** v2.0 Runtime Refactor — Phase 10 planning next (State Reconciliation)
 
 ## Current Position
 
 Milestone: v2.0 Runtime Refactor (executing)
-Phase: 8 — Upstream 1.2.0 Upgrade + Package Rename (**completed**)
-Plan: 08-01, 08-02, 08-03, 08-04 completed
-Last activity: 2026-05-31 -- Phase 08 execution complete; code review found 4 issues; fixes integrated; `npm run check` green with 319 tests passing
+Phase: 9 — Auto Orchestration Native Module (**completed**)
+Plan: 09-01, 09-02, 09-03 completed; retroactive plan-check gaps closed
+Last activity: 2026-06-01 -- Phase 09 native orchestrator implemented; plan-check blockers closed; code review/verification passed; `npm run check` green with 315 tests passing
 
-Progress: [██████░░░░░░░░░░░░░░] 29% (2/7 phases completed, 5/5 completed plans so far) — Phase 9 is next
+Progress: [█████████░░░░░░░░░░░] 43% (3/7 phases completed, 8/8 completed plans so far) — Phase 10 is next
 
 ## Accumulated Context
 
@@ -64,8 +64,8 @@ Progress: [██████░░░░░░░░░░░░░░] 29% (2/
 
 ### Carried Tech Debt from v1.0
 
-- `AUTO_MODE_CHECKLIST` prompt injection (`src/prompt-transform.ts`) is a workaround for missing native auto orchestration — Phase 9 native module will retire this.
-- `--chain`/`--auto` argv passing from Pi slash command to workflow prompt was diagnosed in Phase 7; Phase 9 must use that evidence to implement runtime ownership.
+- `AUTO_MODE_CHECKLIST` prompt injection (`src/prompt-transform.ts`) was retired in Phase 9; native orchestration now owns `--auto`/`--chain` control flow.
+- `--chain`/`--auto` argv passing from Pi slash command to workflow prompt was diagnosed in Phase 7 and closed in Phase 9 by registering native Pi command handoff seams.
 - Remaining `gsd-tools.cjs` usage is a Phase 8 stopgap launcher for workflow compatibility, not the v2.0 target architecture.
 
 ### Resolved at Phase 8 Close
@@ -82,11 +82,11 @@ Progress: [██████░░░░░░░░░░░░░░] 29% (2/
 
 ## Next Steps
 
-1. **Plan Phase 9: Auto Orchestration Native Module**
-   - Own `--auto` and `--chain` execution loop in TypeScript
-   - Remove `AUTO_MODE_CHECKLIST` prompt injection
-   - Add lifecycle journaling and orchestration-scoped observability
-2. Keep Phase 8 artifacts as closeout evidence:
+1. **Plan Phase 10: State Reconciliation**
+   - Build on Phase 09 `reconcileBeforeDispatch` seam
+   - Detect `.planning/` drift before every native dispatch
+   - Persist actionable repair/resume hints in orchestration journal
+2. Keep Phase 8/9 artifacts as closeout evidence:
    - `.planning/phases/08-upstream-1-2-0-upgrade-package-rename/08-REVIEW.md`
    - `.planning/phases/08-upstream-1-2-0-upgrade-package-rename/08-REVIEW-FIX.md`
 3. Before release, run ship/preflight and ensure generated artifacts remain synced after any final version bump.

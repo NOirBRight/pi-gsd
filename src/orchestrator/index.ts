@@ -1,10 +1,11 @@
-import { buildUnitQueue, resolveWorkflowSettings } from "./settings.js";
+import { buildUnitQueue, inferPhaseSignals, resolveWorkflowSettings } from "./settings.js";
 import { advanceOrchestration, getSnapshotStatus, resumeOrchestration, startOrchestration, stopOrchestration, type AdvanceOptions } from "./state-machine.js";
 import type { AutoOrchestrator, DispatchAdapter, OrchestrationEvent, OrchestrationSnapshot, OrchestratorResult, OrchestratorSessionContext, OrchestratorStatus, QueueBuildInput, QueueBuildResult, ResolvedWorkflowSettings, StateDigestAdapter, JournalAdapter } from "./types.js";
 
 export type AutoOrchestratorDependencies = {
   settingsResolver?: (context: OrchestratorSessionContext) => ResolvedWorkflowSettings;
   queueBuilder?: (input: QueueBuildInput) => QueueBuildResult;
+  phaseSignalResolver?: (context: OrchestratorSessionContext) => QueueBuildInput["phaseSignals"];
   dispatch?: DispatchAdapter;
   journal?: JournalAdapter;
   stateDigest?: StateDigestAdapter;
@@ -18,18 +19,22 @@ export function createAutoOrchestrator(deps: AutoOrchestratorDependencies = {}):
   return {
     start(sessionContext) {
       const settings = (deps.settingsResolver ?? defaultSettingsResolver)(sessionContext);
+      const phaseSignals = (deps.phaseSignalResolver ?? defaultPhaseSignalResolver)(sessionContext);
       const queue = (deps.queueBuilder ?? buildUnitQueue)({
         mode: sessionContext.mode,
         phase: sessionContext.phase,
         cwd: sessionContext.cwd,
         configPath: sessionContext.configPath,
+        startAt: sessionContext.startAt,
         settings,
+        phaseSignals,
       });
 
       if (queue.decision === "pause_for_user") {
         snapshot = startOrchestration({ phase: sessionContext.phase, mode: sessionContext.mode, settings: queue.settings, units: queue.units, now: deps.clock, cwd: sessionContext.cwd });
+        const started = snapshot.lastEvent;
         snapshot = withLastEvent({ ...snapshot, status: "paused", resumeHint: queue.resumeHint }, settingsResolvedEvent(snapshot, deps.clock));
-        return record({ ok: false, messages: [queue.resumeHint ?? "orchestration paused for user"], snapshot, status: getSnapshotStatus(snapshot), events: [snapshotEvent(snapshot, "orchestration_started"), snapshot.lastEvent].filter((event): event is OrchestrationEvent => Boolean(event)) }, snapshot, deps);
+        return record({ ok: false, messages: [queue.resumeHint ?? "orchestration paused for user"], snapshot, status: getSnapshotStatus(snapshot), events: [started, snapshot.lastEvent].filter((event): event is OrchestrationEvent => Boolean(event)) }, snapshot, deps);
       }
 
       snapshot = startOrchestration({ phase: sessionContext.phase, mode: sessionContext.mode, settings: queue.settings, units: queue.units, now: deps.clock, cwd: sessionContext.cwd });
@@ -99,21 +104,30 @@ function defaultSettingsResolver(context: OrchestratorSessionContext) {
   return resolveWorkflowSettings({ cwd: context.cwd, configPath: context.configPath });
 }
 
+function defaultPhaseSignalResolver(context: OrchestratorSessionContext) {
+  return inferPhaseSignals({ cwd: context.cwd, phase: context.phase });
+}
+
 function record<T extends OrchestratorResult>(result: T, snapshot: OrchestrationSnapshot | undefined, deps: AutoOrchestratorDependencies): T {
   if (!snapshot) return result;
   const written: string[] = [...(result.written ?? [])];
   const events = result.events ?? (snapshot.lastEvent ? [snapshot.lastEvent] : []);
+  const messages = [...result.messages];
+  let ok = result.ok;
   if (deps.journal) {
     for (const event of events) {
       const journalResult = deps.journal.append(event, snapshot);
+      messages.push(...journalResult.messages);
+      if (!journalResult.ok) ok = false;
       if (journalResult.written) written.push(...journalResult.written);
     }
   }
   if (deps.stateDigest) {
     const digestResult = deps.stateDigest.write(snapshot);
+    messages.push(...digestResult.messages);
     if (digestResult.written) written.push(...digestResult.written);
   }
-  return written.length > 0 ? { ...result, written } : result;
+  return { ...result, ok, messages, ...(written.length > 0 ? { written } : {}) };
 }
 
 function emptyStatus(): OrchestratorStatus {

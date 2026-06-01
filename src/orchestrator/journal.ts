@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, isAbsolute, join, resolve, relative } from "node:path";
 import type { JournalAdapter, OrchestrationEvent, OrchestrationSnapshot, OrchestratorResult } from "./types.js";
 
 export const DEFAULT_JOURNAL_PATH = ".planning/orchestration-state.json";
@@ -86,7 +86,8 @@ export function writeJournalSnapshot(options: JournalSnapshotOptions): JournalWr
   if (!resolved.ok) return { ok: false, messages: resolved.messages, written: [] };
 
   const existing = readJournal(options);
-  const events = existing.ok && existing.journal ? existing.journal.events : [];
+  if (!existing.ok) return { ok: false, messages: existing.messages, written: [] };
+  const events = existing.journal ? existing.journal.events : [];
   return writeJournal(resolved.path, { version: 1, snapshot: redactSnapshot(options.snapshot), events });
 }
 
@@ -95,7 +96,8 @@ export function appendJournalEvent(options: JournalEventOptions): JournalWriteRe
   if (!resolved.ok) return { ok: false, messages: resolved.messages, written: [] };
 
   const existing = readJournal(options);
-  const events = existing.ok && existing.journal ? existing.journal.events : [];
+  if (!existing.ok) return { ok: false, messages: existing.messages, written: [] };
+  const events = existing.journal ? existing.journal.events : [];
   const journal: OrchestrationJournal = {
     version: 1,
     snapshot: redactSnapshot(options.snapshot),
@@ -175,7 +177,7 @@ function resolveJournalPath(options: JournalOptions): { ok: true; path: string }
 
 function isInsideOrSame(parent: string, child: string): boolean {
   const rel = relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !resolve(rel).startsWith(".."));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function normalizeJournal(value: unknown): OrchestrationJournal | undefined {

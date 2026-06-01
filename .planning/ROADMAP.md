@@ -163,9 +163,9 @@ Plans:
 | 4. Workflow Fidelity | v1.0 | 2/2 | Complete | 2026-05-30 |
 | 5. Polish & Ship | v1.0 | 3/3 | Complete | 2026-05-30 |
 | 6. Workflow Runtime Fidelity | v1.0 | 3/3 | Complete | 2026-05-30 |
-| 7. Pi Runtime Spike + Module Mapping | v2.0 | 0/1 | Planned | — |
-| 8. Upstream 1.2.0 Upgrade + Package Rename | v2.0 | 0/4 | Not started | — |
-| 9. Auto Orchestration Module | v2.0 | 3/3 | Complete   | 2026-06-01 |
+| 7. Pi Runtime Spike + Module Mapping | v2.0 | 1/1 | Complete | 2026-05-31 |
+| 8. Upstream 1.2.0 Upgrade + Package Rename | v2.0 | 4/4 | Complete | 2026-06-01 |
+| 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |
 | 10. State Reconciliation Module | v2.0 | 0/2 | Not started | — |
 | 11. Worktree Safety + Recovery Classification | v2.0 | 0/2 | Not started | — |
 | 12. Tool Contract + Settings Bridge | v2.0 | 0/2 | Not started | — |

@@ -349,27 +349,23 @@ node "$(node -e "console.log(require.resolve('@opengsd/gsd-core/get-shit-done/bi
 | A2 | Warning sign examples such as checking `process.env.ARGUMENTS` are likely failure modes. | Common Pitfalls | Low; affects diagnostic guidance only. |
 | A3 | Event schemas containing raw prompt/user/env fields would violate redaction goals. | Common Pitfalls | Medium; planner should explicitly validate log schemas against D-17. |
 
-## Open Questions
+## Open Questions (RESOLVED in Phase 09 closeout)
 
-1. **Where is the native trigger wired?**
+1. **Where is the native trigger wired?** — RESOLVED
    - What we know: Pi currently substitutes slash-command args into prompt content, and existing CLI exposes `official` passthrough but no orchestrator command. [CITED: 07 spike pi-argv.md] [CITED: src/cli.ts]
-   - What's unclear: Whether Phase 9 should expose a CLI command, a Pi extension hook integration, or both for first delivery. [ASSUMED]
-   - Recommendation: Plan one stable service API first, then a minimal CLI/extension invocation surface needed for the integration test.
+   - Resolution: Phase 09 exposes both `pi-gsd-core orchestrate` and Pi extension command handlers for `gsd-plan-phase`, `gsd-execute-phase`, `gsd-verify-work`, and `gsd-ship` when args include `--auto` / `--chain`. [VERIFIED: src/cli.ts] [VERIFIED: src/extension.ts] [VERIFIED: tests/extension.test.ts]
 
-2. **Exact settings precedence rule.**
+2. **Exact settings precedence rule.** — RESOLVED
    - What we know: Context leaves precedence between explicit flags, persistent config, roadmap phase indicators, and user confirmation not fully locked. [CITED: 09-CONTEXT.md]
-   - What's unclear: Final rule for conflicts such as `--chain` with disabled verifier or frontend indicators with `workflow.ui_phase=false`. [CITED: 09-CONTEXT.md]
-   - Recommendation: Planner should propose: explicit invocation flag starts orchestration; persistent `workflow.*` toggles decide Unit inclusion; phase indicators enable conditional candidates only when setting allows; ambiguity pauses with question.
+   - Resolution: explicit invocation starts orchestration; normalized `workflow.*` settings decide Unit inclusion; inferred phase signals enable conditional candidates only when settings allow; conflicts pause with a resume hint. [VERIFIED: src/orchestrator/settings.ts] [VERIFIED: src/orchestrator/index.ts] [VERIFIED: tests/orchestrator-settings.test.ts]
 
-3. **STATE.md write-through handler for resume pointer.**
+3. **STATE.md write-through handler for resume pointer.** — RESOLVED
    - What we know: `state json` and `state get` work locally; generated docs describe `state update/patch`, but exact field/section update semantics for a custom resume pointer need verification before implementation. [VERIFIED: gsd-tools query state json/state get] [CITED: 07 spike upstream-1.2.0-impact.md]
-   - What's unclear: Best handler invocation to add/update a short digest without direct Markdown edits. [ASSUMED]
-   - Recommendation: Add Wave 0 spike/test around `gsd-tools query state patch/update/get` on a temp fixture before implementing STATE digest updates.
+   - Resolution: Phase 09 writes the replayable sibling journal as canonical resume state and uses the official state handler for a bounded digest pointer when available; direct Markdown editing remains outside the runtime path. [VERIFIED: src/orchestrator/journal.ts] [VERIFIED: src/orchestrator/state-digest.ts]
 
-4. **Pi subagent callable surface inside package code.**
+4. **Pi subagent callable surface inside package code.** — RESOLVED WITH ADAPTER SEAM
    - What we know: `src/pi-subagents.ts` currently resolves package metadata only; generated prompts instruct LLM use of Pi `subagent` tool. [CITED: src/pi-subagents.ts] [CITED: generated/workflows/workflows/autonomous.md]
-   - What's unclear: Exact programmatic API for dispatching subagents from native TypeScript in this runtime. [ASSUMED]
-   - Recommendation: Planner should include an early dispatch-adapter spike/test and keep dispatch behind an interface so service logic is not blocked.
+   - Resolution: no stable programmatic Pi subagent API is assumed inside package code. Dispatch remains behind `DispatchAdapter`; the Pi extension wires the native loop and fails closed with an actionable pause if a runner is unavailable, while tests inject runners that produce artifacts. [VERIFIED: src/orchestrator/dispatch.ts] [VERIFIED: src/extension.ts]
 
 ## Environment Availability
 

@@ -1,40 +1,40 @@
 import {
   OFFICIAL_ROOT_PLACEHOLDER,
   PI_SUBAGENTS_PACKAGE_NAME,
-  advance,
   checkPiSubagentsTempAcl,
-  createAutoOrchestrator,
   generateAgents,
   generateAll,
   generatePrompts,
   generateWorkflows,
-  getStatus,
   materializeOfficialAgentPaths,
   resolveAgentTargetDir,
   resolvePiSubagentsPackage,
-  resume,
   runDoctor,
   splitFrontmatter,
-  start,
-  stop,
   syncAgents,
   transformOfficialAgentMarkdown,
   writeFrontmatter
-} from "./chunk-KLECSVZD.js";
+} from "./chunk-E25V7VD3.js";
 import {
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
   addPiSubagentGuidance,
+  advance,
   commandFileToPiPromptName,
+  createAutoOrchestrator,
+  getStatus,
   normalizeGsdSlashReferences,
   resolveOfficialPackage,
+  resume,
   rewriteOfficialClaudePaths,
   rewriteRuntimeMessageText,
   splitCodeFences,
+  start,
+  stop,
   transformAskUserQuestionForPi,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi
-} from "./chunk-27CGUQAG.js";
+} from "./chunk-GBKM44ZU.js";
 export {
   OFFICIAL_PACKAGE_NAME,
   OFFICIAL_ROOT_PLACEHOLDER,

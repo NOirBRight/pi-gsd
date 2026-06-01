@@ -1,10 +1,18 @@
 import { accessSync, constants as fsConstants, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveOfficialPackage } from "./official.js";
 import { rewriteRuntimeMessageText } from "./runtime-rewrites.js";
 import { readEnabledModels, runGsdModelsCommand } from "./gsd-models.js";
+import { createDispatchAdapter } from "./orchestrator/dispatch.js";
+import { createAutoOrchestrator } from "./orchestrator/index.js";
+import { createJournalAdapter } from "./orchestrator/journal.js";
+import { createStateDigestAdapter } from "./orchestrator/state-digest.js";
+import { createNativeAutoHandoff } from "./orchestrator/trigger.js";
+
+const piGsdPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Subdirectories under the pi-subagents temp root that may suffer ACL corruption.
@@ -150,6 +158,24 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (!pkgRoot) return undefined;
     return { message: rewriteMessageForRuntime(event.message, pkgRoot) };
+  });
+
+  pi.on("input", (event: unknown, ctx: { cwd: string; ui: { notify(message: string, type?: "info" | "warning" | "error"): void } }) => {
+    const text = isRecord(event) && typeof event.text === "string" ? event.text : undefined;
+    if (!text) return { action: "continue" as const };
+    const resourceRoot = piGsdPackageRoot;
+    const handoff = createNativeAutoHandoff({
+      cwd: ctx.cwd,
+      createOrchestrator: () => createAutoOrchestrator({
+        journal: createJournalAdapter({ cwd: ctx.cwd }),
+        stateDigest: createStateDigestAdapter({ cwd: ctx.cwd }),
+        dispatch: createDispatchAdapter({ cwd: ctx.cwd, resourceRoot }),
+      }),
+    });
+    const result = handoff(text);
+    if (!result) return { action: "continue" as const };
+    notify(ctx, result.messages.join("\n"), result.ok ? "info" : "warning");
+    return { action: "handled" as const };
   });
 
   pi.registerCommand("gsd-models", {

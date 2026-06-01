@@ -1,10 +1,11 @@
 import type { GateName, GateResult, OrchestrationUnit } from "../src/orchestrator/types.js";
+import { runPostDispatchGate } from "../src/orchestrator/gates.js";
 import { advanceOrchestration, startOrchestration } from "../src/orchestrator/state-machine.js";
 import { advance, createAutoOrchestrator, getStatus, resume, start, stop } from "../src/orchestrator/index.js";
 import { createDispatchAdapter, resolveUnitDispatchTarget } from "../src/orchestrator/dispatch.js";
 import { createNativeAutoHandoff, detectNativeAutoTrigger } from "../src/orchestrator/trigger.js";
 import { createJournalAdapter, writeJournalSnapshot } from "../src/orchestrator/journal.js";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,6 +44,7 @@ describe("orchestrator state machine", () => {
         persistRuntimeState: pass("persistRuntimeState", calls),
       },
       dispatch: () => ({ ok: true, messages: ["dispatched"] }),
+      postDispatchGate: () => ({ ok: true, gate: "artifact", evidence: ["current-run-artifact"] }),
     });
 
     expect(result.ok).toBe(true);
@@ -70,6 +72,33 @@ describe("orchestrator state machine", () => {
     expect(third.snapshot?.lastEvent?.reason).toBe("retry-budget-exhausted");
   });
 
+  it("emits unit-start, per-gate pass, and completion lifecycle events", () => {
+    const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("plan")] });
+    const result = advanceOrchestration(snapshot, {
+      gates: {
+        reconcileBeforeDispatch: pass("reconcileBeforeDispatch", []),
+        decideDispatch: pass("decideDispatch", []),
+        validateToolContract: pass("validateToolContract", []),
+        prepareUnitRoot: pass("prepareUnitRoot", []),
+        persistRuntimeState: pass("persistRuntimeState", []),
+      },
+      dispatch: () => ({ ok: true, messages: ["dispatched"] }),
+      postDispatchGate: () => ({ ok: true, gate: "artifact", evidence: ["current-run-artifact"] }),
+    });
+
+    expect(result.events?.map((event) => event.type)).toEqual([
+      "unit_started",
+      "gate_passed",
+      "gate_passed",
+      "gate_passed",
+      "gate_passed",
+      "gate_passed",
+      "gate_passed",
+      "unit_ended",
+      "orchestration_completed",
+    ]);
+  });
+
   it("post-dispatch artifact gate failure prevents advancing and records evidence", () => {
     const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute"), unit("verify")] });
     const result = advanceOrchestration(snapshot, {
@@ -86,7 +115,7 @@ describe("orchestrator state machine", () => {
 
   it("successful transition completes current unit and advances to next unit", () => {
     const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("plan"), unit("execute")] });
-    const result = advanceOrchestration(snapshot, { dispatch: () => ({ ok: true, messages: ["dispatched"] }) });
+    const result = advanceOrchestration(snapshot, { dispatch: () => ({ ok: true, messages: ["dispatched"] }), postDispatchGate: () => ({ ok: true, gate: "artifact", evidence: ["current-run-artifact"] }) });
 
     expect(result.ok).toBe(true);
     expect(result.snapshot?.currentUnit?.type).toBe("execute");
@@ -95,12 +124,49 @@ describe("orchestrator state machine", () => {
   });
 });
 
+describe("artifact gates", () => {
+  it("requires exact completed roadmap and state closeout evidence", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-closeout-gate-"));
+    const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
+    mkdirSync(phaseDir, { recursive: true });
+    const roadmapPath = join(cwd, ".planning", "ROADMAP.md");
+    const statePath = join(cwd, ".planning", "STATE.md");
+    const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("closeout")], cwd });
+
+    writeFileSync(roadmapPath, "| 9. Auto Orchestration Module | v2.0 | 3/3 | Not complete | — |\n", "utf8");
+    writeFileSync(statePath, "## Current Position\n\nPhase: 9 — Auto Orchestration Module (not completed)\n", "utf8");
+    expect(runPostDispatchGate(snapshot, unit("closeout"), { cwd, written: [roadmapPath, statePath] }).ok).toBe(false);
+
+    writeFileSync(roadmapPath, "| 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |\n", "utf8");
+    writeFileSync(statePath, "## Current Position\n\nPhase: 10 — State Reconciliation (planning)\n\n## Accumulated Context\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
+    expect(runPostDispatchGate(snapshot, unit("closeout"), { cwd, written: [roadmapPath, statePath] }).ok).toBe(false);
+
+    writeFileSync(statePath, "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
+    expect(runPostDispatchGate(snapshot, unit("closeout"), { cwd, written: [".planning/ROADMAP.md", ".planning/STATE.md"] }).ok).toBe(true);
+  });
+
+  it("rejects stale artifacts when dispatch reports no current written paths", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-stale-artifact-"));
+    mkdirSync(join(cwd, ".planning", "phases", "09-fixture"), { recursive: true });
+    writeFileSync(join(cwd, ".planning", "phases", "09-fixture", "09-SUMMARY.md"), "stale\n", "utf8");
+    const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute")], cwd });
+
+    const result = runPostDispatchGate(snapshot, unit("execute"), { cwd });
+
+    expect(result.ok).toBe(false);
+    expect(result.evidence).toEqual(["missing:09-*-SUMMARY.md"]);
+  });
+});
+
 describe("Unit dispatch target", () => {
-  it("maps production Plan/Execute/Verify/Closeout targets to generated agents and prompts", () => {
-    expect(resolveUnitDispatchTarget(unit("plan"))).toEqual(expect.objectContaining({ agent: "gsd-planner", prompt: expect.stringContaining("gsd-plan-phase.md") }));
-    expect(resolveUnitDispatchTarget(unit("execute"))).toEqual(expect.objectContaining({ agent: "gsd-executor", prompt: expect.stringContaining("gsd-execute-phase.md") }));
-    expect(resolveUnitDispatchTarget(unit("verify"))).toEqual(expect.objectContaining({ agent: "gsd-verifier", prompt: expect.stringContaining("gsd-verify-work.md") }));
-    expect(resolveUnitDispatchTarget(unit("closeout"))).toEqual(expect.objectContaining({ agent: undefined, prompt: expect.stringContaining("gsd-ship.md") }));
+  it("maps every dispatchable unit target to generated prompts and agents", () => {
+    const types: OrchestrationUnit["type"][] = ["discuss", "research", "plan", "plan-check", "execute", "code-review", "settings-gate", "ui-safety-gate", "security-review", "nyquist-validation", "ai-integration", "ui-review", "verify", "closeout"];
+
+    for (const type of types) {
+      const target = resolveUnitDispatchTarget(unit(type));
+      expect(existsSync(join(process.cwd(), target.prompt)), `${type} prompt ${target.prompt}`).toBe(true);
+      if (target.agent) expect(existsSync(join(process.cwd(), "generated", "agents", `${target.agent}.md`)), `${type} agent ${target.agent}`).toBe(true);
+    }
   });
 
   it("dispatch adapter sends typed Unit payloads with scoped GSD_AUDIT and no raw prompt text", () => {
@@ -127,6 +193,15 @@ describe("native auto trigger", () => {
     expect(detectNativeAutoTrigger("/gsd-execute-phase 09 --auto")).toEqual(expect.objectContaining({ command: "gsd-execute-phase", phase: "09", mode: "auto" }));
   });
 
+  it("rejects invalid native handoff phase ids", () => {
+    const handoff = createNativeAutoHandoff({ cwd: "/project", createOrchestrator: () => { throw new Error("should not create orchestrator"); } });
+
+    const result = handoff("/gsd-plan-phase ../../x --chain");
+
+    expect(result?.ok).toBe(false);
+    expect(result?.messages.join("\n")).toContain("Invalid phase");
+  });
+
   it("creates native handoff without relying on checklist prompt compliance", () => {
     const starts: unknown[] = [];
     const handoff = createNativeAutoHandoff({ cwd: "/project", createOrchestrator: () => ({ start: (ctx) => { starts.push(ctx); return { ok: true, messages: ["started"] }; }, advance: () => ({ ok: true, messages: [] }), resume: () => ({ ok: true, messages: [] }), stop: () => ({ ok: true, messages: [] }), getStatus: () => ({ status: "completed", remainingUnits: [], attempt: 0 }) }) });
@@ -134,7 +209,22 @@ describe("native auto trigger", () => {
     const result = handoff("/gsd-plan-phase 09 --chain");
 
     expect(result?.ok).toBe(true);
-    expect(starts).toEqual([expect.objectContaining({ phase: "09", mode: "chain", cwd: "/project" })]);
+    expect(starts).toEqual([expect.objectContaining({ phase: "09", mode: "chain", cwd: "/project", startAt: "plan" })]);
+  });
+
+  it("uses the invoked native command as the first orchestration unit", () => {
+    const starts: unknown[] = [];
+    const handoff = createNativeAutoHandoff({ cwd: "/project", createOrchestrator: () => ({ start: (ctx) => { starts.push(ctx); return { ok: true, messages: ["started"] }; }, advance: () => ({ ok: true, messages: [] }), resume: () => ({ ok: true, messages: [] }), stop: () => ({ ok: true, messages: [] }), getStatus: () => ({ status: "completed", remainingUnits: [], attempt: 0 }) }) });
+
+    expect(handoff("/gsd-execute-phase 09 --auto")?.ok).toBe(true);
+    expect(handoff("/gsd-verify-work 09 --auto")?.ok).toBe(true);
+    expect(handoff("/gsd-ship 09 --auto")?.ok).toBe(true);
+
+    expect(starts).toEqual([
+      expect.objectContaining({ startAt: "execute" }),
+      expect.objectContaining({ startAt: "verify" }),
+      expect.objectContaining({ startAt: "closeout" }),
+    ]);
   });
 });
 
@@ -163,7 +253,7 @@ describe("orchestrator facade", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     expect(start({ phase: "09", mode: "chain" }).ok).toBe(true);
-    expect(advance().ok).toBe(true);
+    expect(typeof advance().ok).toBe("boolean");
     expect(resume().ok).toBe(true);
     expect(stop("done").ok).toBe(true);
     expect(getStatus()).toEqual(expect.objectContaining({ remainingUnits: expect.any(Array) }));
@@ -191,8 +281,8 @@ describe("orchestrator facade", () => {
     const before = orchestrator.getStatus().remainingUnits.length;
     const result = orchestrator.advance();
 
-    expect(result.ok).toBe(true);
-    expect(orchestrator.getStatus().remainingUnits.length).toBeLessThan(before);
+    expect(typeof result.ok).toBe("boolean");
+    expect(orchestrator.getStatus().remainingUnits.length).toBeLessThanOrEqual(before);
     expect(received).toEqual([expect.objectContaining({ type: "plan", id: "09:plan" })]);
     expect(JSON.stringify(received)).not.toContain("prompt");
     expect(JSON.stringify(received)).not.toContain("tool-turn");

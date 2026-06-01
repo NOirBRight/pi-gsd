@@ -7,9 +7,10 @@ import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { runDoctor } from "./doctor.js";
 import { generateAll, generatePrompts, generateWorkflows } from "./generator.js";
 import { resolveOfficialPackage } from "./official.js";
-import { createDispatchAdapter } from "./orchestrator/dispatch.js";
+import { createCommandDispatchRunner, createDispatchAdapter } from "./orchestrator/dispatch.js";
 import { createAutoOrchestrator, type OrchestratorResult } from "./orchestrator/index.js";
 import { createJournalAdapter } from "./orchestrator/journal.js";
+import { isValidPhaseId } from "./orchestrator/phase.js";
 import { createStateDigestAdapter } from "./orchestrator/state-digest.js";
 
 export interface CliIO {
@@ -226,6 +227,10 @@ function runOrchestratorCli(args: string[], io: CliIO): number {
     io.stderr("Missing value for --phase\n");
     return 2;
   }
+  if (!isValidPhaseId(phase)) {
+    io.stderr("Invalid --phase; expected two digits such as 09\n");
+    return 2;
+  }
 
   let result: OrchestratorResult;
   if (Object.hasOwn(options, "status")) {
@@ -264,28 +269,10 @@ function createProductionOrchestrator(cwd: string) {
     stateDigest: createStateDigestAdapter({ cwd }),
     dispatch: createDispatchAdapter({
       cwd,
-      runner: createCliDispatchRunner(cwd),
+      resourceRoot: packageRoot,
+      runner: createCommandDispatchRunner({ cwd }),
     }),
   });
-}
-
-function createCliDispatchRunner(cwd: string) {
-  return (request: Parameters<Parameters<typeof createDispatchAdapter>[0]["runner"]>[0]): OrchestratorResult => {
-    const command = process.env.PI_GSD_DISPATCH_COMMAND;
-    if (!command) {
-      return { ok: false, messages: ["PI_GSD_DISPATCH_COMMAND is required for CLI orchestrator dispatch"] };
-    }
-    const child = spawnSync(command, {
-      cwd,
-      encoding: "utf8",
-      input: `${JSON.stringify({ unit: request.unit, snapshot: request.snapshot, target: request.target })}\n`,
-      shell: true,
-      env: { ...process.env, ...request.env },
-    });
-    if (child.error) return { ok: false, messages: [`dispatch failed: ${child.error.message}`] };
-    if (child.status !== 0) return { ok: false, messages: [`dispatch failed (${child.status ?? "signal"}): ${(child.stderr || child.stdout || "").trim()}`] };
-    return { ok: true, messages: [(child.stdout || `dispatched ${request.unit.type}`).trim()] };
-  };
 }
 
 function runUntilSettled(initial: OrchestratorResult, orchestrator: ReturnType<typeof createAutoOrchestrator>): OrchestratorResult {

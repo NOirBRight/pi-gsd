@@ -38,6 +38,25 @@ describe("piGsdExtension message rewriting", () => {
 });
 
 describe("piGsdExtension command registration", () => {
+  it("does not shadow generated GSD prompt commands", () => {
+    const commands: Record<string, any> = {};
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn((name: string, options: unknown) => {
+        commands[name] = options;
+      }),
+      registerTool: vi.fn(),
+    };
+
+    piGsdExtension(pi as never);
+
+    expect(commands["gsd-plan-phase"]).toBeUndefined();
+    expect(commands["gsd-execute-phase"]).toBeUndefined();
+    expect(commands["gsd-verify-work"]).toBeUndefined();
+    expect(commands["gsd-ship"]).toBeUndefined();
+    expect(pi.on).toHaveBeenCalledWith("input", expect.any(Function));
+  });
+
   it("registers the gsd-models command", () => {
     const commands: Record<string, unknown> = {};
     const pi = {

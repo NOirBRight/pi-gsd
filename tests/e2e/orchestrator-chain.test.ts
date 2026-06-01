@@ -8,6 +8,8 @@ import { createDispatchAdapter } from "../../src/orchestrator/dispatch.js";
 function writeFixture(root: string) {
   mkdirSync(join(root, ".planning", "phases", "09-fixture"), { recursive: true });
   writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: true, ui_phase: false, ui_review: false } }), "utf8");
+  writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |\n", "utf8");
+  writeFileSync(join(root, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
   const promptsDir = join(root, "generated", "prompts");
   const agentsDir = join(root, "generated", "agents");
   mkdirSync(promptsDir, { recursive: true });
@@ -32,10 +34,12 @@ describe("orchestrator chain e2e", () => {
         runner: ({ unit, env }) => {
           dispatched.push(`${unit.type}:${env.GSD_AUDIT}`);
           const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
-          if (unit.type === "plan") writeFileSync(join(phaseDir, "09-PLAN.md"), "plan\n", "utf8");
-          if (unit.type === "execute") writeFileSync(join(phaseDir, "09-SUMMARY.md"), "summary\n", "utf8");
-          if (unit.type === "verify") writeFileSync(join(phaseDir, "09-VERIFICATION.md"), "verification\n", "utf8");
-          return { ok: true, messages: [`dispatched ${unit.type}`] };
+          const written: string[] = [];
+          if (unit.type === "plan") { const path = join(phaseDir, "09-PLAN.md"); writeFileSync(path, "plan\n", "utf8"); written.push(path); }
+          if (unit.type === "execute") { const path = join(phaseDir, "09-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
+          if (unit.type === "verify") { const path = join(phaseDir, "09-VERIFICATION.md"); writeFileSync(path, "verification\n", "utf8"); written.push(path); }
+          if (unit.type === "closeout") { written.push(join(cwd, ".planning", "ROADMAP.md"), join(cwd, ".planning", "STATE.md")); }
+          return { ok: true, messages: [`dispatched ${unit.type}`], written };
         },
       }),
     });

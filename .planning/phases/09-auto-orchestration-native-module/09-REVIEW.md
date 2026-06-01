@@ -1,58 +1,70 @@
 ---
 phase: 09-auto-orchestration-native-module
-reviewed: 2026-06-01T09:24:30Z
-depth: standard
-files_reviewed: 4
+reviewed: 2026-06-01T03:52:30Z
+depth: deep
+files_reviewed: 20
 files_reviewed_list:
+  - package.json
+  - src/extension.ts
+  - src/cli.ts
+  - src/orchestrator/dispatch.ts
+  - src/orchestrator/settings.ts
+  - src/orchestrator/trigger.ts
+  - src/orchestrator/index.ts
+  - src/orchestrator/state-machine.ts
+  - src/orchestrator/gates.ts
   - src/orchestrator/journal.ts
-  - src/prompt-transform.ts
+  - src/orchestrator/types.ts
+  - src/orchestrator/phase.ts
+  - src/orchestrator/state-digest.ts
+  - src/official.ts
+  - tests/extension.test.ts
+  - tests/cli.test.ts
+  - tests/orchestrator-settings.test.ts
+  - tests/orchestrator.test.ts
+  - tests/e2e/orchestrator-chain.test.ts
   - tests/orchestrator-journal.test.ts
-  - tests/prompt-transform.test.ts
 findings:
   critical: 0
   warning: 0
   info: 0
   total: 0
-status: passed
+status: clean
 ---
 
-# Phase 09: Final Focused Code Review Report
+# Phase 09: Final Pass Code Review Report — PASSED
 
-**Reviewed:** 2026-06-01T09:24:30Z  
-**Depth:** standard  
-**Files Reviewed:** 4  
-**Status:** passed / no_issues
+**Reviewed:** 2026-06-01T03:52:30Z  
+**Depth:** deep  
+**Files Reviewed:** 20  
+**Status:** clean
 
 ## Summary
 
-Focused re-review of the prior `phase09/code-review-final.md` CR-01 and WR-01 fixes in `src/orchestrator/journal.ts`, `src/prompt-transform.ts`, and their direct tests.
+Focused final pass on the latest blocker fixes for Phase 09 native orchestration. The three prior blocker areas are resolved:
 
-The previous blocker is fixed: top-level snapshot `resumeHint` is now passed through `safeString()` before journal persistence, event evidence is redacted with the same content filter, and unsafe/sensitive metadata keys are excluded behind a small metadata allowlist.
+- Extension native handoff now uses the `pi-gsd-core` package root as dispatch `resourceRoot` while keeping the official package root for runtime rewrites (`src/extension.ts:15`, `src/extension.ts:166-172`).
+- CLI production orchestration now passes the `pi-gsd-core` `packageRoot` as dispatch `resourceRoot`, so package resources are used when the target project has no local `generated/` directory (`src/cli.ts:266-273`, `src/orchestrator/dispatch.ts:36-43`).
+- Explicit native `startAt` requests now fail closed with `pause_for_user` when the requested unit is disabled instead of falling back to the full queue (`src/orchestrator/settings.ts:98-104`).
 
-The previous warning is fixed: `rewriteAskUserQuestionInSegment()` now advances past both unbalanced and unsupported `AskUserQuestion(` occurrences and continues scanning for later valid calls.
+No remaining Critical/BLOCKER issues were found in this final pass.
 
-Targeted verification run passed:
+## Narrative Findings (AI reviewer)
 
-```text
-npm test -- --run tests/prompt-transform.test.ts tests/orchestrator-journal.test.ts
-Test Files  2 passed (2)
-Tests       57 passed (57)
-```
+No Critical/BLOCKER findings remain. Prior CR-01, CR-02, and CR-03 are considered resolved.
 
-## Critical Issues
+## Verification
 
-None.
+Commands run during this final pass:
 
-## Warnings
+- `npx vitest run tests/orchestrator-settings.test.ts tests/orchestrator.test.ts -t "starts queue at requested command unit|pauses instead of falling back|uses the invoked native command|dispatch adapter sends"` — 4 passed.
+- `npx vitest run tests/cli.test.ts -t "runs orchestrate --chain"` — 1 passed.
+- Dist extension smoke with a temp project lacking `generated/` reached the Plan artifact gate rather than failing with `missing dispatch prompt`, confirming packaged dispatch resources are used.
 
-None.
-
-## Info
-
-None.
+User-reported `npm run check` passed with 321 tests was not re-run in full.
 
 ---
 
-_Reviewed: 2026-06-01T09:24:30Z_  
+_Reviewed: 2026-06-01T03:52:30Z_  
 _Reviewer: Claude (gsd-code-reviewer)_  
-_Depth: standard_
+_Depth: deep_

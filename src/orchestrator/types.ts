@@ -7,6 +7,10 @@ export type UnitType =
   | "code-review"
   | "verify"
   | "ui-review"
+  | "security-review"
+  | "nyquist-validation"
+  | "ai-integration"
+  | "ui-safety-gate"
   | "closeout"
   | "settings-gate"
   | "pause-for-user";
@@ -41,10 +45,18 @@ export type ResolvedWorkflowSettings = {
     ui_phase: boolean;
     ui_review: boolean;
     code_review: boolean;
+    security_enforcement?: boolean;
+    nyquist_validation?: boolean;
+    ai_integration_phase?: boolean;
+    ui_safety_gate?: boolean;
+    auto_prune_state?: boolean;
+    research_before_questions?: boolean;
     skip_discuss: boolean;
     worktrees: boolean;
     node_repair: boolean;
     node_repair_budget: number;
+    subagent_timeout?: number;
+    inline_plan_threshold?: number;
   };
   sources?: Partial<Record<keyof ResolvedWorkflowSettings["workflow"], WorkflowSettingSource>>;
 };
@@ -54,10 +66,14 @@ export type QueueBuildInput = {
   phase: string;
   cwd?: string;
   configPath?: string;
+  startAt?: UnitType;
   settings?: ResolvedWorkflowSettings;
   phaseSignals?: {
     isUiPhase?: boolean;
     requiresUiReview?: boolean;
+    requiresSecurityReview?: boolean;
+    requiresNyquistValidation?: boolean;
+    isAiPhase?: boolean;
   };
 };
 
@@ -105,6 +121,7 @@ export type OrchestrationEvent = {
     | "pause"
     | "resume"
     | "stop"
+    | "orchestration_completed"
     | "start"
     | "unit-start"
     | "unit-end"
@@ -142,6 +159,7 @@ export type OrchestratorSessionContext = {
   mode: OrchestrationMode;
   cwd?: string;
   configPath?: string;
+  startAt?: UnitType;
 };
 
 export type OrchestratorResult = {
