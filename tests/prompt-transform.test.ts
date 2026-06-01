@@ -1,5 +1,5 @@
 import { splitFrontmatter, writeFrontmatter } from "../src/frontmatter.js";
-import { addPiSubagentGuidance, commandFileToPiPromptName, normalizeGsdSlashReferences, transformAskUserQuestionForPi, transformSkillDispatchForPi, transformSubagentDispatchForPi } from "../src/prompt-transform.js";
+import { addPiSubagentGuidance, commandFileToPiPromptName, normalizeGsdSlashReferences, transformAskUserQuestionForPi, transformGsdRunLauncher, transformSkillDispatchForPi, transformSubagentDispatchForPi } from "../src/prompt-transform.js";
 
 describe("frontmatter helpers", () => {
   it("splits markdown frontmatter from body", () => {
@@ -71,6 +71,29 @@ describe("prompt transforms", () => {
     const input = "See https://example.com/?next=/gsd:new-project and /gsd:new-project";
 
     expect(normalizeGsdSlashReferences(input)).toBe("See https://example.com/?next=/gsd:new-project and /gsd-new-project");
+  });
+});
+
+describe("transformGsdRunLauncher", () => {
+  const upstreamLauncher = '_GSD_SHIM_NAME="gsd-tools.cjs"; _GSD_RUNTIME_ROOT="${RUNTIME_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"; GSD_TOOLS="${_GSD_RUNTIME_ROOT}/get-shit-done/bin/${_GSD_SHIM_NAME}"; if [ -f "$GSD_TOOLS" ]; then gsd_run() { node "$GSD_TOOLS" "$@"; }; elif command -v gsd-tools >/dev/null 2>&1; then GSD_TOOLS="$(command -v gsd-tools)"; gsd_run() { "$GSD_TOOLS" "$@"; }; else echo "ERROR: gsd-tools.cjs not found" >&2; exit 1; fi';
+
+  it("prepends a node_modules fallback to upstream gsd_run launcher lines", () => {
+    const result = transformGsdRunLauncher(upstreamLauncher);
+
+    expect(result).toContain("require.resolve('@opengsd/gsd-core/get-shit-done/bin/gsd-tools.cjs')");
+    expect(result).toContain(`else ${upstreamLauncher}; fi`);
+  });
+
+  it("is idempotent after the fallback has been inserted", () => {
+    const once = transformGsdRunLauncher(upstreamLauncher);
+
+    expect(transformGsdRunLauncher(once)).toBe(once);
+  });
+
+  it("does not rewrite non-launcher references to gsd-tools.cjs", () => {
+    const input = "Mention gsd-tools.cjs without the launcher variable.";
+
+    expect(transformGsdRunLauncher(input)).toBe(input);
   });
 });
 

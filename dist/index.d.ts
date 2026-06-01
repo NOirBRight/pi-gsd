@@ -35,6 +35,7 @@ declare function writeFrontmatter(data: FrontmatterData, body: string): string;
 
 declare function commandFileToPiPromptName(fileName: string): string;
 declare function normalizeGsdSlashReferences(input: string): string;
+declare function transformGsdRunLauncher(input: string): string;
 declare function addPiSubagentGuidance(input: string): string;
 /**
  * Split text into code-fenced and non-code segments.
@@ -266,6 +267,7 @@ type ResolvedWorkflowSettings = {
         worktrees: boolean;
         node_repair: boolean;
         node_repair_budget: number;
+        state_reconciliation_apply?: boolean;
         subagent_timeout?: number;
         inline_plan_threshold?: number;
     };
@@ -399,4 +401,4 @@ declare function resume(): OrchestratorResult;
 declare function stop(reason: string): OrchestratorResult;
 declare function getStatus(): OrchestratorStatus;
 
-export { type AclCheckOptions, type AclCheckResult, type AgentSyncScope, type AutoOrchestrator, type AutoOrchestratorDependencies, type DispatchAdapter, type DoctorOptions, type DoctorResult, type FrontmatterData, type FrontmatterValue, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, type GenerateWorkflowsOptions, type GenerateWorkflowsResult, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, type OrchestrationUnit, type OrchestratorResult, type OrchestratorSessionContext, type OrchestratorStatus, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, addPiSubagentGuidance, advance, checkPiSubagentsTempAcl, commandFileToPiPromptName, createAutoOrchestrator, generateAgents, generateAll, generatePrompts, generateWorkflows, getStatus, materializeOfficialAgentPaths, normalizeGsdSlashReferences, resolveAgentTargetDir, resolveOfficialPackage, resolvePiSubagentsPackage, resume, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitCodeFences, splitFrontmatter, start, stop, syncAgents, transformAskUserQuestionForPi, transformOfficialAgentMarkdown, transformSkillDispatchForPi, transformSubagentDispatchForPi, writeFrontmatter };
+export { type AclCheckOptions, type AclCheckResult, type AgentSyncScope, type AutoOrchestrator, type AutoOrchestratorDependencies, type DispatchAdapter, type DoctorOptions, type DoctorResult, type FrontmatterData, type FrontmatterValue, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, type GenerateWorkflowsOptions, type GenerateWorkflowsResult, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, type OrchestrationUnit, type OrchestratorResult, type OrchestratorSessionContext, type OrchestratorStatus, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, addPiSubagentGuidance, advance, checkPiSubagentsTempAcl, commandFileToPiPromptName, createAutoOrchestrator, generateAgents, generateAll, generatePrompts, generateWorkflows, getStatus, materializeOfficialAgentPaths, normalizeGsdSlashReferences, resolveAgentTargetDir, resolveOfficialPackage, resolvePiSubagentsPackage, resume, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitCodeFences, splitFrontmatter, start, stop, syncAgents, transformAskUserQuestionForPi, transformGsdRunLauncher, transformOfficialAgentMarkdown, transformSkillDispatchForPi, transformSubagentDispatchForPi, writeFrontmatter };

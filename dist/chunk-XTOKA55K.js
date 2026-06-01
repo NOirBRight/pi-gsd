@@ -8,9 +8,10 @@ import {
   resolveOfficialPackage,
   splitCodeFences,
   transformAskUserQuestionForPi,
+  transformGsdRunLauncher,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi
-} from "./chunk-GBKM44ZU.js";
+} from "./chunk-6TFWBYXD.js";
 
 // src/frontmatter.ts
 var supportedPromptKeys = [
@@ -427,7 +428,7 @@ function applyPromptTransforms(body, _packageName) {
   return transformSkillDispatchForPi(
     transformSubagentDispatchForPi(
       transformAskUserQuestionForPi(
-        addPiSubagentGuidance(normalizeGsdSlashReferences(body))
+        addPiSubagentGuidance(normalizeGsdSlashReferences(transformGsdRunLauncher(body)))
       )
     )
   );

@@ -8,7 +8,7 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 // src/extension.ts
 import { accessSync, constants as fsConstants, mkdirSync as mkdirSync3, rmSync } from "fs";
 import { tmpdir } from "os";
-import { dirname as dirname4, join as join7, resolve as resolve3 } from "path";
+import { dirname as dirname4, join as join12, resolve as resolve4 } from "path";
 import { fileURLToPath } from "url";
 
 // src/official.ts
@@ -103,6 +103,14 @@ function commandFileToPiPromptName(fileName) {
 }
 function normalizeGsdSlashReferences(input) {
   return input.replace(/(^|[\s([{'"`])\/gsd:([a-z0-9][a-z0-9-]*)/g, "$1/gsd-$2");
+}
+var gsdToolsRequireResolve = "require.resolve('@opengsd/gsd-core/get-shit-done/bin/gsd-tools.cjs')";
+function transformGsdRunLauncher(input) {
+  if (input.includes(gsdToolsRequireResolve)) return input;
+  return input.replace(/^.*_GSD_SHIM_NAME="gsd-tools\.cjs".*$/gm, (launcherLine) => {
+    const nodeModulesFallback = `_GSD_SHIM_NAME="gsd-tools.cjs"; GSD_TOOLS="$(node -e "console.log(${gsdToolsRequireResolve})" 2>/dev/null)"; if [ -n "$GSD_TOOLS" ] && [ -f "$GSD_TOOLS" ]; then gsd_run() { node "$GSD_TOOLS" "$@"; }; else ${launcherLine}; fi`;
+    return nodeModulesFallback;
+  });
 }
 var piSubagentGuidance = `<pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi \`subagent\` tool from \`pi-subagents\`.
@@ -539,10 +547,7 @@ import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 var _catalogCache = null;
 function loadModelCatalog(gsdPackageRoot) {
   if (_catalogCache) return _catalogCache;
-  const normalizedRoot = gsdPackageRoot.split("get-shit-done-redux").join("gsd-core");
   const candidates = [
-    join2(normalizedRoot, "get-shit-done", "bin", "shared", "model-catalog.json"),
-    join2(normalizedRoot, "sdk", "shared", "model-catalog.json"),
     join2(gsdPackageRoot, "get-shit-done", "bin", "shared", "model-catalog.json"),
     join2(gsdPackageRoot, "sdk", "shared", "model-catalog.json")
   ];
@@ -1045,6 +1050,7 @@ var DEFAULT_WORKFLOW_SETTINGS = {
   worktrees: true,
   node_repair: true,
   node_repair_budget: 2,
+  state_reconciliation_apply: false,
   subagent_timeout: 900,
   inline_plan_threshold: 1
 };
@@ -1075,6 +1081,7 @@ function resolveWorkflowSettings(options = {}) {
     applyBooleanAlias(configWorkflow, "worktrees", "use_worktrees", workflow, sources);
     applyBooleanAlias(configWorkflow, "plan_check", "plan_checker", workflow, sources);
     applyBoolean(configWorkflow, "node_repair", workflow, sources);
+    applyBoolean(configWorkflow, "state_reconciliation_apply", workflow, sources);
     applyPositiveInteger(configWorkflow, "node_repair_budget", workflow, sources);
     applyPositiveInteger(configWorkflow, "subagent_timeout", workflow, sources);
     applyPositiveInteger(configWorkflow, "inline_plan_threshold", workflow, sources);
@@ -1204,11 +1211,875 @@ function isRecord(value) {
 }
 
 // src/orchestrator/gates.ts
-import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync4, statSync as statSync2 } from "fs";
-import { basename, isAbsolute, join as join5, resolve } from "path";
+import { existsSync as existsSync11, readdirSync as readdirSync3, readFileSync as readFileSync9, statSync as statSync3 } from "fs";
+import { basename as basename2, isAbsolute as isAbsolute2, join as join10, resolve as resolve2 } from "path";
 
 // src/orchestrator/reconciliation.ts
-function reconcileBeforeDispatch(snapshot, unit2) {
+import { relative as relative2 } from "path";
+
+// src/state-reconciliation/index.ts
+import { existsSync as existsSync10 } from "fs";
+import { join as join9 } from "path";
+
+// src/state-reconciliation/drift/noncanonical-plan-like-file.ts
+function detectNoncanonicalPlanLikeFiles(input) {
+  return {
+    repairs: [],
+    blockers: [],
+    evidence: input.snapshot.phases.flatMap((phase) => phase.noncanonical)
+  };
+}
+
+// src/state-reconciliation/drift/completion-timestamp.ts
+import { readFileSync as readFileSync4 } from "fs";
+function detectCompletionTimestampDrift(input) {
+  if (!input.roadmap) return empty();
+  const repairs = [];
+  const blockers = [];
+  for (const row of input.roadmap.phases) {
+    const phase = input.snapshot.phases.find((candidate) => candidate.phase === row.phase);
+    if (!phase || phase.plans.length === 0 || phase.summaries.length !== phase.plans.length) continue;
+    const provenDate = provenCompletionDate(phase.summaries);
+    const evidence = [
+      {
+        reasonCode: "completion-timestamp-drift",
+        path: row.path,
+        phase: row.phase,
+        artifact: "roadmap",
+        message: "ROADMAP row considered for completion timestamp repair.",
+        metadata: { line: row.line }
+      },
+      ...phase.summaries.map((path) => ({
+        reasonCode: "completion-timestamp-drift",
+        path,
+        phase: row.phase,
+        artifact: "summary",
+        message: "Canonical summary considered for ROADMAP completion timestamp."
+      }))
+    ];
+    if (!provenDate) {
+      if (row.status !== "Complete") continue;
+      blockers.push({
+        reasonCode: "completion-timestamp-drift",
+        phase: row.phase,
+        artifact: "roadmap",
+        message: `ROADMAP phase ${row.phase} completion timestamp cannot be repaired because canonical summaries do not prove one timestamp.`,
+        evidence,
+        suggestedNextAction: "manual-review"
+      });
+      continue;
+    }
+    if (row.completed === provenDate) continue;
+    repairs.push({
+      reasonCode: "completion-timestamp-drift",
+      action: "update-roadmap-completed",
+      phase: row.phase,
+      path: row.path,
+      description: `Update ROADMAP phase ${row.phase} completed timestamp to ${provenDate}.`,
+      evidence
+    });
+  }
+  return { repairs, blockers, evidence: [] };
+}
+function provenCompletionDate(summaryPaths) {
+  const dates = /* @__PURE__ */ new Set();
+  for (const path of summaryPaths) {
+    const match = /^completed:\s*["']?(?<date>\d{4}-\d{2}-\d{2})["']?\s*$/m.exec(readFileSync4(path, "utf8"));
+    if (match?.groups) dates.add(match.groups.date);
+  }
+  return dates.size === 1 ? [...dates][0] : void 0;
+}
+function empty() {
+  return { repairs: [], blockers: [], evidence: [] };
+}
+
+// src/state-reconciliation/drift/roadmap-divergence.ts
+function detectRoadmapDivergence(input) {
+  if (!input.roadmap) return empty2();
+  const repairs = [];
+  const blockers = [];
+  for (const row of input.roadmap.phases) {
+    const phase = input.snapshot.phases.find((candidate) => candidate.phase === row.phase);
+    if (!phase) continue;
+    const expectedComplete = phase.summaries.length;
+    const expectedTotal = phase.plans.length;
+    const expectedStatus = expectedTotal > 0 && expectedComplete === expectedTotal ? "Complete" : "Executing";
+    const diverges = row.plansComplete !== expectedComplete || row.totalPlans !== expectedTotal || row.status !== expectedStatus;
+    if (!diverges) continue;
+    const evidence = [{
+      reasonCode: "roadmap-divergence",
+      path: row.path,
+      phase: row.phase,
+      artifact: "summary",
+      message: `ROADMAP row has ${row.plansComplete}/${row.totalPlans} ${row.status}; canonical artifacts show ${expectedComplete}/${expectedTotal} ${expectedStatus}.`,
+      metadata: {
+        line: row.line,
+        plansComplete: row.plansComplete,
+        totalPlans: row.totalPlans,
+        canonicalPlans: expectedTotal,
+        canonicalSummaries: expectedComplete
+      }
+    }];
+    if (expectedTotal > 0 && expectedComplete === expectedTotal) {
+      repairs.push({
+        reasonCode: "roadmap-divergence",
+        action: "update-roadmap-row",
+        phase: row.phase,
+        path: row.path,
+        description: `Update ROADMAP phase ${row.phase} row to ${expectedComplete}/${expectedTotal} ${expectedStatus}.`,
+        evidence
+      });
+      continue;
+    }
+    if (input.activeUnitId === `${row.phase}:execute` && expectedStatus === "Executing") {
+      continue;
+    }
+    blockers.push({
+      reasonCode: "roadmap-divergence",
+      phase: row.phase,
+      artifact: "roadmap",
+      message: `ROADMAP phase ${row.phase} metadata cannot be mechanically proven from canonical artifacts.`,
+      evidence,
+      suggestedNextAction: "manual-review"
+    });
+  }
+  return { repairs, blockers, evidence: [] };
+}
+function empty2() {
+  return { repairs: [], blockers: [], evidence: [] };
+}
+
+// src/state-reconciliation/drift/sketch-flag.ts
+function detectSketchFlagDrift(input) {
+  if (!input.sketch) return empty3();
+  if (typeof input.sketch.observedEnabled === "boolean" && input.sketch.observedEnabled === input.sketch.expectedEnabled) return empty3();
+  const evidence = input.sketch.evidencePaths.map((path) => ({
+    reasonCode: "sketch-flag-drift",
+    path,
+    phase: input.sketch?.phase,
+    message: "Sketch metadata was considered but does not mechanically prove the ROADMAP flag."
+  }));
+  return {
+    repairs: [],
+    blockers: [{
+      reasonCode: "sketch-flag-drift",
+      phase: input.sketch.phase,
+      artifact: "roadmap",
+      message: "Sketch flag drift is not mechanically provable from available sketch metadata.",
+      evidence,
+      suggestedNextAction: "manual-review"
+    }],
+    evidence: []
+  };
+}
+function empty3() {
+  return { repairs: [], blockers: [], evidence: [] };
+}
+
+// src/state-reconciliation/drift/stale-worker.ts
+function detectStaleWorker(input) {
+  const journal = input.journal;
+  if (!journal?.ok || journal.journal?.snapshot.status !== "running") return empty4();
+  const currentUnit = unitId(journal.journal.snapshot.currentUnit);
+  if (currentUnit && currentUnit === input.activeUnitId) return empty4();
+  const evidence = [{
+    reasonCode: "stale-worker",
+    path: journal.path,
+    message: "Journal has an active worker snapshot that requires recovery classification.",
+    metadata: currentUnit ? { currentUnit } : void 0
+  }];
+  return {
+    repairs: [],
+    blockers: [{
+      reasonCode: "stale-worker",
+      artifact: "journal",
+      message: "Journal active worker state requires recovery classification.",
+      evidence,
+      suggestedNextAction: "requires-recovery-classification"
+    }],
+    evidence: []
+  };
+}
+function unitId(value) {
+  if (!value || typeof value !== "object") return void 0;
+  const id = value.id;
+  return typeof id === "string" ? id : void 0;
+}
+function empty4() {
+  return { repairs: [], blockers: [], evidence: [] };
+}
+
+// src/state-reconciliation/drift/summary-count-mismatch.ts
+import { basename } from "path";
+function detectSummaryCountMismatch(input) {
+  const blockers = [];
+  if (input.activeUnitId?.endsWith(":execute")) {
+    return { repairs: [], blockers: [], evidence: [] };
+  }
+  for (const phase of input.snapshot.phases) {
+    const summaries = new Set(phase.summaries.map((path) => artifactPlan(path, "SUMMARY")));
+    const missing = phase.plans.map((path) => ({ path, plan: artifactPlan(path, "PLAN") })).filter((plan) => plan.plan && !summaries.has(plan.plan));
+    if (missing.length === 0) continue;
+    const evidence = missing.map(({ path, plan }) => ({
+      reasonCode: "summary-count-mismatch",
+      path,
+      phase: phase.phase,
+      plan,
+      artifact: "summary",
+      message: `Canonical plan ${basename(path)} has no matching ${phase.phase}-${plan}-SUMMARY.md artifact.`
+    }));
+    blockers.push({
+      reasonCode: "summary-count-mismatch",
+      phase: phase.phase,
+      artifact: "summary",
+      message: `Phase ${phase.phase} is missing canonical summary artifacts: ${missing.map(({ plan }) => `${phase.phase}-${plan}-SUMMARY.md`).join(", ")}.`,
+      evidence,
+      suggestedNextAction: "manual-review"
+    });
+  }
+  return { repairs: [], blockers, evidence: [] };
+}
+function artifactPlan(path, suffix) {
+  const pattern = new RegExp(`^\\d{2}-(\\d{2})-${suffix}\\.md$`);
+  return pattern.exec(basename(path))?.[1];
+}
+
+// src/state-reconciliation/drift/unknown-drift.ts
+function detectUnknownDrift(input) {
+  return {
+    repairs: [],
+    blockers: (input.unsupportedMismatches ?? []).map((mismatch) => ({
+      reasonCode: "unknown-drift",
+      artifact: "state",
+      message: `Unsupported drift mismatch: ${mismatch.message}`,
+      evidence: [{
+        reasonCode: "unknown-drift",
+        path: mismatch.path,
+        message: mismatch.message
+      }],
+      suggestedNextAction: "manual-review"
+    })),
+    evidence: []
+  };
+}
+
+// src/state-reconciliation/drift/unregistered-milestone.ts
+function detectUnregisteredMilestone(input) {
+  const state = input.state;
+  const milestone = state?.frontmatter.milestone;
+  if (!state || typeof milestone !== "string" || !input.roadmap) return empty5();
+  const knownMilestones = new Set(input.roadmap.phases.map((phase) => phase.milestone));
+  if (knownMilestones.has(milestone)) return empty5();
+  const evidence = [
+    {
+      reasonCode: "unregistered-milestone",
+      path: state.path,
+      message: `STATE references milestone ${milestone}.`,
+      metadata: { milestone }
+    },
+    {
+      reasonCode: "unregistered-milestone",
+      path: input.roadmap.path,
+      message: `ROADMAP progress table does not register milestone ${milestone}.`,
+      metadata: { milestone }
+    }
+  ];
+  return {
+    repairs: [],
+    blockers: [{
+      reasonCode: "unregistered-milestone",
+      artifact: "roadmap",
+      message: `Milestone ${milestone} is not registered in ROADMAP metadata; Phase 10 must not synthesize milestone prose.`,
+      evidence,
+      suggestedNextAction: "manual-review"
+    }],
+    evidence: []
+  };
+}
+function empty5() {
+  return { repairs: [], blockers: [], evidence: [] };
+}
+
+// src/state-reconciliation/catalog.ts
+var DETECTORS = [
+  detectSummaryCountMismatch,
+  detectRoadmapDivergence,
+  detectCompletionTimestampDrift,
+  detectSketchFlagDrift,
+  detectStaleWorker,
+  detectUnregisteredMilestone,
+  detectNoncanonicalPlanLikeFiles,
+  detectUnknownDrift
+];
+function classifyDrift(input) {
+  return DETECTORS.reduce((combined, detector) => {
+    const result = detector(input);
+    combined.repairs.push(...result.repairs);
+    combined.blockers.push(...result.blockers);
+    combined.evidence.push(...result.evidence);
+    return combined;
+  }, { repairs: [], blockers: [], evidence: [] });
+}
+
+// src/state-reconciliation/journal.ts
+import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
+import { join as join5 } from "path";
+function readJournalState(basePath) {
+  const path = join5(basePath, ".planning", "orchestration-state.json");
+  if (!existsSync5(path)) {
+    return { ok: true, path, blockers: [] };
+  }
+  try {
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
+    if (!isJournal(parsed)) {
+      return blocked(path, "orchestration-state.json has an invalid journal shape.");
+    }
+    return { ok: true, path, journal: parsed, blockers: [] };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return blocked(path, `Failed to parse orchestration-state.json: ${detail}`);
+  }
+}
+function applyJournalMetadataRepair(content, repair) {
+  if (repair.action !== "update-journal-metadata") return content;
+  if (!repair.before || !repair.after) throw new Error("Journal metadata repair requires before and after text.");
+  const parsed = JSON.parse(content);
+  if (!isJournal(parsed)) throw new Error("Journal metadata repair target has an invalid journal shape.");
+  if (!content.includes(repair.before)) return content;
+  const next = content.replace(repair.before, repair.after);
+  const reparsed = JSON.parse(next);
+  if (!isJournal(reparsed)) throw new Error("Journal metadata repair would create an invalid journal shape.");
+  return next;
+}
+function isJournal(value) {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value;
+  return candidate.version === 1 && !!candidate.snapshot && typeof candidate.snapshot === "object" && Array.isArray(candidate.events);
+}
+function blocked(path, message) {
+  return {
+    ok: false,
+    path,
+    blockers: [{
+      reasonCode: "unknown-drift",
+      artifact: "journal",
+      message: `${message} (${path})`,
+      evidence: [{
+        reasonCode: "unknown-drift",
+        path,
+        message
+      }],
+      suggestedNextAction: "manual-review"
+    }]
+  };
+}
+
+// src/state-reconciliation/repair.ts
+import { existsSync as existsSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync2 } from "fs";
+import { isAbsolute, relative, resolve } from "path";
+
+// src/state-reconciliation/roadmap.ts
+import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
+import { join as join6 } from "path";
+function readRoadmapState(basePath) {
+  const path = join6(basePath, ".planning", "ROADMAP.md");
+  if (!existsSync6(path)) {
+    return {
+      path,
+      phases: [],
+      blockers: [metadataBlocker("roadmap", path, "Missing ROADMAP.md metadata file.")]
+    };
+  }
+  const lines = readFileSync6(path, "utf8").split(/\r?\n/);
+  const phases = [];
+  for (const [index, line] of lines.entries()) {
+    const cells = parseTableRow(line);
+    if (!cells) continue;
+    const phase = /^(?<phase>\d+)\.\s*(?<title>.+)$/.exec(cells[0]);
+    const plans = /^(?<complete>\d+)\/(?<total>\d+)$/.exec(cells[2]);
+    if (!phase?.groups || !plans?.groups) continue;
+    phases.push({
+      phase: phase.groups.phase.padStart(2, "0"),
+      title: phase.groups.title.trim(),
+      milestone: cells[1],
+      plansComplete: Number(plans.groups.complete),
+      totalPlans: Number(plans.groups.total),
+      status: cells[3],
+      completed: isBlankCompleted(cells[4]) ? void 0 : cells[4],
+      path,
+      line: index + 1
+    });
+  }
+  return { path, phases, blockers: [] };
+}
+function applyRoadmapRepair(content, repair) {
+  if (repair.action !== "update-roadmap-row" && repair.action !== "update-roadmap-completed") return content;
+  const lineNumber = repairLineNumber(repair);
+  if (!lineNumber) throw new Error(`Repair ${repair.action} is missing ROADMAP line metadata.`);
+  const lines = content.split(/\r?\n/);
+  const lineIndex = lineNumber - 1;
+  const cells = parseTableRow(lines[lineIndex] ?? "");
+  if (!cells) throw new Error(`ROADMAP line ${lineNumber} is not a metadata table row.`);
+  if (repair.action === "update-roadmap-row") {
+    const complete = repairNumber(repair, "canonicalSummaries");
+    const total = repairNumber(repair, "canonicalPlans");
+    cells[2] = `${complete}/${total}`;
+    cells[3] = total > 0 && complete === total ? "Complete" : "Executing";
+  }
+  if (repair.action === "update-roadmap-completed") {
+    const date = /(?<date>\d{4}-\d{2}-\d{2})/.exec(repair.description)?.groups?.date;
+    if (!date) throw new Error("Completion timestamp repair is missing a proven date.");
+    cells[4] = date;
+  }
+  lines[lineIndex] = `| ${cells.join(" | ")} |`;
+  return lines.join("\n");
+}
+function parseTableRow(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return void 0;
+  if (/^\|\s*-+/.test(trimmed)) return void 0;
+  const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+  return cells.length >= 5 ? cells : void 0;
+}
+function repairLineNumber(repair) {
+  const line = repair.evidence.find((item) => typeof item.metadata?.line === "number")?.metadata?.line;
+  return typeof line === "number" ? line : void 0;
+}
+function repairNumber(repair, key) {
+  const value = repair.evidence.find((item) => typeof item.metadata?.[key] === "number")?.metadata?.[key];
+  if (typeof value !== "number") throw new Error(`Repair ${repair.action} is missing ${key} metadata.`);
+  return value;
+}
+function isBlankCompleted(value) {
+  return value === "" || value === "-" || value === "\u2014";
+}
+function metadataBlocker(artifact, path, message) {
+  return {
+    reasonCode: "unknown-drift",
+    artifact,
+    message: `${message} (${path})`,
+    evidence: [{
+      reasonCode: "unknown-drift",
+      path,
+      message
+    }],
+    suggestedNextAction: "manual-review"
+  };
+}
+
+// src/state-reconciliation/state.ts
+import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
+import { join as join7 } from "path";
+function readStateDigest(basePath) {
+  const path = join7(basePath, ".planning", "STATE.md");
+  if (!existsSync7(path)) {
+    return {
+      path,
+      frontmatter: {},
+      currentPosition: {},
+      blockers: [metadataBlocker2(path, "Missing STATE.md metadata file.")]
+    };
+  }
+  const content = readFileSync7(path, "utf8");
+  return {
+    path,
+    frontmatter: parseFrontmatter(content),
+    currentPosition: parseCurrentPosition(content),
+    blockers: []
+  };
+}
+function applyStateMetadataRepair(content, repair) {
+  if (repair.action !== "update-state-metadata") return content;
+  if (!repair.before || !repair.after) throw new Error("STATE metadata repair requires before and after text.");
+  assertStateMetadataOnly(repair.before);
+  assertStateMetadataOnly(repair.after);
+  return content.includes(repair.before) ? content.replace(repair.before, repair.after) : content;
+}
+function parseFrontmatter(content) {
+  const match = /^---\r?\n(?<body>[\s\S]*?)\r?\n---/.exec(content);
+  if (!match?.groups) return {};
+  const root = {};
+  let currentObject;
+  for (const rawLine of match.groups.body.split(/\r?\n/)) {
+    if (!rawLine.trim()) continue;
+    const nested = /^ {2}(?<key>[^:]+):\s*(?<value>.*)$/.exec(rawLine);
+    if (nested?.groups && currentObject) {
+      currentObject[nested.groups.key.trim()] = scalar(nested.groups.value.trim());
+      continue;
+    }
+    currentObject = void 0;
+    const top = /^(?<key>[^:]+):\s*(?<value>.*)$/.exec(rawLine);
+    if (!top?.groups) continue;
+    const key = top.groups.key.trim();
+    const value = top.groups.value.trim();
+    if (value === "") {
+      const child = {};
+      root[key] = child;
+      currentObject = child;
+      continue;
+    }
+    root[key] = scalar(value);
+  }
+  return root;
+}
+function assertStateMetadataOnly(text) {
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    if (/^(status|last_updated|last_activity|Phase|Plan|Progress):/.test(line.trim())) continue;
+    if (/^ {2}(total_phases|completed_phases|total_plans|completed_plans|percent):/.test(line)) continue;
+    throw new Error(`STATE metadata repair may not change non-metadata line: ${line}`);
+  }
+}
+function parseCurrentPosition(content) {
+  const section = currentPositionSection(content);
+  const digest = {};
+  for (const line of section.split(/\r?\n/)) {
+    const phase = /^Phase:\s*(?<phase>\d+)(?:\s*\((?<name>[^)]+)\))?\s*(?:[\u2014-]\s*(?<status>.+))?\s*$/.exec(line.trim());
+    if (phase?.groups) {
+      digest.phase = phase.groups.phase.padStart(2, "0");
+      if (phase.groups.name) digest.phaseName = phase.groups.name.trim();
+      if (phase.groups.status) digest.phaseStatus = phase.groups.status.trim();
+      continue;
+    }
+    const plan = /^Plan:\s*(?<current>\d+)\s+of\s+(?<total>\d+)/.exec(line.trim());
+    if (plan?.groups) {
+      digest.plan = Number(plan.groups.current);
+      digest.totalPlans = Number(plan.groups.total);
+      continue;
+    }
+    const progress = /^Progress:.*?(?<percent>\d+)%/.exec(line.trim());
+    if (progress?.groups) digest.percent = Number(progress.groups.percent);
+  }
+  return digest;
+}
+function currentPositionSection(content) {
+  const match = /## Current Position\r?\n(?<body>[\s\S]*?)(?:\r?\n## |\s*$)/.exec(content);
+  return match?.groups?.body ?? "";
+}
+function scalar(value) {
+  const unquoted = value.replace(/^["']|["']$/g, "");
+  return /^\d+$/.test(unquoted) ? Number(unquoted) : unquoted;
+}
+function metadataBlocker2(path, message) {
+  return {
+    reasonCode: "unknown-drift",
+    artifact: "state",
+    message: `${message} (${path})`,
+    evidence: [{
+      reasonCode: "unknown-drift",
+      path,
+      message
+    }],
+    suggestedNextAction: "manual-review"
+  };
+}
+
+// src/state-reconciliation/repair.ts
+function planRepairs(detection) {
+  return [...detection.repairs].sort((left, right) => repairKey(left).localeCompare(repairKey(right)));
+}
+function applyRepairs(basePath, repairs, fs = defaultFileSystem) {
+  const written = [];
+  const blockers = [];
+  for (const repair of planRepairs({ repairs })) {
+    const precondition = checkPreconditions(basePath, repair, fs);
+    if (precondition) {
+      blockers.push(written.length > 0 ? partialWriteBlocker(precondition.message, repair, written) : precondition);
+      break;
+    }
+    const path = repair.path;
+    try {
+      const before = fs.readFile(path);
+      const after = applyRepairContent(before, repair);
+      if (after === before) continue;
+      fs.writeFile(path, after);
+      written.push({ kind: repairKind(path), reasonCode: repair.reasonCode, path, action: "update" });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      blockers.push(partialWriteBlocker(`Failed to apply repair: ${detail}`, repair, written));
+      break;
+    }
+  }
+  return { ok: blockers.length === 0, written, blockers };
+}
+function repairKey(repair) {
+  return [
+    repair.path ?? "",
+    repair.phase ?? "",
+    repair.plan ?? "",
+    repair.reasonCode,
+    repair.action
+  ].join("\0");
+}
+function applyRepairContent(content, repair) {
+  if (repair.action === "update-roadmap-row" || repair.action === "update-roadmap-completed") {
+    return applyRoadmapRepair(content, repair);
+  }
+  if (repair.action === "update-state-metadata") return applyStateMetadataRepair(content, repair);
+  if (repair.action === "update-journal-metadata") return applyJournalMetadataRepair(content, repair);
+  return content;
+}
+function checkPreconditions(basePath, repair, fs) {
+  if (!repair.path) return repairBlocker("Repair target path is missing.", repair);
+  if (!isInsidePlanning(basePath, repair.path)) return repairBlocker(`Repair target is outside .planning: ${repair.path}`, repair);
+  if (!fs.exists(repair.path)) return repairBlocker(`Repair target does not exist: ${repair.path}`, repair);
+  return void 0;
+}
+function isInsidePlanning(basePath, path) {
+  const planningRoot = resolve(basePath, ".planning");
+  const target = resolve(path);
+  const rel = relative(planningRoot, target);
+  return rel === "" || !!rel && !rel.startsWith("..") && !isAbsolute(rel);
+}
+function repairBlocker(message, repair) {
+  return {
+    reasonCode: "unknown-drift",
+    message,
+    evidence: repair.evidence,
+    repairPlan: [repair],
+    suggestedNextAction: "manual-review"
+  };
+}
+function partialWriteBlocker(message, repair, written) {
+  return {
+    reasonCode: "partial-write",
+    message,
+    evidence: repair.evidence,
+    repairPlan: [repair],
+    written,
+    suggestedNextAction: "rerun-reconcile"
+  };
+}
+function repairKind(path) {
+  if (path.endsWith("ROADMAP.md")) return "roadmap";
+  if (path.endsWith("STATE.md")) return "state";
+  if (path.endsWith("orchestration-state.json")) return "journal";
+  return void 0;
+}
+var defaultFileSystem = {
+  exists: existsSync8,
+  readFile: (path) => readFileSync8(path, "utf8"),
+  writeFile: (path, content) => writeFileSync2(path, content, "utf8")
+};
+
+// src/state-reconciliation/scan.ts
+import { existsSync as existsSync9, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
+import { join as join8 } from "path";
+
+// src/state-reconciliation/artifacts.ts
+var PLAN_ARTIFACT = /^(?<phase>\d{2})-(?<plan>\d{2})-PLAN\.md$/;
+var SUMMARY_ARTIFACT = /^(?<phase>\d{2})-(?<plan>\d{2})-SUMMARY\.md$/;
+var PHASE_ARTIFACTS = [
+  [/^(?<phase>\d{2})-VERIFICATION\.md$/, "verification"],
+  [/^(?<phase>\d{2})-REVIEW\.md$/, "review"],
+  [/^(?<phase>\d{2})-CONTEXT\.md$/, "context"]
+];
+var PLAN_LIKE_MARKDOWN = /^(?<phase>\d{2})-.*PLAN.*\.md$/;
+function classifyArtifactName(filename) {
+  const plan = PLAN_ARTIFACT.exec(filename);
+  if (plan?.groups) return canonical(filename, "plan", plan.groups.phase, plan.groups.plan);
+  const summary = SUMMARY_ARTIFACT.exec(filename);
+  if (summary?.groups) return canonical(filename, "summary", summary.groups.phase, summary.groups.plan);
+  for (const [pattern, kind] of PHASE_ARTIFACTS) {
+    const match = pattern.exec(filename);
+    if (match?.groups) return canonical(filename, kind, match.groups.phase);
+  }
+  const planLike = PLAN_LIKE_MARKDOWN.exec(filename);
+  if (planLike?.groups) {
+    return {
+      canonical: false,
+      filename,
+      kind: "noncanonical",
+      phase: planLike.groups.phase,
+      reasonCode: "noncanonical-plan-like-file",
+      evidence: {
+        reasonCode: "noncanonical-plan-like-file",
+        phase: planLike.groups.phase,
+        artifact: "noncanonical",
+        message: "Plan-like markdown does not match canonical NN-YY-PLAN.md naming."
+      }
+    };
+  }
+  return { canonical: false, filename, kind: "ignored" };
+}
+function canonical(filename, kind, phase, plan) {
+  return { canonical: true, filename, kind, phase, ...plan ? { plan } : {} };
+}
+
+// src/state-reconciliation/scan.ts
+function scanPlanningArtifacts(basePath) {
+  const phasesPath = join8(basePath, ".planning", "phases");
+  if (!existsSync9(phasesPath)) {
+    const blocker = {
+      reasonCode: "unknown-drift",
+      artifact: "state",
+      message: `Missing .planning/phases directory at ${phasesPath}`,
+      evidence: [],
+      suggestedNextAction: "manual-review"
+    };
+    return { phasesPath, phases: [], totals: emptyTotals(), evidence: [], blockers: [blocker] };
+  }
+  const phases = /* @__PURE__ */ new Map();
+  const evidence = [];
+  const blockers = [];
+  for (const entry of readdirSync2(phasesPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isDirectory()) continue;
+    const phaseDir = join8(phasesPath, entry.name);
+    for (const file of readdirSync2(phaseDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!file.isFile()) continue;
+      const path = join8(phaseDir, file.name);
+      if (!statSync2(path).isFile()) continue;
+      const classification = classifyArtifactName(file.name);
+      if (classification.canonical) {
+        const phase = getOrCreatePhase(phases, classification.phase, phaseDir);
+        if (classification.kind === "plan") phase.plans.push(path);
+        if (classification.kind === "summary") phase.summaries.push(path);
+        if (classification.kind === "verification") phase.verifications.push(path);
+        if (classification.kind === "review") phase.reviews.push(path);
+        if (classification.kind === "context") phase.contexts.push(path);
+        continue;
+      }
+      if (classification.reasonCode === "noncanonical-plan-like-file" && classification.evidence) {
+        const item = { ...classification.evidence, path };
+        evidence.push(item);
+        if (classification.phase) getOrCreatePhase(phases, classification.phase, phaseDir).noncanonical.push(item);
+      }
+    }
+  }
+  const phaseList = [...phases.values()].sort((a, b) => a.phase.localeCompare(b.phase));
+  return {
+    phasesPath,
+    phases: phaseList,
+    totals: {
+      plans: sum(phaseList, "plans"),
+      summaries: sum(phaseList, "summaries"),
+      verifications: sum(phaseList, "verifications"),
+      reviews: sum(phaseList, "reviews"),
+      contexts: sum(phaseList, "contexts"),
+      noncanonical: sum(phaseList, "noncanonical")
+    },
+    evidence,
+    blockers
+  };
+}
+function getOrCreatePhase(phases, phase, directory) {
+  const existing = phases.get(phase);
+  if (existing) return existing;
+  const created = {
+    phase,
+    directory,
+    plans: [],
+    summaries: [],
+    verifications: [],
+    reviews: [],
+    contexts: [],
+    noncanonical: []
+  };
+  phases.set(phase, created);
+  return created;
+}
+function emptyTotals() {
+  return { plans: 0, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 0 };
+}
+function sum(phases, key) {
+  return phases.reduce((total, phase) => total + phase[key].length, 0);
+}
+
+// src/state-reconciliation/errors.ts
+var ReconciliationFailedError = class extends Error {
+  static suggestedNextActions = [
+    "manual-review",
+    "rerun-reconcile",
+    "requires-recovery-classification"
+  ];
+  reasonCode;
+  blockers;
+  repairPlan;
+  evidence;
+  suggestedNextAction;
+  report;
+  constructor(report) {
+    const firstBlocker = report.blockers[0];
+    const reasonCode = firstBlocker?.reasonCode ?? "unknown-drift";
+    super(`State reconciliation failed: ${reasonCode}`);
+    this.name = "ReconciliationFailedError";
+    this.reasonCode = reasonCode;
+    this.blockers = report.blockers;
+    this.repairPlan = firstBlocker?.repairPlan?.length ? firstBlocker.repairPlan : report.repairs;
+    this.evidence = uniqueEvidence([
+      ...report.evidence,
+      ...report.blockers.flatMap((blocker) => blocker.evidence)
+    ]);
+    this.suggestedNextAction = firstBlocker?.suggestedNextAction ?? suggestedActionFor(reasonCode);
+    this.report = report;
+  }
+};
+function uniqueEvidence(evidence) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const item of evidence) {
+    const key = JSON.stringify({
+      reasonCode: item.reasonCode,
+      path: item.path,
+      paths: item.paths,
+      phase: item.phase,
+      plan: item.plan,
+      artifact: item.artifact,
+      message: item.message
+    });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+function suggestedActionFor(reasonCode) {
+  if (reasonCode === "partial-write") return "rerun-reconcile";
+  if (reasonCode === "stale-worker") return "requires-recovery-classification";
+  return "manual-review";
+}
+
+// src/state-reconciliation/index.ts
+function reconcileBeforeDispatch(basePath, options = {}) {
+  const scan = scanPlanningArtifacts(basePath);
+  const snapshot = {
+    phasesPath: scan.phasesPath,
+    phases: scan.phases,
+    totals: scan.totals
+  };
+  const roadmap = readOptionalRoadmapState(basePath);
+  const state = readOptionalStateDigest(basePath);
+  const journal = readJournalState(basePath);
+  const detection = classifyDrift({ snapshot, roadmap, state, journal, activeUnitId: options.activeUnitId });
+  const blockers = [
+    ...scan.blockers,
+    ...roadmap?.blockers ?? [],
+    ...state?.blockers ?? [],
+    ...journal.blockers,
+    ...detection.blockers
+  ];
+  const repairs = planRepairs(detection);
+  const application = options.apply && blockers.length === 0 ? applyRepairs(basePath, repairs, options.fileSystem) : { ok: true, blockers: [], written: [] };
+  return {
+    ok: blockers.length === 0 && application.ok,
+    snapshot,
+    repairs,
+    blockers: [...blockers, ...application.blockers],
+    written: application.written,
+    evidence: [...scan.evidence, ...detection.evidence]
+  };
+}
+function readOptionalRoadmapState(basePath) {
+  return existsSync10(join9(basePath, ".planning", "ROADMAP.md")) ? readRoadmapState(basePath) : void 0;
+}
+function readOptionalStateDigest(basePath) {
+  return existsSync10(join9(basePath, ".planning", "STATE.md")) ? readStateDigest(basePath) : void 0;
+}
+
+// src/orchestrator/reconciliation.ts
+var maxEvidenceItems = 20;
+var maxEvidenceLength = 240;
+function reconcileBeforeDispatch2(snapshot, unit2) {
   if (snapshot.status !== "running") {
     return {
       ok: false,
@@ -1229,13 +2100,66 @@ function reconcileBeforeDispatch(snapshot, unit2) {
       evidence: [`current:${snapshot.currentUnit?.id ?? "none"}`, `target:${unit2.id}`]
     };
   }
-  return { ok: true, gate: "reconcileBeforeDispatch", evidence: ["phase-9-minimal-reconciliation"] };
+  const basePath = snapshot.cwd ?? process.cwd();
+  const report = reconcileBeforeDispatch(basePath, {
+    activeUnitId: unit2.id,
+    apply: snapshot.settings.workflow.state_reconciliation_apply === true
+  });
+  if (!report.ok) return toGateFailure(toReconciliationFailedError(report), basePath);
+  return {
+    ok: true,
+    gate: "reconcileBeforeDispatch",
+    evidence: [
+      "native-state-reconciliation",
+      `repairs:${report.repairs.length}`,
+      `written:${report.written.length}`
+    ]
+  };
+}
+function toReconciliationFailedError(report) {
+  return new ReconciliationFailedError(report);
+}
+function toGateFailure(error, basePath = process.cwd()) {
+  return {
+    ok: false,
+    gate: "reconcileBeforeDispatch",
+    reason: error.reasonCode,
+    retryable: false,
+    resumeHint: `State reconciliation blocked dispatch: ${error.reasonCode}. Inspect structured blockers before continuing.`,
+    evidence: boundedGateEvidence(error, basePath)
+  };
+}
+function boundedGateEvidence(error, basePath) {
+  const values = [
+    `reason:${error.reasonCode}`,
+    `suggestedNextAction:${error.suggestedNextAction}`,
+    ...error.blockers.flatMap((blocker) => [
+      `blocker:${blocker.reasonCode}`,
+      ...blocker.evidence.flatMap((evidence) => evidenceToStrings(evidence, basePath))
+    ])
+  ];
+  return [...new Set(values.map(truncateEvidence))].slice(0, maxEvidenceItems);
+}
+function evidenceToStrings(evidence, basePath) {
+  const values = [`evidence:${evidence.reasonCode}`];
+  if (evidence.path) values.push(`path:${safeRelativePath(basePath, evidence.path)}`);
+  for (const path of evidence.paths ?? []) values.push(`path:${safeRelativePath(basePath, path)}`);
+  if (evidence.phase) values.push(`phase:${evidence.phase}`);
+  if (evidence.plan) values.push(`plan:${evidence.plan}`);
+  return values;
+}
+function safeRelativePath(basePath, path) {
+  const rel = relative2(basePath, path);
+  return rel && !rel.startsWith("..") ? rel : path;
+}
+function truncateEvidence(value) {
+  return value.length <= maxEvidenceLength ? value : `${value.slice(0, maxEvidenceLength)}...`;
 }
 
 // src/orchestrator/gates.ts
 function runPreDispatchGates(snapshot, unit2, overrides = {}) {
   const orderedGates = [
-    ["reconcileBeforeDispatch", overrides.reconcileBeforeDispatch ?? reconcileBeforeDispatch],
+    ["reconcileBeforeDispatch", overrides.reconcileBeforeDispatch ?? reconcileBeforeDispatch2],
     ["decideDispatch", overrides.decideDispatch ?? decideDispatch],
     ["validateToolContract", overrides.validateToolContract ?? validateToolContract],
     ["prepareUnitRoot", overrides.prepareUnitRoot ?? prepareUnitRoot],
@@ -1248,9 +2172,9 @@ function runPreDispatchGates(snapshot, unit2, overrides = {}) {
   return { ok: true, gate: "persistRuntimeState", evidence: orderedGates.map(([name]) => name) };
 }
 function runPostDispatchGate(snapshot, unit2, options = {}) {
-  const exists = options.exists ?? existsSync5;
+  const exists = options.exists ?? existsSync11;
   const cwd = options.cwd ?? process.cwd();
-  const phaseDir = join5(cwd, ".planning", "phases");
+  const phaseDir = join10(cwd, ".planning", "phases");
   if (unit2.type === "plan") {
     return existsMatching(cwd, phaseDir, unit2.phase, "PLAN.md", exists, options.written) ? pass("artifact", "plan artifact exists") : fail("Plan Unit did not produce a *-PLAN.md artifact.", [`missing:${unit2.phase}-*-PLAN.md`]);
   }
@@ -1300,10 +2224,10 @@ function existsMatching(cwd, phaseRoot, phase, suffix, exists, written) {
   const artifactPattern = new RegExp(`^${escapeRegExp(phase)}(?:-\\d+)?-${escapeRegExp(suffix)}$`);
   try {
     const candidates = [
-      ...readdirSync2(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join5(phaseRoot, entry.name)),
-      ...readdirSync2(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync2(join5(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join5(phaseRoot, entry.name, child.name)))
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join10(phaseRoot, entry.name)),
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync3(join10(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join10(phaseRoot, entry.name, child.name)))
     ];
-    return candidates.some((path) => artifactPattern.test(basename(path)) && writtenSet.has(resolve(path)) && exists(path));
+    return candidates.some((path) => artifactPattern.test(basename2(path)) && writtenSet.has(resolve2(path)) && exists(path));
   } catch {
     return false;
   }
@@ -1312,18 +2236,18 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function normalizeWrittenPath(cwd, value) {
-  return resolve(isAbsolute(value) ? value : resolve(cwd, value));
+  return resolve2(isAbsolute2(value) ? value : resolve2(cwd, value));
 }
 function closeoutEvidence(cwd, phase, written) {
   if (!written?.length) return false;
   const writtenSet = new Set(written.map((path) => normalizeWrittenPath(cwd, path)));
-  const roadmapPath = resolve(cwd, ".planning", "ROADMAP.md");
-  const statePath = resolve(cwd, ".planning", "STATE.md");
+  const roadmapPath = resolve2(cwd, ".planning", "ROADMAP.md");
+  const statePath = resolve2(cwd, ".planning", "STATE.md");
   if (!writtenSet.has(roadmapPath) || !writtenSet.has(statePath)) return false;
   try {
-    const roadmap = readFileSync4(roadmapPath, "utf8");
-    const state = readFileSync4(statePath, "utf8");
-    statSync2(join5(cwd, ".planning", "phases"));
+    const roadmap = readFileSync9(roadmapPath, "utf8");
+    const state = readFileSync9(statePath, "utf8");
+    statSync3(join10(cwd, ".planning", "phases"));
     return roadmapPhaseComplete(roadmap, phase) && statePhaseComplete(state, phase);
   } catch {
     return false;
@@ -1649,15 +2573,15 @@ function withLastEvent(snapshot, event) {
 }
 
 // src/orchestrator/journal.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync2, readFileSync as readFileSync5, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname3, isAbsolute as isAbsolute2, resolve as resolve2, relative } from "path";
+import { existsSync as existsSync12, mkdirSync as mkdirSync2, readFileSync as readFileSync10, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname3, isAbsolute as isAbsolute3, resolve as resolve3, relative as relative3 } from "path";
 var DEFAULT_JOURNAL_PATH = ".planning/orchestration-state.json";
 var allowedEventKeys = /* @__PURE__ */ new Set(["type", "ts", "phase", "unitId", "status", "attempt", "reason", "resumeHint", "evidence"]);
 var unsafeEventKeys = /* @__PURE__ */ new Set(["prompt", "userText", "env", "token", "secret", "password", "apiKey", "api_key", "authorization", "bearer", "args", "arguments", "rawArgs"]);
 var safeMetadataKeys = /* @__PURE__ */ new Set(["setting", "source", "label", "safe"]);
 var secretPattern = /(?:password|secret|token|api[_-]?key|authorization|bearer)/i;
 var maxStringLength = 240;
-var maxEvidenceItems = 20;
+var maxEvidenceItems2 = 20;
 function createJournalAdapter(options) {
   return {
     append(event, snapshot) {
@@ -1679,11 +2603,11 @@ function createJournalAdapter(options) {
 function readJournal(options) {
   const resolved = resolveJournalPath(options);
   if (!resolved.ok) return { ok: false, messages: resolved.messages };
-  if (!existsSync6(resolved.path)) {
+  if (!existsSync12(resolved.path)) {
     return { ok: true, messages: ["orchestration journal not found"] };
   }
   try {
-    const parsed = JSON.parse(readFileSync5(resolved.path, "utf8"));
+    const parsed = JSON.parse(readFileSync10(resolved.path, "utf8"));
     const journal = normalizeJournal(parsed);
     if (!journal) {
       return { ok: false, messages: ["orchestration journal is invalid"] };
@@ -1723,7 +2647,7 @@ function redactJournalEvent(event) {
     }
     if (key === "evidence") {
       const evidence = Array.isArray(value) ? value : [];
-      redacted.evidence = evidence.filter((item) => typeof item === "string").slice(0, maxEvidenceItems).map(safeString);
+      redacted.evidence = evidence.filter((item) => typeof item === "string").slice(0, maxEvidenceItems2).map(safeString);
       continue;
     }
     if (typeof value === "string") {
@@ -1748,7 +2672,7 @@ function redactUnit(unit2) {
 function writeJournal(path, journal) {
   try {
     mkdirSync2(dirname3(path), { recursive: true });
-    writeFileSync2(path, `${JSON.stringify(journal, null, 2)}
+    writeFileSync3(path, `${JSON.stringify(journal, null, 2)}
 `, "utf8");
     return { ok: true, messages: ["orchestration journal written"], written: [path], snapshot: journal.snapshot, status: journal.snapshot ? void 0 : void 0 };
   } catch (error) {
@@ -1756,17 +2680,17 @@ function writeJournal(path, journal) {
   }
 }
 function resolveJournalPath(options) {
-  const cwd = resolve2(options.cwd);
-  const planningDir = resolve2(cwd, ".planning");
-  const candidate = resolve2(cwd, options.journalPath ?? DEFAULT_JOURNAL_PATH);
+  const cwd = resolve3(options.cwd);
+  const planningDir = resolve3(cwd, ".planning");
+  const candidate = resolve3(cwd, options.journalPath ?? DEFAULT_JOURNAL_PATH);
   if (!isInsideOrSame(planningDir, candidate)) {
     return { ok: false, messages: [`refusing orchestration journal path outside .planning: ${candidate}`] };
   }
   return { ok: true, path: candidate };
 }
 function isInsideOrSame(parent, child) {
-  const rel = relative(parent, child);
-  return rel === "" || !rel.startsWith("..") && !isAbsolute2(rel);
+  const rel = relative3(parent, child);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
 }
 function normalizeJournal(value) {
   if (!value || typeof value !== "object") return void 0;
@@ -1890,7 +2814,7 @@ function createNativeAutoHandoff(options) {
 }
 
 // src/extension.ts
-var piGsdPackageRoot = resolve3(dirname4(fileURLToPath(import.meta.url)), "..");
+var piGsdPackageRoot = resolve4(dirname4(fileURLToPath(import.meta.url)), "..");
 var TEMP_DIR_SUBDIRS = ["async-subagent-results", "async-subagent-runs"];
 function buildPiSubagentsTempRoot() {
   const username = (() => {
@@ -1907,14 +2831,14 @@ function buildPiSubagentsTempRoot() {
     return "unknown";
   })();
   const sanitized = username.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
-  return join7(tmpdir(), `pi-subagents-user-${sanitized}`);
+  return join12(tmpdir(), `pi-subagents-user-${sanitized}`);
 }
 function guardPiSubagentsTempDirs(options) {
   try {
     const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync3 };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
     for (const subdir of TEMP_DIR_SUBDIRS) {
-      const dirPath = join7(tempRoot, subdir);
+      const dirPath = join12(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
       } catch {
@@ -2059,6 +2983,7 @@ function errorMessage(error) {
 export {
   commandFileToPiPromptName,
   normalizeGsdSlashReferences,
+  transformGsdRunLauncher,
   addPiSubagentGuidance,
   splitCodeFences,
   transformAskUserQuestionForPi,
@@ -2071,6 +2996,7 @@ export {
   rewriteRuntimeMessageText,
   createCommandDispatchRunner,
   createDispatchAdapter,
+  resolveWorkflowSettings,
   createAutoOrchestrator,
   start,
   advance,

@@ -9,7 +9,7 @@ import {
   type ModelChoiceLike,
 } from "../src/gsd-models.js";
 
-const GSD_ROOT = join(process.cwd(), "node_modules", "@opengsd", "get-shit-done-redux");
+const GSD_ROOT = join(process.cwd(), "node_modules", "@opengsd", "gsd-core");
 
 function mockModels(): ModelChoiceLike[] {
   return [

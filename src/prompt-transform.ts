@@ -6,6 +6,20 @@ export function normalizeGsdSlashReferences(input: string): string {
   return input.replace(/(^|[\s([{'"`])\/gsd:([a-z0-9][a-z0-9-]*)/g, "$1/gsd-$2");
 }
 
+const gsdToolsRequireResolve = "require.resolve('@opengsd/gsd-core/get-shit-done/bin/gsd-tools.cjs')";
+
+export function transformGsdRunLauncher(input: string): string {
+  if (input.includes(gsdToolsRequireResolve)) return input;
+
+  return input.replace(/^.*_GSD_SHIM_NAME="gsd-tools\.cjs".*$/gm, (launcherLine) => {
+    const nodeModulesFallback =
+      `_GSD_SHIM_NAME="gsd-tools.cjs"; GSD_TOOLS="$(node -e "console.log(${gsdToolsRequireResolve})" 2>/dev/null)"; ` +
+      `if [ -n "$GSD_TOOLS" ] && [ -f "$GSD_TOOLS" ]; then gsd_run() { node "$GSD_TOOLS" "$@"; }; ` +
+      `else ${launcherLine}; fi`;
+    return nodeModulesFallback;
+  });
+}
+
 const piSubagentGuidance = `<pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi \`subagent\` tool from \`pi-subagents\`.
 Before delegation, inspect available agents with \`subagent({ action: "list" })\`.

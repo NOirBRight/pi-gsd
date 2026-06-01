@@ -14,7 +14,7 @@ import {
   syncAgents,
   transformOfficialAgentMarkdown,
   writeFrontmatter
-} from "./chunk-E25V7VD3.js";
+} from "./chunk-XTOKA55K.js";
 import {
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
@@ -32,9 +32,10 @@ import {
   start,
   stop,
   transformAskUserQuestionForPi,
+  transformGsdRunLauncher,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi
-} from "./chunk-GBKM44ZU.js";
+} from "./chunk-6TFWBYXD.js";
 export {
   OFFICIAL_PACKAGE_NAME,
   OFFICIAL_ROOT_PLACEHOLDER,
@@ -65,6 +66,7 @@ export {
   stop,
   syncAgents,
   transformAskUserQuestionForPi,
+  transformGsdRunLauncher,
   transformOfficialAgentMarkdown,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi,

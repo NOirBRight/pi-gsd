@@ -6,6 +6,7 @@ import {
   commandFileToPiPromptName,
   normalizeGsdSlashReferences,
   transformAskUserQuestionForPi,
+  transformGsdRunLauncher,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi,
 } from "./prompt-transform.js";
@@ -55,7 +56,7 @@ function applyPromptTransforms(body: string, _packageName: string): string {
   return transformSkillDispatchForPi(
     transformSubagentDispatchForPi(
       transformAskUserQuestionForPi(
-        addPiSubagentGuidance(normalizeGsdSlashReferences(body)),
+        addPiSubagentGuidance(normalizeGsdSlashReferences(transformGsdRunLauncher(body))),
       ),
     ),
   );

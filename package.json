@@ -18,6 +18,7 @@
     "dist",
     "generated/prompts",
     "generated/agents",
+    "generated/workflows",
     "docs/PUBLISHING.md",
     "README.md",
     "LICENSE"
@@ -26,7 +27,7 @@
     "build": "tsup src/cli.ts src/extension.ts src/index.ts --format esm --dts --clean --out-dir dist --external @earendil-works/pi-tui --external @earendil-works/pi-coding-agent",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build && node dist/cli.js doctor --prompts generated/prompts --cwd .",
+    "check": "npm run typecheck && npm test && npm run build && node dist/cli.js doctor --prompts generated/prompts --workflows generated/workflows --cwd .",
     "generate": "node dist/cli.js generate"
   },
   "engines": {
