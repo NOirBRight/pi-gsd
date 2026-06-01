@@ -28,7 +28,7 @@ export function reconcileBeforeDispatch(basePath: string, options: Reconciliatio
   const roadmap = readOptionalRoadmapState(basePath);
   const state = readOptionalStateDigest(basePath);
   const journal = readJournalState(basePath);
-  const detection = classifyDrift({ snapshot, roadmap, state, journal });
+  const detection = classifyDrift({ snapshot, roadmap, state, journal, activeUnitId: options.activeUnitId });
   const blockers = [
     ...scan.blockers,
     ...(roadmap?.blockers ?? []),

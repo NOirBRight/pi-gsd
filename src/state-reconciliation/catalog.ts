@@ -27,6 +27,7 @@ export type DriftDetectionInput = {
   roadmap?: RoadmapState;
   state?: StateDigest;
   journal?: JournalState;
+  activeUnitId?: string;
   sketch?: {
     phase?: string;
     expectedEnabled?: boolean;

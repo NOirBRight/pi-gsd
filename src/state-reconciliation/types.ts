@@ -18,6 +18,7 @@ export type CanonicalArtifactKind = "plan" | "summary" | "verification" | "revie
 export type ReconciliationOptions = {
   apply?: boolean;
   phase?: string;
+  activeUnitId?: string;
   now?: () => string;
   fileSystem?: ReconciliationFileSystem;
 };

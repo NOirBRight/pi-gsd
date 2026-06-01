@@ -6,6 +6,7 @@ export function detectStaleWorker(input: DriftDetectionInput): DriftDetection {
   if (!journal?.ok || journal.journal?.snapshot.status !== "running") return empty();
 
   const currentUnit = unitId(journal.journal.snapshot.currentUnit);
+  if (currentUnit && currentUnit === input.activeUnitId) return empty();
   const evidence: ReconciliationEvidence[] = [{
     reasonCode: "stale-worker",
     path: journal.path,
