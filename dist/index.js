@@ -14,7 +14,7 @@ import {
   syncAgents,
   transformOfficialAgentMarkdown,
   writeFrontmatter
-} from "./chunk-XTOKA55K.js";
+} from "./chunk-JCRRSCBD.js";
 import {
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,

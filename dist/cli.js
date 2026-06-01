@@ -4,7 +4,7 @@ import {
   generatePrompts,
   runDoctor,
   syncAgents
-} from "./chunk-XTOKA55K.js";
+} from "./chunk-JCRRSCBD.js";
 import {
   createAutoOrchestrator,
   createCommandDispatchRunner,

@@ -520,14 +520,16 @@ import { basename, join as join5, relative as relative2 } from "path";
 // src/rpiv.ts
 import { readFileSync as readFileSync5 } from "fs";
 import { createRequire as createRequire2 } from "module";
+import { homedir as homedir2 } from "os";
 import { dirname as dirname3, join as join4 } from "path";
 var RPIV_PACKAGE_NAME = "@juicesharp/rpiv-ask-user-question";
 function resolveRpivPackage(options = {}) {
   const startDir = options.startDir ?? process.cwd();
   const require2 = createRequire2(import.meta.url);
+  const resolvePaths = [startDir, piNpmPackageRoot()];
   let packageJsonPath;
   try {
-    packageJsonPath = require2.resolve(`${RPIV_PACKAGE_NAME}/package.json`, { paths: [startDir] });
+    packageJsonPath = require2.resolve(`${RPIV_PACKAGE_NAME}/package.json`, { paths: resolvePaths });
   } catch {
     try {
       packageJsonPath = require2.resolve(`${RPIV_PACKAGE_NAME}/package.json`);
@@ -536,7 +538,7 @@ function resolveRpivPackage(options = {}) {
   }
   if (!packageJsonPath) {
     try {
-      const entryPath = require2.resolve(RPIV_PACKAGE_NAME, { paths: [startDir] });
+      const entryPath = require2.resolve(RPIV_PACKAGE_NAME, { paths: resolvePaths });
       let dir = dirname3(entryPath);
       for (let i = 0; i < 10; i++) {
         const candidate = join4(dir, "package.json");
@@ -561,6 +563,9 @@ function resolveRpivPackage(options = {}) {
     throw new Error(`@juicesharp/rpiv-ask-user-question package.json is missing a string version.`);
   }
   return { packageRoot: dirname3(packageJsonPath), packageName: RPIV_PACKAGE_NAME, version: packageJson.version };
+}
+function piNpmPackageRoot() {
+  return join4(process.env.PI_CODING_AGENT_DIR ?? join4(homedir2(), ".pi", "agent"), "npm");
 }
 
 // src/doctor.ts

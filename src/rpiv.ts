@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export const RPIV_PACKAGE_NAME = "@juicesharp/rpiv-ask-user-question";
@@ -17,11 +18,12 @@ export type RpivPackage = {
 export function resolveRpivPackage(options: { startDir?: string } = {}): RpivPackage {
   const startDir = options.startDir ?? process.cwd();
   const require = createRequire(import.meta.url);
+  const resolvePaths = [startDir, piNpmPackageRoot()];
 
   // Strategy 1: resolve package.json directly (works when exports allow it)
   let packageJsonPath: string | undefined;
   try {
-    packageJsonPath = require.resolve(`${RPIV_PACKAGE_NAME}/package.json`, { paths: [startDir] });
+    packageJsonPath = require.resolve(`${RPIV_PACKAGE_NAME}/package.json`, { paths: resolvePaths });
   } catch {
     try {
       packageJsonPath = require.resolve(`${RPIV_PACKAGE_NAME}/package.json`);
@@ -33,7 +35,7 @@ export function resolveRpivPackage(options: { startDir?: string } = {}): RpivPac
   // Strategy 2: resolve the package entrypoint, then walk up to find package.json
   if (!packageJsonPath) {
     try {
-      const entryPath = require.resolve(RPIV_PACKAGE_NAME, { paths: [startDir] });
+      const entryPath = require.resolve(RPIV_PACKAGE_NAME, { paths: resolvePaths });
       // Walk up from the resolved entry to find the nearest package.json
       let dir = dirname(entryPath);
       for (let i = 0; i < 10; i++) {
@@ -62,4 +64,8 @@ export function resolveRpivPackage(options: { startDir?: string } = {}): RpivPac
     throw new Error(`@juicesharp/rpiv-ask-user-question package.json is missing a string version.`);
   }
   return { packageRoot: dirname(packageJsonPath), packageName: RPIV_PACKAGE_NAME, version: packageJson.version };
+}
+
+function piNpmPackageRoot(): string {
+  return join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"), "npm");
 }
