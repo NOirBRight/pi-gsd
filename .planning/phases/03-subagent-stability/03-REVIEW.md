@@ -81,7 +81,7 @@ if (errorCode === "EACCES" || errorCode === "EPERM") {
   ok = false;
   messages.push(`pi-subagents temp ACL: MISSING — directory ${dirPath} does not exist. Subagents may fail until it is created.`);
 } else {
-  messages.push(`pi-subagents temp ACL: check error (${errorCode}): ${dirPath}`);
+  messages.push(`pi-subagents temp ACL: ok (dir not found: ${dirPath})`);
 }
 ```
 
@@ -92,9 +92,8 @@ if (errorCode === "EACCES" || errorCode === "EPERM") {
 **Fix:**
 ```typescript
 // Use the sanitized username rather than raw process.env.USERNAME:
-// Extract the sanitization logic into a shared helper, or at minimum:
 const username = process.env.USERNAME ?? "$USERNAME";
-// Escape for PowerShell by wrapping in single quotes (literal string):
+// Or, escape for PowerShell by wrapping in single quotes (PowerShell literal string):
 `icacls "${dirPath}" /grant '${username}':F /t; `
 ```
 
@@ -104,7 +103,7 @@ const username = process.env.USERNAME ?? "$USERNAME";
 
 **File:** `src/extension.ts:28-32`
 **Issue:** `buildPiSubagentsTempRoot` includes a `require("node:os")` fallback to call `os.userInfo()` for the username. However, the module already has `import { tmpdir } from "node:os"` at line 2, which guarantees `node:os` is loaded. The `require` fallback inside the IIFE can never fail (if the ESM import worked, `require` will also succeed), making the try/catch dead code. The `os.userInfo()` call could be replaced with a direct import.
-**Fix:** Replace the `require` fallback with a top-level import:
+**Fix:** Replace the `require` fallback with a top-level helper or import:
 ```typescript
 import { tmpdir, userInfo } from "node:os";
 // Then in buildPiSubagentsTempRoot:
@@ -120,4 +119,6 @@ if (info.username) return info.username;
 
 ---
 
-_Revi
+_Reviewed: 2026-05-30T02:11:00Z_
+_Reviewer: Claude (gsd-code-reviewer)_
+_Depth: deep_

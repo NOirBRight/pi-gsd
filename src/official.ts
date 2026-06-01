@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-export const OFFICIAL_PACKAGE_NAME = "@opengsd/get-shit-done-redux";
+export const OFFICIAL_PACKAGE_NAME = "@opengsd/gsd-core";
 
 export interface OfficialPaths {
   commandsDir: string;

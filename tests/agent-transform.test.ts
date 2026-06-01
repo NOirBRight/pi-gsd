@@ -1,5 +1,4 @@
 import { materializeOfficialAgentPaths, transformOfficialAgentMarkdown } from "../src/agent-transform.js";
-
 describe("transformOfficialAgentMarkdown", () => {
   it("preserves agent identity and maps known Claude tools to Pi tools", () => {
     const result = transformOfficialAgentMarkdown(`---
@@ -76,6 +75,20 @@ URL: https://example.com/#/gsd:plan-phase
     expect(result.markdown).toContain("URL: https://example.com/#/gsd:plan-phase");
   });
 
+  it("normalizes official GSD slash command references in agent bodies", () => {
+    const result = transformOfficialAgentMarkdown(`---
+name: gsd-roadmapper
+description: Creates roadmaps
+---
+
+Next: \`/gsd:plan-phase 1\`
+URL: https://example.com/#/gsd:plan-phase
+`);
+
+    expect(result.markdown).toContain("Next: `/gsd-plan-phase 1`");
+    expect(result.markdown).toContain("URL: https://example.com/#/gsd:plan-phase");
+  });
+
   it("rewrites bare HOME references to official root placeholders", () => {
     const result = transformOfficialAgentMarkdown(`---
 name: gsd-runner
@@ -94,11 +107,51 @@ Run node "$HOME/.claude/get-shit-done/bin/gsd-tools.cjs".
   it("materializes official root placeholders for synced agents", () => {
     const materialized = materializeOfficialAgentPaths(
       "@__PI_GSD_OFFICIAL_ROOT__/get-shit-done/references/mandatory-initial-read.md\n",
-      "D:\\Workstation\\pi-gsd\\node_modules\\@opengsd\\get-shit-done-redux",
+      "D:\\Workstation\\pi-gsd\\node_modules\\@opengsd\\gsd-core",
     );
 
     expect(materialized).toBe(
-      "@D:/Workstation/pi-gsd/node_modules/@opengsd/get-shit-done-redux/get-shit-done/references/mandatory-initial-read.md\n",
+      "@D:/Workstation/pi-gsd/node_modules/@opengsd/gsd-core/get-shit-done/references/mandatory-initial-read.md\n",
     );
+  });
+
+  it("rewrites subagent_type=\"general-purpose\" to subagent_type=\"general\" in agent body", () => {
+    const result = transformOfficialAgentMarkdown(`---
+name: gsd-advisor
+description: Advisor agent
+tools: Read
+---
+
+Spawn a subagent with subagent_type="general-purpose" to research.
+`);
+
+    expect(result.markdown).toContain('subagent_type="general"');
+    expect(result.markdown).not.toContain('subagent_type="general-purpose"');
+  });
+
+  it("rewrites Agent(subagent_type=...) to subagent({agent: ...}) in agent body", () => {
+    const result = transformOfficialAgentMarkdown(`---
+name: gsd-orchestrator
+description: Orchestrates agents
+tools: Read, Bash
+---
+
+Agent(subagent_type="gsd-executor", prompt="Run plan")
+`);
+
+    expect(result.markdown).toContain('subagent({agent: "gsd-executor", task: "Run plan"})');
+    expect(result.markdown).not.toContain('Agent(subagent_type=');
+  });
+
+  it("preserves text without subagent_type or Agent() patterns", () => {
+    const result = transformOfficialAgentMarkdown(`---
+name: gsd-simple
+description: Simple agent
+---
+
+Just read the file and report.
+`);
+
+    expect(result.markdown).toContain('Just read the file and report.');
   });
 });

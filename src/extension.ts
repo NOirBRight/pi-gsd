@@ -73,9 +73,6 @@ export type GuardOptions = {
  * guard that must not crash Pi.
  */
 export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
-  // Reset ACL diagnostic flag at the start of each guard run.
-  // Without this, hot reload or session resume would carry over stale true from a previous run.
-  delete (globalThis as Record<string, unknown>).__piSubagentsTempAclBroken;
   try {
     const fsImpl: GuardFs = options?.fs ?? { accessSync, rmSync, mkdirSync };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
@@ -84,16 +81,8 @@ export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
       const dirPath = join(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
-      } catch (accessError: unknown) {
-        const errorCode = typeof accessError === "object" && accessError !== null && "code" in accessError
-          ? (accessError as { code: string }).code
-          : "";
-        // Only repair for ACL corruption (EACCES/EPERM).
-        // Non-ACL errors (ENOENT, EBUSY, etc.) are not corruption — skip repair.
-        if (errorCode !== "EACCES" && errorCode !== "EPERM") {
-          continue;
-        }
-        // Directory has ACL corruption — try to repair
+      } catch {
+        // Directory is inaccessible — try to repair
         try {
           fsImpl.rmSync(dirPath, { recursive: true, force: true });
           fsImpl.mkdirSync(dirPath, { recursive: true });
@@ -129,11 +118,6 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
     // This runs AFTER extension load, so it's a late-stage safety net — see comment
     // on guardPiSubagentsTempDirs for limitations.
     guardPiSubagentsTempDirs();
-
-    // If ACL repair failed, warn the user so they can take action
-    if ((globalThis as Record<string, unknown>).__piSubagentsTempAclBroken) {
-      notify(ctx, "pi-gsd: pi-subagents temp directories have ACL corruption that could not be auto-repaired. Run 'pi gsd doctor' for repair instructions.", "warning");
-    }
 
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (pkgRoot) {

@@ -1,7 +1,7 @@
 {
-  "name": "pi-gsd-redux",
-  "version": "0.1.0",
-  "description": "Pi adapter for official Open GSD without forking workflows",
+  "name": "pi-gsd-core",
+  "version": "0.2.0",
+  "description": "Pi runtime adapter for upstream @opengsd/gsd-core",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,7 +12,7 @@
     }
   },
   "bin": {
-    "pi-gsd-redux": "dist/cli.js"
+    "pi-gsd-core": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -50,11 +50,19 @@
   "license": "MIT",
   "dependencies": {
     "@earendil-works/pi-tui": "^0.77.0",
-    "@opengsd/get-shit-done-redux": "latest",
+    "@opengsd/gsd-core": "1.2.0",
     "pi-subagents": "github:NOirBRight/pi-subagents#ec7bfe8ac129f658008d508925e81baf3c32c41c"
   },
   "overrides": {
     "pi-subagents": "github:NOirBRight/pi-subagents#ec7bfe8ac129f658008d508925e81baf3c32c41c"
+  },
+  "peerDependencies": {
+    "@juicesharp/rpiv-ask-user-question": "^1.15.0"
+  },
+  "peerDependenciesMeta": {
+    "@juicesharp/rpiv-ask-user-question": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",

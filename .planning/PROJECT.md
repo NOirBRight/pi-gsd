@@ -11,6 +11,8 @@ Pi adapter for Get Shit Done (GSD) — an upstream-compatible extension that gen
 - Agent frontmatter normalization (CRLF-safe, Pi-compatible)
 - Interactive model routing: `/gsd-models` command maps upstream model tiers to local Pi models
 - Doctor and sync tooling for agent lifecycle management
+- AskUserQuestion, Skill(), and subagent_type runtime transformations for Pi compatibility
+- rpiv-ask-user-question peer dependency verification in doctor
 
 ## Non-Goals
 

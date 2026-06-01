@@ -94,6 +94,38 @@ tools: Read, Write, Bash, Glob, Grep
     );
     expect(readFileSync(marker, "utf8")).toBe("export const keep = true;\n");
   });
+
+  it("rewrites subagent_type=\"general-purpose\" to subagent_type=\"general\" in generated agents", () => {
+    const fixture = createOfficialFixture();
+    writeFileSync(
+      join(fixture.packageRoot, "agents", "gsd-advisor.md"),
+      '---\nname: gsd-advisor\ndescription: Advisor agent\ntools: Read\n---\n\nsubagent_type="general-purpose"\n',
+      "utf8",
+    );
+    const outDir = join(fixture.root, "generated", "agents");
+
+    generateAgents({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-advisor.md"), "utf8");
+    expect(generated).toContain('subagent_type="general"');
+    expect(generated).not.toContain('general-purpose');
+  });
+
+  it("rewrites Agent(subagent_type=...) to subagent({agent: ..., task: ...}) in generated agents", () => {
+    const fixture = createOfficialFixture();
+    writeFileSync(
+      join(fixture.packageRoot, "agents", "gsd-orchestrator.md"),
+      '---\nname: gsd-orchestrator\ndescription: Orchestrates\ntools: Read, Bash\n---\n\nAgent(subagent_type="gsd-executor", prompt="Run the plan")\n',
+      "utf8",
+    );
+    const outDir = join(fixture.root, "generated", "agents");
+
+    generateAgents({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-orchestrator.md"), "utf8");
+    expect(generated).toContain('subagent({agent: "gsd-executor", task: "Run the plan"})');
+    expect(generated).not.toContain('Agent(subagent_type=');
+  });
 });
 
 function writePlannerAgent(packageRoot: string) {

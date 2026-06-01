@@ -13,7 +13,7 @@ const requiredDirectories = [
 
 export function createOfficialFixture(options: { omit?: string[]; packageName?: string } = {}) {
   const root = mkdtempRoot();
-  const packageName = options.packageName ?? "@opengsd/get-shit-done-redux";
+  const packageName = options.packageName ?? "@opengsd/gsd-core";
   const packageRoot = join(root, "node_modules", ...packageName.split("/"));
   const omitted = new Set(options.omit ?? []);
 

@@ -1,0 +1,44 @@
+{
+  "phase": "4",
+  "phase_name": "Workflow Fidelity",
+  "timestamp": "2026-05-30T00:00:00.000Z",
+  "areas_completed": [
+    "AskUserQuestion integration approach",
+    "Execution fidelity root cause",
+    "Workflow prompt rewrite vs runtime bridge"
+  ],
+  "areas_remaining": ["Test strategy for workflow fidelity"],
+  "decisions": {
+    "AskUserQuestion integration approach": [
+      {
+        "question": "GSD AskUserQuestion → Pi ask_user_question schema translation: where should it live?",
+        "answer": "Prompt rewrite at generation time (Option B) as primary approach",
+        "options_presented": ["Adapter in pi-gsd-redux", "Prompt rewrite at generation time", "Separate shim extension"]
+      }
+    ],
+    "Execution fidelity root cause": [
+      {
+        "question": "What actually fails when --chain/--auto and revision loops don't execute fully?",
+        "answer": "Three-layer stack: (1) Skill() dispatch syntax mismatch — GSD writes Skill(skill=\"gsd-xxx\"), Pi needs /skill:name or read; (2) AskUserQuestion tool missing — needs rpiv ask_user_question adapter; (3) Generated prompts may have lost Skill()/AskUserQuestion references already. GSD's OpenCode adapter proves prompt rewrite strategy works.",
+        "options_presented": ["Skill() dispatch not available", "Subagent markers wrong", "Context/timeout divergence", "Something else / mixed"]
+      }
+    ],
+    "Workflow prompt rewrite vs runtime bridge": [
+      {
+        "question": "Should AskUserQuestion and Skill() adaptation happen at prompt-generation time or runtime?",
+        "answer": "Prompt rewrite at generation time — consistent with GSD's OpenCode adapter pattern (install.js converts AskUserQuestion→question, SlashCommand→skill, etc. per runtime). Pi needs the same approach with Pi-specific targets.",
+        "options_presented": ["Prompt rewrite at generation time", "Runtime bridge via extension hooks", "Both (belt and suspenders)"]
+      }
+    ]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    "node_modules/@opengsd/get-shit-done-redux/bin/install.js — OpenCode/Copilot/Codex runtime adapters",
+    "node_modules/@opengsd/get-shit-done-redux/get-shit-done/workflows/ — upstream GSD workflows with Skill()/AskUserQuestion references",
+    "node_modules/@juicesharp/rpiv-ask-user-question/ — Pi ask_user_question tool schema and registration",
+    "node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts — Pi ExtensionAPI (registerTool, registerCommand, sendUserMessage)",
+    "src/prompt-transform.ts — current prompt transformation module",
+    "src/agent-transform.ts — current agent transformation module",
+    "src/extension.ts — Pi extension entry point"
+  ]
+}

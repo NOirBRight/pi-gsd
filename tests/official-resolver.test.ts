@@ -10,7 +10,7 @@ describe("resolveOfficialPackage", () => {
 
     const resolved = resolveOfficialPackage({ startDir: fixture.root });
 
-    expect(resolved.packageName).toBe("@opengsd/get-shit-done-redux");
+    expect(resolved.packageName).toBe("@opengsd/gsd-core");
     expect(resolved.packageRoot).toBe(fixture.packageRoot);
     expect(resolved.version).toBe("1.2.3");
     expect(resolved.paths.commandsDir).toBe(join(fixture.packageRoot, "commands", "gsd"));
@@ -40,7 +40,7 @@ describe("resolveOfficialPackage", () => {
 
       const resolved = resolveOfficialPackage();
 
-      expect(resolved.packageName).toBe("@opengsd/get-shit-done-redux");
+      expect(resolved.packageName).toBe("@opengsd/gsd-core");
       expect(resolved.packageRoot).toBe(fixture.packageRoot);
     } finally {
       process.chdir(originalCwd);
@@ -53,7 +53,7 @@ describe("resolveOfficialPackage", () => {
     const resolved = resolveOfficialPackage({ startDir: emptyRoot });
 
     expect(resolved.packageName).toBe(OFFICIAL_PACKAGE_NAME);
-    expect(normalizePath(resolved.packageRoot)).toMatch(/node_modules\/@opengsd\/get-shit-done-redux$/);
+    expect(normalizePath(resolved.packageRoot)).toMatch(/node_modules\/@opengsd\/gsd-core$/);
   });
 
   it("throws an actionable error when official package is missing", () => {

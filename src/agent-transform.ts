@@ -47,9 +47,15 @@ export function materializeOfficialAgentPaths(input: string, officialRoot: strin
 }
 
 function rewriteOfficialAgentBody(body: string, unsupportedTools: string[]): string {
-  const rewritten = normalizeGsdSlashReferences(body)
+  let rewritten = normalizeGsdSlashReferences(body)
     .replace(/@(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `@${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`)
     .replace(/(^|[^@])(?:~|\$HOME)\/\.claude\/get-shit-done\//g, `$1${OFFICIAL_ROOT_PLACEHOLDER}/get-shit-done/`);
+
+  // Rewrite subagent_type="general-purpose" to subagent_type="general"
+  rewritten = rewritten.replace(/subagent_type="general-purpose"/g, 'subagent_type="general"');
+
+  // Rewrite Agent(subagent_type="xxx", prompt="yyy") to subagent({agent: "xxx", task: "yyy"})
+  rewritten = rewriteAgentDispatch(rewritten);
 
   if (unsupportedTools.length === 0) {
     return rewritten;
@@ -101,4 +107,17 @@ function writeAgentFrontmatter(data: FrontmatterData, body: string): string {
     lines.push(`tools: ${data.tools}`);
   }
   return `---\n${lines.join("\n")}\n---\n${body}`;
+}
+
+/**
+ * Rewrite Agent(subagent_type="xxx", prompt="yyy") calls to subagent({agent: "xxx", task: "yyy"})
+ */
+function rewriteAgentDispatch(text: string): string {
+  // Match Agent(subagent_type="xxx", prompt="yyy") or Agent(subagent_type="xxx", prompt="""multiline""")
+  return text.replace(
+    /Agent\(subagent_type="([^"]+)",\s*prompt="([\s\S]*?)"\)/g,
+    (_match, agentType: string, promptText: string) => {
+      return `subagent({agent: "${agentType}", task: "${promptText}"})`;
+    },
+  );
 }

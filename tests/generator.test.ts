@@ -124,4 +124,74 @@ describe("generatePrompts", () => {
     expect(generated).toContain("<pi_subagents_runtime_note>");
     expect(generated).toContain('subagent({ action: "list" })');
   });
+
+  it("transforms AskUserQuestion calls in generated prompts", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "quick.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(
+      commandPath,
+      "---\ndescription: Quick\n---\nAskUserQuestion(\"Confirm\", \"Proceed?\", [\"Yes\", \"No\"])\n",
+      "utf8",
+    );
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-quick.md"), "utf8");
+    expect(generated).toContain("ask_user_question");
+    expect(generated).not.toContain("AskUserQuestion(");
+  });
+
+  it("transforms Skill() dispatch calls in generated prompts", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "autonomous.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(
+      commandPath,
+      '---\ndescription: Autonomous\n---\nSkill(skill="gsd-plan-phase", args="4 --auto")\n',
+      "utf8",
+    );
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-autonomous.md"), "utf8");
+    expect(generated).toContain('Use the /gsd-plan-phase skill');
+    expect(generated).not.toContain('Skill(skill=');
+  });
+
+  it("transforms subagent_type=\"general-purpose\" in generated prompts", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "advisor.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(
+      commandPath,
+      '---\ndescription: Advisor\n---\nsubagent_type="general-purpose"\n',
+      "utf8",
+    );
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-advisor.md"), "utf8");
+    expect(generated).toContain('subagent_type="general"');
+    expect(generated).not.toContain('general-purpose');
+  });
+
+  it("preserves AskUserQuestion inside code fences while transforming outside", () => {
+    const fixture = createOfficialFixture();
+    const commandPath = join(fixture.packageRoot, "commands", "gsd", "docs.md");
+    const outDir = join(fixture.root, "generated", "prompts");
+    writeFileSync(
+      commandPath,
+      '---\ndescription: Docs\n---\n```\nAskUserQuestion("Header", "Question?", ["Yes"])\n```\nOutside: AskUserQuestion("Check", "OK?", ["OK"])\n',
+      "utf8",
+    );
+
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+
+    const generated = readFileSync(join(outDir, "gsd-docs.md"), "utf8");
+    // Code-fenced AskUserQuestion is preserved
+    expect(generated).toContain('AskUserQuestion("Header"');
+    // Outside code fences AskUserQuestion is transformed
+    expect(generated).toContain('ask_user_question');
+  });
 });

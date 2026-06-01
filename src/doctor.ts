@@ -1,12 +1,13 @@
 import { accessSync, constants as fsConstants, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { generateAgents } from "./agent-generator.js";
 import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { buildPiSubagentsTempRoot, TEMP_DIR_SUBDIRS } from "./extension.js";
-import { generatePrompts } from "./generator.js";
+import { generatePrompts, generateWorkflows } from "./generator.js";
 import { resolveOfficialPackage } from "./official.js";
 import { resolvePiSubagentsPackage } from "./pi-subagents.js";
+import { resolveRpivPackage, RPIV_PACKAGE_NAME } from "./rpiv.js";
 
 export type AclCheckOptions = {
   /** Override the temp root path (defaults to buildPiSubagentsTempRoot()) */
@@ -24,10 +25,13 @@ export type DoctorOptions = {
   startDir?: string;
   generatedPromptsDir: string;
   generatedAgentsDir?: string;
+  generatedWorkflowsDir?: string;
   agentSyncScope?: AgentSyncScope;
   piSubagentsResolver?: typeof resolvePiSubagentsPackage;
   /** Override ACL checker (for testing) — defaults to checkPiSubagentsTempAcl */
   aclChecker?: () => AclCheckResult;
+  /** Override rpiv resolver (for testing) — defaults to resolveRpivPackage */
+  rpivResolver?: typeof resolveRpivPackage;
 };
 
 export type DoctorResult = {
@@ -105,6 +109,18 @@ export function runDoctor(options: DoctorOptions): DoctorResult {
     messages.push(`pi-subagents package: missing (${error instanceof Error ? error.message : String(error)})`);
   }
 
+  // rpiv-ask-user-question availability check (warning, not error)
+  const rpivResolver = options.rpivResolver ?? resolveRpivPackage;
+  try {
+    const rpiv = rpivResolver({ startDir: options.startDir });
+    messages.push(`rpiv-ask-user-question: ok (${rpiv.packageName}@${rpiv.version})`);
+  } catch {
+    messages.push(
+      `rpiv-ask-user-question: missing — AskUserQuestion-dependent workflows (discuss, plan, etc.) will use --text fallback mode. ` +
+      `Install with: pi install npm:${RPIV_PACKAGE_NAME}`,
+    );
+  }
+
   // ACL corruption check for pi-subagents temp directories
   const aclChecker = options.aclChecker ?? checkPiSubagentsTempAcl;
   const aclResult = aclChecker();
@@ -118,6 +134,20 @@ export function runDoctor(options: DoctorOptions): DoctorResult {
     const expected = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir: expectedDir });
     const promptsOk = compareGeneratedFiles({ expectedPaths: expected.written, actualDir: options.generatedPromptsDir, label: "prompt", messages });
     ok = ok && promptsOk;
+
+    if (options.generatedWorkflowsDir) {
+      const expectedWorkflowsDir = join(tempDir, "workflows");
+      const expectedWorkflows = generateWorkflows({ officialRoot: officialPackage.packageRoot, outDir: expectedWorkflowsDir });
+      const workflowsOk = compareGeneratedFiles({
+        expectedPaths: expectedWorkflows.written,
+        expectedDir: expectedWorkflowsDir,
+        actualDir: options.generatedWorkflowsDir,
+        label: "workflow",
+        messages,
+      });
+      ok = ok && workflowsOk;
+      if (workflowsOk) messages.push("generated workflows: ok");
+    }
 
     if (options.generatedAgentsDir) {
       const expectedAgentsDir = join(tempDir, "agents");
@@ -150,12 +180,12 @@ export function runDoctor(options: DoctorOptions): DoctorResult {
   }
 }
 
-function compareGeneratedFiles(options: { expectedPaths: string[]; actualDir: string; label: string; messages: string[] }) {
-  const expectedFileNames = new Set(options.expectedPaths.map((expectedPath) => basename(expectedPath)));
+function compareGeneratedFiles(options: { expectedPaths: string[]; expectedDir?: string; actualDir: string; label: string; messages: string[] }) {
+  const expectedFileNames = new Set(options.expectedPaths.map((expectedPath) => expectedResourceName(expectedPath, options.expectedDir)));
   let ok = true;
 
   for (const expectedPath of options.expectedPaths) {
-    const fileName = basename(expectedPath);
+    const fileName = expectedResourceName(expectedPath, options.expectedDir);
     const actualPath = join(options.actualDir, fileName);
     let actual: string;
 
@@ -196,9 +226,17 @@ function normalizeLineEndings(content: string) {
   return content.replace(/\r\n/g, "\n");
 }
 
+function expectedResourceName(expectedPath: string, expectedDir: string | undefined) {
+  if (!expectedDir) return basename(expectedPath);
+  return relative(expectedDir, expectedPath).replace(/\\/g, "/");
+}
+
 function readGeneratedMarkdownFileNames(generatedPromptsDir: string) {
   try {
-    return readdirSync(generatedPromptsDir).filter((name) => name.endsWith(".md")).sort();
+    return readdirSync(generatedPromptsDir, { recursive: true })
+      .filter((name) => typeof name === "string" && name.endsWith(".md"))
+      .map((name) => String(name).replace(/\\/g, "/"))
+      .sort();
   } catch (error) {
     if (isMissingFileError(error)) {
       return [];

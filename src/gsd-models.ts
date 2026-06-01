@@ -30,7 +30,7 @@ export type ModelChoiceLike = {
 };
 
 // ── Model catalog ───────────────────────────────────────────────────
-// Loaded from @opengsd/get-shit-done-redux/sdk/shared/model-catalog.json
+// Loaded from @opengsd/gsd-core/sdk/shared/model-catalog.json
 
 type CatalogAgent = {
   golden: string;   // quality profile tier alias
@@ -55,7 +55,10 @@ export function invalidateModelCatalog(): void {
 
 export function loadModelCatalog(gsdPackageRoot: string): ModelCatalog {
   if (_catalogCache) return _catalogCache;
+  const normalizedRoot = gsdPackageRoot.split("get-shit-done-redux").join("gsd-core");
   const candidates = [
+    join(normalizedRoot, "get-shit-done", "bin", "shared", "model-catalog.json"),
+    join(normalizedRoot, "sdk", "shared", "model-catalog.json"),
     join(gsdPackageRoot, "get-shit-done", "bin", "shared", "model-catalog.json"),
     join(gsdPackageRoot, "sdk", "shared", "model-catalog.json"),
   ];

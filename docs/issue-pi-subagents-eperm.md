@@ -91,9 +91,9 @@ function ensureAccessibleDir(dirPath: string): void {
 
 但 **两者不能平替**（详见下节）。
 
-## pi-gsd-redux 对 subagent 的依赖
+## pi-gsd-core 对 subagent 的依赖
 
-`pi-gsd-redux` **深度绑定 `pi-subagents`（nicobailon）**，无法切换到 tintinweb 版：
+`pi-gsd-core` **深度绑定 `pi-subagents`（nicobailon）**，无法切换到 tintinweb 版：
 
 1. **工具名** — GSD 所有 prompt guidance 写死 `subagent` 工具名，tintinweb 注册的是 `Agent`
 2. **Agent frontmatter** — GSD 使用 `systemPromptMode`、`defaultContext`、`fallbackModels`、`completionGuard` 等字段，tintinweb 不支持
@@ -113,7 +113,7 @@ function ensureAccessibleDir(dirPath: string): void {
 
 ### 方案 B：本地 monkey-patch（快速 workaround）
 
-在 `pi-gsd-redux` 的 extension 入口中，在 `pi-subagents` 加载前，预先清理/修复临时目录：
+在 `pi-gsd-core` 的 extension 入口中，在 `pi-subagents` 加载前，预先清理/修复临时目录：
 
 - 检测 `async-subagent-results` 等 目录 ACL 是否损坏
 - 尝试修复权限或删除重建
