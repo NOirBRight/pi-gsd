@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { classifyArtifactName } from "../src/state-reconciliation/artifacts.js";
+import { reconcileBeforeDispatch } from "../src/state-reconciliation/index.js";
+import { scanPlanningArtifacts } from "../src/state-reconciliation/scan.js";
 import { RECONCILIATION_REASON_CODES } from "../src/state-reconciliation/types.js";
 import type { ReconciledStateSnapshot, ReconciliationReasonCode, ReconciliationReport } from "../src/state-reconciliation/types.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("state reconciliation contracts", () => {
   it("contracts expose the minimal structured report fields", () => {
@@ -77,5 +82,70 @@ describe("canonical artifact classification", () => {
       phase: "09",
     }));
     expect(result.kind).not.toBe("plan");
+  });
+});
+
+describe("state reconciliation scanner", () => {
+  it("scanner reads canonical phase artifact counts and evidence paths", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-state-scan-"));
+    const phaseDir = join(root, ".planning", "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    for (const filename of ["10-01-PLAN.md", "10-01-SUMMARY.md", "10-VERIFICATION.md", "10-REVIEW.md", "10-CONTEXT.md", "10-PLAN-CHECK.md"]) {
+      writeFileSync(join(phaseDir, filename), `${filename}\n`, "utf8");
+    }
+
+    const scan = scanPlanningArtifacts(root);
+
+    expect(scan.blockers).toEqual([]);
+    expect(scan.totals).toEqual({
+      plans: 1,
+      summaries: 1,
+      verifications: 1,
+      reviews: 1,
+      contexts: 1,
+      noncanonical: 1,
+    });
+    expect(scan.phases[0]).toEqual(expect.objectContaining({
+      phase: "10",
+      plans: [join(phaseDir, "10-01-PLAN.md")],
+      summaries: [join(phaseDir, "10-01-SUMMARY.md")],
+    }));
+    expect(scan.evidence).toEqual([
+      expect.objectContaining({
+        reasonCode: "noncanonical-plan-like-file",
+        path: join(phaseDir, "10-PLAN-CHECK.md"),
+      }),
+    ]);
+  });
+
+  it("scanner returns a typed blocker when planning artifacts are missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-state-missing-"));
+
+    const scan = scanPlanningArtifacts(root);
+
+    expect(scan.phases).toEqual([]);
+    expect(scan.blockers).toEqual([
+      expect.objectContaining({
+        reasonCode: "unknown-drift",
+        artifact: "state",
+        message: expect.stringContaining(".planning/phases"),
+      }),
+    ]);
+  });
+});
+
+describe("state reconciliation structured report", () => {
+  it("structured report defaults to dry-run with no writes", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-state-report-"));
+    const phaseDir = join(root, ".planning", "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan\n", "utf8");
+
+    const report = reconcileBeforeDispatch(root);
+
+    expect(report.ok).toBe(true);
+    expect(report.repairs).toEqual([]);
+    expect(report.written).toEqual([]);
+    expect(report.snapshot.totals.plans).toBe(1);
   });
 });
