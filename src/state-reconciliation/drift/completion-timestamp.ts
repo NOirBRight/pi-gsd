@@ -9,20 +9,30 @@ export function detectCompletionTimestampDrift(input: DriftDetectionInput): Drif
   const blockers: ReconciliationBlocker[] = [];
 
   for (const row of input.roadmap.phases) {
-    if (row.status !== "Complete") continue;
     const phase = input.snapshot.phases.find((candidate) => candidate.phase === row.phase);
     if (!phase || phase.plans.length === 0 || phase.summaries.length !== phase.plans.length) continue;
 
     const provenDate = provenCompletionDate(phase.summaries);
-    const evidence: ReconciliationEvidence[] = phase.summaries.map((path) => ({
-      reasonCode: "completion-timestamp-drift",
-      path,
-      phase: row.phase,
-      artifact: "summary",
-      message: "Canonical summary considered for ROADMAP completion timestamp.",
-    }));
+    const evidence: ReconciliationEvidence[] = [
+      {
+        reasonCode: "completion-timestamp-drift",
+        path: row.path,
+        phase: row.phase,
+        artifact: "roadmap",
+        message: "ROADMAP row considered for completion timestamp repair.",
+        metadata: { line: row.line },
+      },
+      ...phase.summaries.map((path) => ({
+        reasonCode: "completion-timestamp-drift" as const,
+        path,
+        phase: row.phase,
+        artifact: "summary" as const,
+        message: "Canonical summary considered for ROADMAP completion timestamp.",
+      })),
+    ];
 
     if (!provenDate) {
+      if (row.status !== "Complete") continue;
       blockers.push({
         reasonCode: "completion-timestamp-drift",
         phase: row.phase,

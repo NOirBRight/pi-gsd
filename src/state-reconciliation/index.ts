@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { classifyDrift } from "./catalog.js";
 import { readJournalState } from "./journal.js";
-import { planRepairs } from "./repair.js";
+import { applyRepairs, planRepairs } from "./repair.js";
 import { readRoadmapState } from "./roadmap.js";
 import { scanPlanningArtifacts } from "./scan.js";
 import { readStateDigest } from "./state.js";
@@ -11,7 +11,7 @@ import type { ReconciliationOptions, ReconciliationReport } from "./types.js";
 export { classifyDrift, KNOWN_DRIFT_KINDS } from "./catalog.js";
 export { classifyArtifactName } from "./artifacts.js";
 export { readJournalState } from "./journal.js";
-export { planRepairs } from "./repair.js";
+export { applyRepairs, planRepairs } from "./repair.js";
 export { readRoadmapState } from "./roadmap.js";
 export { scanPlanningArtifacts } from "./scan.js";
 export { readStateDigest } from "./state.js";
@@ -35,13 +35,17 @@ export function reconcileBeforeDispatch(basePath: string, options: Reconciliatio
     ...journal.blockers,
     ...detection.blockers,
   ];
+  const repairs = planRepairs(detection);
+  const application = options.apply && blockers.length === 0
+    ? applyRepairs(basePath, repairs)
+    : { ok: true, blockers: [], written: [] };
 
   return {
-    ok: blockers.length === 0,
+    ok: blockers.length === 0 && application.ok,
     snapshot,
-    repairs: planRepairs(detection),
-    blockers,
-    written: options.apply ? [] : [],
+    repairs,
+    blockers: [...blockers, ...application.blockers],
+    written: application.written,
     evidence: [...scan.evidence, ...detection.evidence],
   };
 }
