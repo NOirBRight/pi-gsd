@@ -1,6 +1,7 @@
 import { scanPlanningArtifacts } from "./scan.js";
 import type { ReconciliationOptions, ReconciliationReport } from "./types.js";
 
+export { classifyDrift, KNOWN_DRIFT_KINDS } from "./catalog.js";
 export { classifyArtifactName } from "./artifacts.js";
 export { readJournalState } from "./journal.js";
 export { readRoadmapState } from "./roadmap.js";
