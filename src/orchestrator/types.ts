@@ -55,6 +55,7 @@ export type ResolvedWorkflowSettings = {
     worktrees: boolean;
     node_repair: boolean;
     node_repair_budget: number;
+    state_reconciliation_apply?: boolean;
     subagent_timeout?: number;
     inline_plan_threshold?: number;
   };

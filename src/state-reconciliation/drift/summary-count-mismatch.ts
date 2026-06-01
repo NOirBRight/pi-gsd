@@ -5,6 +5,10 @@ import type { ReconciliationBlocker, ReconciliationEvidence } from "../types.js"
 export function detectSummaryCountMismatch(input: DriftDetectionInput): DriftDetection {
   const blockers: ReconciliationBlocker[] = [];
 
+  if (input.activeUnitId?.endsWith(":execute")) {
+    return { repairs: [], blockers: [], evidence: [] };
+  }
+
   for (const phase of input.snapshot.phases) {
     const summaries = new Set(phase.summaries.map((path) => artifactPlan(path, "SUMMARY")));
     const missing = phase.plans

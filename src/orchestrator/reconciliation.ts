@@ -33,7 +33,10 @@ export function reconcileBeforeDispatch(snapshot: OrchestrationSnapshot, unit: O
   }
 
   const basePath = snapshot.cwd ?? process.cwd();
-  const report = reconcilePlanningStateBeforeDispatch(basePath, { activeUnitId: unit.id });
+  const report = reconcilePlanningStateBeforeDispatch(basePath, {
+    activeUnitId: unit.id,
+    apply: snapshot.settings.workflow.state_reconciliation_apply === true,
+  });
   if (!report.ok) return toGateFailure(toReconciliationFailedError(report), basePath);
 
   return {

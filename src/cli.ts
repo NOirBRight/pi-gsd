@@ -11,6 +11,7 @@ import { createCommandDispatchRunner, createDispatchAdapter } from "./orchestrat
 import { createAutoOrchestrator, type OrchestratorResult } from "./orchestrator/index.js";
 import { createJournalAdapter } from "./orchestrator/journal.js";
 import { isValidPhaseId } from "./orchestrator/phase.js";
+import { resolveWorkflowSettings } from "./orchestrator/settings.js";
 import { createStateDigestAdapter } from "./orchestrator/state-digest.js";
 
 export interface CliIO {
@@ -30,7 +31,7 @@ Commands:
   doctor [--prompts <dir>] [--agents [dir]] [--workflows [dir]] [--scope project|user] [--cwd <dir>]
   sync-agents [--scope project|user] [--agents <dir>] [--cwd <dir>] [--dry-run] [--check]
   official [--cwd <dir>] [--] [...args]
-  orchestrate (--auto|--chain|--resume|--status|--stop <reason>) --phase <phase> [--cwd <dir>]
+  orchestrate (--auto|--chain|--resume|--status|--stop <reason>) --phase <phase> [--cwd <dir>] [--reconcile-apply]
 `;
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -217,11 +218,11 @@ function parseSyncScope(scope: string): AgentSyncScope {
 }
 
 function runOrchestratorCli(args: string[], io: CliIO): number {
-  const options = parseOptions(args, { auto: false, chain: false, resume: false, status: false, stop: true, phase: true, cwd: true });
+  const options = parseOptions(args, { auto: false, chain: false, resume: false, status: false, stop: true, phase: true, cwd: true, "reconcile-apply": false });
   const cwd = resolve(options.cwd ?? process.cwd());
   const phase = options.phase;
   const mode = Object.hasOwn(options, "auto") ? "auto" : "chain";
-  const orchestrator = createProductionOrchestrator(cwd);
+  const orchestrator = createProductionOrchestrator(cwd, { reconcileApply: options["reconcile-apply"] === "true" });
 
   if (!phase) {
     io.stderr("Missing value for --phase\n");
@@ -263,8 +264,18 @@ function runOrchestratorCli(args: string[], io: CliIO): number {
   return result.ok ? 0 : 1;
 }
 
-function createProductionOrchestrator(cwd: string) {
+function createProductionOrchestrator(cwd: string, options: { reconcileApply?: boolean } = {}) {
   return createAutoOrchestrator({
+    settingsResolver: (context) => {
+      const settings = resolveWorkflowSettings({ cwd: context.cwd, configPath: context.configPath });
+      return options.reconcileApply
+        ? {
+            ...settings,
+            workflow: { ...settings.workflow, state_reconciliation_apply: true },
+            sources: { ...settings.sources, state_reconciliation_apply: "override" },
+          }
+        : settings;
+    },
     journal: createJournalAdapter({ cwd }),
     stateDigest: createStateDigestAdapter({ cwd }),
     dispatch: createDispatchAdapter({

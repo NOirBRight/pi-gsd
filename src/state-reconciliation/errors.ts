@@ -29,10 +29,33 @@ export class ReconciliationFailedError extends Error implements ReconciliationFa
     this.reasonCode = reasonCode;
     this.blockers = report.blockers;
     this.repairPlan = firstBlocker?.repairPlan?.length ? firstBlocker.repairPlan : report.repairs;
-    this.evidence = report.evidence.length ? report.evidence : report.blockers.flatMap((blocker) => blocker.evidence);
+    this.evidence = uniqueEvidence([
+      ...report.evidence,
+      ...report.blockers.flatMap((blocker) => blocker.evidence),
+    ]);
     this.suggestedNextAction = firstBlocker?.suggestedNextAction ?? suggestedActionFor(reasonCode);
     this.report = report;
   }
+}
+
+function uniqueEvidence(evidence: ReconciliationEvidence[]): ReconciliationEvidence[] {
+  const seen = new Set<string>();
+  const result: ReconciliationEvidence[] = [];
+  for (const item of evidence) {
+    const key = JSON.stringify({
+      reasonCode: item.reasonCode,
+      path: item.path,
+      paths: item.paths,
+      phase: item.phase,
+      plan: item.plan,
+      artifact: item.artifact,
+      message: item.message,
+    });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
 }
 
 function suggestedActionFor(reasonCode: ReconciliationReasonCode): ReconciliationSuggestedNextAction {

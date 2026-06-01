@@ -36,8 +36,8 @@ describe("orchestrator chain e2e", () => {
           dispatched.push(`${unit.type}:${env.GSD_AUDIT}`);
           const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
           const written: string[] = [];
-          if (unit.type === "plan") { const path = join(phaseDir, "09-PLAN.md"); writeFileSync(path, "plan\n", "utf8"); written.push(path); }
-          if (unit.type === "execute") { const path = join(phaseDir, "09-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
+          if (unit.type === "plan") { const path = join(phaseDir, "09-01-PLAN.md"); writeFileSync(path, "plan\n", "utf8"); written.push(path); }
+          if (unit.type === "execute") { const path = join(phaseDir, "09-01-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
           if (unit.type === "verify") { const path = join(phaseDir, "09-VERIFICATION.md"); writeFileSync(path, "verification\n", "utf8"); written.push(path); }
           if (unit.type === "closeout") {
             writeFileSync(join(cwd, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\n", "utf8");

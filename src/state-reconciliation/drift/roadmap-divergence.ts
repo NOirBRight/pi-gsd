@@ -44,6 +44,10 @@ export function detectRoadmapDivergence(input: DriftDetectionInput): DriftDetect
       continue;
     }
 
+    if (input.activeUnitId === `${row.phase}:execute` && expectedStatus === "Executing") {
+      continue;
+    }
+
     blockers.push({
       reasonCode: "roadmap-divergence",
       phase: row.phase,

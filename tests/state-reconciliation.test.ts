@@ -100,6 +100,40 @@ describe("state reconciliation contracts", () => {
     expect(error.message).toContain("summary-count-mismatch");
   });
 
+  it("ReconciliationFailedError merges report and blocker evidence for handoff", () => {
+    const blockerEvidence = {
+      reasonCode: "summary-count-mismatch" as const,
+      path: ".planning/phases/10-state-reconciliation-module/10-04-PLAN.md",
+      message: "Plan exists without matching summary.",
+    };
+    const reportEvidence = {
+      reasonCode: "noncanonical-plan-like-file" as const,
+      path: ".planning/phases/10-state-reconciliation-module/10-PLAN-CHECK.md",
+      message: "Noncanonical plan-like artifact is evidence only.",
+    };
+
+    const error = new ReconciliationFailedError({
+      ok: false,
+      snapshot: {
+        phasesPath: ".planning/phases",
+        phases: [],
+        totals: { plans: 1, summaries: 0, verifications: 0, reviews: 0, contexts: 0, noncanonical: 1 },
+      },
+      blockers: [{
+        reasonCode: "summary-count-mismatch",
+        message: "Phase 10 has a missing summary.",
+        artifact: "summary",
+        evidence: [blockerEvidence],
+        suggestedNextAction: "manual-review",
+      }],
+      repairs: [],
+      written: [],
+      evidence: [reportEvidence],
+    });
+
+    expect(error.evidence).toEqual([reportEvidence, blockerEvidence]);
+  });
+
   it("suggested next action values remain category-level only", () => {
     expect(ReconciliationFailedError.suggestedNextActions).toEqual([
       "manual-review",
@@ -352,6 +386,40 @@ describe("state reconciliation drift catalog", () => {
       }),
     ]);
     expect(drift.repairs).toEqual([]);
+  });
+
+  it("summary-count mismatch does not block the active execute unit", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-summary-count-active-execute-"));
+    const phaseDir = join(root, ".planning", "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan 1\n", "utf8");
+
+    const scan = scanPlanningArtifacts(root);
+    const drift = classifyDrift({
+      snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals },
+      activeUnitId: "10:execute",
+    });
+
+    expect(drift.blockers).toEqual([]);
+  });
+
+  it("roadmap divergence does not block the active execute unit for incomplete phases", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-roadmap-active-execute-"));
+    const planningDir = join(root, ".planning");
+    const phaseDir = join(planningDir, "phases", "10-state-reconciliation-module");
+    mkdirSync(phaseDir, { recursive: true });
+    writeFileSync(join(phaseDir, "10-01-PLAN.md"), "plan 1\n", "utf8");
+    writeFileSync(join(planningDir, "ROADMAP.md"), "| 10. State Reconciliation Module | v2.0 | 0/0 | Executing | — |\n", "utf8");
+
+    const scan = scanPlanningArtifacts(root);
+    const roadmap = readRoadmapState(root);
+    const drift = classifyDrift({
+      snapshot: { phasesPath: scan.phasesPath, phases: scan.phases, totals: scan.totals },
+      roadmap,
+      activeUnitId: "10:execute",
+    });
+
+    expect(drift.blockers).toEqual([]);
   });
 
   it("noncanonical plan-like files produce evidence and never count as plans", () => {

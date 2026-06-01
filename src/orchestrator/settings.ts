@@ -28,6 +28,7 @@ const DEFAULT_WORKFLOW_SETTINGS: ResolvedWorkflowSettings["workflow"] = {
   worktrees: true,
   node_repair: true,
   node_repair_budget: 2,
+  state_reconciliation_apply: false,
   subagent_timeout: 900,
   inline_plan_threshold: 1,
 };
@@ -62,6 +63,7 @@ export function resolveWorkflowSettings(options: { cwd?: string; configPath?: st
     applyBooleanAlias(configWorkflow, "worktrees", "use_worktrees", workflow, sources);
     applyBooleanAlias(configWorkflow, "plan_check", "plan_checker", workflow, sources);
     applyBoolean(configWorkflow, "node_repair", workflow, sources);
+    applyBoolean(configWorkflow, "state_reconciliation_apply", workflow, sources);
     applyPositiveInteger(configWorkflow, "node_repair_budget", workflow, sources);
     applyPositiveInteger(configWorkflow, "subagent_timeout", workflow, sources);
     applyPositiveInteger(configWorkflow, "inline_plan_threshold", workflow, sources);
