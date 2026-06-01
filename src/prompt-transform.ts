@@ -48,3 +48,590 @@ function mentionsGsdSubagentPair(input: string): boolean {
   return /\bgsd-[a-z0-9-]+\b[\s\S]{0,80}\bsubagents?\b/i.test(input)
     || /\bsubagents?\b[\s\S]{0,80}\bgsd-[a-z0-9-]+\b/i.test(input);
 }
+
+/**
+ * Split text into code-fenced and non-code segments.
+ * Triple-backtick fenced regions are preserved as-is.
+ *
+ * Limitation (WR-01): Only triple-backtick code fences are protected.
+ * 4-space indented code blocks are not detected because official GSD
+ * workflows consistently use triple backticks. If indented code blocks
+ * appear in custom content, wrap them in triple backticks first.
+ */
+export function splitCodeFences(text: string): { segment: string; isCode: boolean }[] {
+  const parts: { segment: string; isCode: boolean }[] = [];
+  const regex = /(`{3}[\s\S]*?`{3})/g;
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push({ segment: text.slice(lastIdx, match.index), isCode: false });
+    }
+    parts.push({ segment: match[1], isCode: true });
+    lastIdx = regex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    parts.push({ segment: text.slice(lastIdx), isCode: false });
+  }
+  if (parts.length === 0) {
+    parts.push({ segment: text, isCode: false });
+  }
+  return parts;
+}
+
+/**
+ * Rewrites AskUserQuestion calls in GSD workflow markdown to Pi-compatible
+ * ask_user_question schema.
+ *
+ * Supported forms:
+ * 1. AskUserQuestion("header", "question", ["A", "B"])
+ * 2. AskUserQuestion("header", "question", ["A", "B"], multiSelect: true)
+ * 3. AskUserQuestion("header", "question", [{ label: "A", description: "desc A" }])
+ * 4. AskUserQuestion(header: "...", question: "...", options: [...], multiSelect: true/false)
+ * 5. AskUserQuestion([{ header: "...", question: "...", ... }])
+ * 6. Multi-line variants of all the above
+ *
+ * Idempotency: does not transform text already containing ask_user_question.
+ * Code-fence safe: does not transform within ```...``` blocks.
+ */
+export function transformAskUserQuestionForPi(input: string): string {
+  if (input.includes("ask_user_question")) return input;
+
+  const segments = splitCodeFences(input);
+  let changed = false;
+  const result = segments.map(({ segment, isCode }) => {
+    if (isCode) return segment;
+    const transformed = rewriteAskUserQuestionInSegment(segment);
+    if (transformed !== segment) changed = true;
+    return transformed;
+  }).join("");
+
+  return changed ? result : input;
+}
+
+/**
+ * Process a single non-code segment, replacing all AskUserQuestion calls.
+ */
+function rewriteAskUserQuestionInSegment(segment: string): string {
+  let result = segment;
+  let safety = 100;
+  let searchFrom = 0;
+
+  while (safety-- > 0) {
+    const match = /AskUserQuestion\s*\(/.exec(result.slice(searchFrom));
+    if (!match || match.index === undefined) break;
+
+    const callStart = searchFrom + match.index;
+    const argsStart = callStart + match[0].length - 1; // position of '('
+    const argsText = extractBalancedParens(result, argsStart);
+    if (!argsText) {
+      searchFrom = argsStart + 1;
+      continue;
+    }
+
+    const callEnd = argsStart + argsText.length + 2; // after closing )
+    const rewritten = transformAskUserQuestionCall(argsText);
+
+    if (rewritten === null) {
+      searchFrom = argsStart + 1;
+      continue;
+    }
+    result = result.slice(0, callStart) + rewritten + result.slice(callEnd);
+    searchFrom = callStart + rewritten.length;
+  }
+
+  if (safety <= 0) {
+    console.warn("[pi-gsd] rewriteAskUserQuestionInSegment: safety limit reached — possible unbalanced AskUserQuestion in input");
+  }
+
+  return result;
+}
+
+/**
+ * Extract content between balanced parentheses starting at the open paren position.
+ * Returns the inner content (without the parens), or null if unbalanced.
+ */
+function extractBalancedParens(text: string, openParenPos: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let stringChar = "";
+  let i = openParenPos;
+
+  for (; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") {
+        i++; // skip escaped char
+        continue;
+      }
+      if (ch === stringChar) {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringChar = ch;
+      continue;
+    }
+    if (ch === "(") {
+      depth++;
+    } else if (ch === ")") {
+      depth--;
+      if (depth === 0) {
+        return text.slice(openParenPos + 1, i);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Transform an AskUserQuestion call's inner arguments text into ask_user_question schema.
+ */
+function transformAskUserQuestionCall(argsText: string): string | null {
+  const trimmed = argsText.trim();
+
+  // Form 5: Array of question objects — AskUserQuestion([{...}, {...}])
+  if (trimmed.startsWith("[")) {
+    return transformArrayQuestionForm(trimmed);
+  }
+
+  // Form 1-4: positional args or named params
+  // Try named params first: AskUserQuestion(header: "...", question: "...", options: [...])
+  const namedParsed = parseNamedParams(trimmed);
+  if (namedParsed) {
+    return formatAskUserQuestion(namedParsed);
+  }
+
+  // Try positional args: AskUserQuestion("header", "question", [...], multiSelect: true)
+  const positionalParsed = parsePositionalArgs(trimmed);
+  if (positionalParsed) {
+    return formatAskUserQuestion(positionalParsed);
+  }
+
+  return null;
+}
+
+interface ParsedQuestion {
+  header: string;
+  question: string;
+  options: ParsedOption[];
+  multiSelect?: boolean;
+}
+
+interface ParsedOption {
+  label: string;
+  description: string;
+}
+
+/**
+ * Escape a string for embedding inside double-quoted JSON-like values.
+ * Escapes backslashes first, then double quotes.
+ */
+function escapeDoubleQuotedString(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Unescape a string that was inside double quotes.
+ * Reverses escapeDoubleQuotedString: \" → " and \\ → \.
+ */
+function unescapeDoubleQuotedString(s: string): string {
+  return s.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+}
+
+function formatAskUserQuestion(questions: ParsedQuestion[]): string {
+  const formattedQuestions = questions.map((q) => {
+    const opts = q.options
+      .map((o) => `{ label: "${escapeDoubleQuotedString(o.label)}", description: "${escapeDoubleQuotedString(o.description)}" }`)
+      .join(", ");
+    const parts = [
+      `question: "${escapeDoubleQuotedString(q.question)}"`,
+      `header: "${escapeDoubleQuotedString(q.header)}"`,
+      `options: [${opts}]`,
+    ];
+    if (q.multiSelect) {
+      parts.push("multiSelect: true");
+    }
+    return `{ ${parts.join(", ")} }`;
+  });
+
+  return `ask_user_question({ questions: [${formattedQuestions.join(", ")}] })`;
+}
+
+/**
+ * Parse named params: header: "...", question: "...", options: [...], multiSelect: ...
+ */
+function parseNamedParams(argsText: string): ParsedQuestion[] | null {
+  const headerMatch = argsText.match(/header:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  const questionMatch = argsText.match(/question:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  if (!headerMatch || !questionMatch) return null;
+
+  const header = unescapeDoubleQuotedString(headerMatch[1]);
+  const question = unescapeDoubleQuotedString(questionMatch[1]);
+
+  // Handle multi-line question strings (pipe or block)
+  const questionBlockMatch = argsText.match(/question:\s*\|\n?([\s\S]*?)\n\s*\|?/);
+  const finalQuestion = questionBlockMatch ? questionBlockMatch[1].trim() : question;
+
+  // Extract options
+  const options = parseOptionsBlock(argsText);
+  if (!options) return null;
+
+  const multiSelectMatch = argsText.match(/multiSelect:\s*(true|false)/);
+  const multiSelect = multiSelectMatch ? multiSelectMatch[1] === "true" : undefined;
+
+  return [{ header, question: finalQuestion, options, multiSelect }];
+}
+
+/**
+ * Parse positional args: "header", "question", [...], multiSelect?: ...
+ */
+function parsePositionalArgs(argsText: string): ParsedQuestion[] | null {
+  const topTokens = tokenizeTopLevel(argsText);
+
+  if (topTokens.length < 3) return null;
+
+  const header = unquote(topTokens[0]);
+  if (header === null) return null;
+  const question = unquote(topTokens[1]);
+  if (question === null) return null;
+
+  const optionsRaw = topTokens[2];
+  if (!optionsRaw.startsWith("[")) return null;
+  const options = parseOptionsArray(optionsRaw);
+  if (!options) return null;
+
+  let multiSelect: boolean | undefined;
+  for (let i = 3; i < topTokens.length; i++) {
+    const ms = topTokens[i].trim();
+    if (ms.startsWith("multiSelect")) {
+      const val = ms.match(/multiSelect\s*:\s*(true|false)/);
+      if (val) multiSelect = val[1] === "true";
+    }
+  }
+
+  return [{ header, question, options, multiSelect }];
+}
+
+/**
+ * Tokenize top-level comma-separated args within an AskUserQuestion call.
+ * Respects nesting in brackets and strings.
+ */
+function tokenizeTopLevel(text: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let depth = 0;
+  let inString = false;
+  let stringChar = "";
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      current += ch;
+      if (ch === "\\" && i + 1 < text.length) {
+        current += text[++i];
+        continue;
+      }
+      if (ch === stringChar) {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringChar = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "[" || ch === "{" || ch === "(") {
+      depth++;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "]" || ch === "}" || ch === ")") {
+      if (depth > 0) depth--;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "," && depth === 0) {
+      tokens.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current.trim()) {
+    tokens.push(current.trim());
+  }
+
+  return tokens;
+}
+
+/**
+ * Remove surrounding quotes from a string and unescape internal escapes.
+ * For double-quoted strings: unescapes \" → " and \\ → \.
+ * For single-quoted strings: strips delimiters only (no escape processing).
+ */
+function unquote(s: string): string | null {
+  const trimmed = s.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1);
+  }
+  return null;
+}
+
+/**
+ * Parse an options array string like ["A", "B"] or [{ label: "A", description: "B" }]
+ */
+function parseOptionsArray(raw: string): ParsedOption[] | null {
+  const inner = raw.trim().slice(1, -1).trim();
+  if (!inner) return []; // empty options []
+
+  // Try object options first: { label: "...", description: "..." }
+  if (inner.includes("{")) {
+    return parseObjectOptions(inner);
+  }
+
+  // Simple string options: "A", "B"
+  const strings: string[] = [];
+  let inStr = false;
+  let sChar = "";
+  let token = "";
+
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (inStr) {
+      if (ch === "\\" && i + 1 < inner.length) {
+        token += inner[++i];
+        continue;
+      }
+      if (ch === sChar) {
+        strings.push(token);
+        token = "";
+        inStr = false;
+        continue;
+      }
+      token += ch;
+    } else {
+      if (ch === '"' || ch === "'") {
+        inStr = true;
+        sChar = ch;
+      }
+    }
+  }
+
+  if (strings.length > 0) {
+    return strings.map((s) => ({ label: s, description: s }));
+  }
+
+  return null;
+}
+
+/**
+ * Parse object options from inner array content.
+ */
+function parseObjectOptions(inner: string): ParsedOption[] | null {
+  const options: ParsedOption[] = [];
+  const objPattern = /\{\s*label:\s*"((?:[^"\\]|\\.)*)"\s*,\s*description:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = objPattern.exec(inner)) !== null) {
+    options.push({ label: match[1], description: match[2] });
+  }
+
+  return options.length > 0 ? options : null;
+}
+
+/**
+ * Parse the options block from named params form.
+ */
+function parseOptionsBlock(argsText: string): ParsedOption[] | null {
+  const optionsIdx = argsText.search(/\boptions:/);
+  if (optionsIdx === -1) return null;
+
+  const bracketStart = argsText.indexOf("[", optionsIdx);
+  if (bracketStart === -1) return null;
+
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = bracketStart; i < argsText.length; i++) {
+    if (argsText[i] === "[") depth++;
+    else if (argsText[i] === "]") {
+      depth--;
+      if (depth === 0) {
+        endIdx = i;
+        break;
+      }
+    }
+  }
+  if (endIdx === -1) return null;
+
+  const optionsRaw = argsText.slice(bracketStart, endIdx + 1);
+  return parseOptionsArray(optionsRaw);
+}
+
+/**
+ * Parse the array-of-questions form: [{ header: "...", ... }, { ... }]
+ */
+function transformArrayQuestionForm(trimmed: string): string | null {
+  const questions: ParsedQuestion[] = [];
+
+  let depth = 0;
+  let blockStart = -1;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === "{") {
+      if (depth === 0) blockStart = i;
+      depth++;
+    } else if (trimmed[i] === "}") {
+      depth--;
+      if (depth === 0 && blockStart !== -1) {
+        const block = trimmed.slice(blockStart, i + 1);
+        const parsed = parseQuestionObject(block);
+        if (parsed) questions.push(parsed);
+        blockStart = -1;
+      }
+    }
+  }
+
+  if (questions.length === 0) return null;
+  return formatAskUserQuestion(questions);
+}
+
+/**
+ * Parse a single question object like { header: "...", question: "...", options: [...], multiSelect: true }
+ */
+function parseQuestionObject(block: string): ParsedQuestion | null {
+  const headerMatch = block.match(/header:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  const questionMatch = block.match(/question:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  if (!headerMatch || !questionMatch) return null;
+
+  const header = unescapeDoubleQuotedString(headerMatch[1]);
+  const question = unescapeDoubleQuotedString(questionMatch[1]);
+  const options = parseOptionsBlock(block);
+  if (!options) return null;
+
+  const multiSelectMatch = block.match(/multiSelect:\s*(true|false)/);
+  const multiSelect = multiSelectMatch ? multiSelectMatch[1] === "true" : undefined;
+
+  return { header, question, options, multiSelect };
+}
+
+/**
+ * Rewrites Skill(skill="gsd-xxx", args="yyy") calls to Pi-equivalent instructions.
+ *
+ * Pattern: Skill(skill="gsd-NAME", args="ARGS") →
+ *   Use the /gsd-NAME skill (invoke via slash command /gsd-NAME ARGS in Pi) or read the corresponding workflow prompt to continue.
+ *
+ * Pattern: Skill(skill="gsd-NAME") (no args) →
+ *   Use the /gsd-NAME skill (invoke via slash command /gsd-NAME in Pi) or read the corresponding workflow prompt to continue.
+ *
+ * Code-fence safe: does not transform within ```...``` blocks.
+ */
+export function transformSkillDispatchForPi(input: string): string {
+  const segments = splitCodeFences(input);
+  let changed = false;
+  const result = segments.map(({ segment, isCode }) => {
+    if (isCode) return segment;
+    const transformed = rewriteSkillDispatchInSegment(segment);
+    if (transformed !== segment) changed = true;
+    return transformed;
+  }).join("");
+
+  return changed ? result : input;
+}
+
+/**
+ * Rewrite all Skill() dispatch calls in a non-code segment.
+ * Handles:
+ *   - Double quotes: Skill(skill="gsd-xxx", args="yyy")
+ *   - Escaped double quotes in strings: Skill(skill=\"gsd-xxx\", args=\"yyy\")
+ *   - Single quotes: Skill(skill='gsd-xxx', args='yyy')
+ *   - Non-gsd prefix: Skill(skill="update-config")
+ */
+function rewriteSkillDispatchInSegment(segment: string): string {
+  // Pattern 1: Skill with escaped double quotes (inside prompt="...")
+  //   Skill(skill=\"xxx\", args=\"yyy\")
+  segment = segment.replace(
+    /Skill\(skill=\\"([a-z0-9-]+)\\"(?:,\s*args=\\"([^\\"]*)\\")?\)/g,
+    (_match, name: string, args: string | undefined) => {
+      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
+      const invokePart = args
+        ? `invoke via slash command ${slashCmd} in Pi`
+        : `invoke via slash command /${name} in Pi`;
+      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+    },
+  );
+
+  // Pattern 2: Skill with single quotes
+  //   Skill(skill='xxx', args='yyy')
+  segment = segment.replace(
+    /Skill\(skill='([a-z0-9-]+)'(?:,\s*args='([^']*)')?\)/g,
+    (_match, name: string, args: string | undefined) => {
+      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
+      const invokePart = args
+        ? `invoke via slash command ${slashCmd} in Pi`
+        : `invoke via slash command /${name} in Pi`;
+      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+    },
+  );
+
+  // Pattern 3: Skill with double quotes (standard form)
+  //   Skill(skill="xxx", args="yyy")  or  Skill(skill="xxx")
+  //   Also handles non-gsd prefix like Skill(skill="update-config")
+  segment = segment.replace(
+    /Skill\(skill="([a-z0-9-]+)"(?:,\s*args="([^"]*)")?\)/g,
+    (_match, name: string, args: string | undefined) => {
+      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
+      const invokePart = args
+        ? `invoke via slash command ${slashCmd} in Pi`
+        : `invoke via slash command /${name} in Pi`;
+      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+    },
+  );
+
+  return segment;
+}
+
+/**
+ * Rewrites subagent_type="general-purpose" to subagent_type="general" in prompt text.
+ * Also rewrites Agent(subagent_type="xxx", prompt="yyy") to subagent({agent: "xxx", task: "yyy"}).
+ *
+ * Code-fence safe: does not transform within ```...``` blocks.
+ */
+export function transformSubagentDispatchForPi(input: string): string {
+  const segments = splitCodeFences(input);
+  let changed = false;
+  const result = segments.map(({ segment, isCode }) => {
+    if (isCode) return segment;
+    let transformed = segment;
+    // Rewrite subagent_type="general-purpose" to subagent_type="general"
+    const before1 = transformed;
+    transformed = transformed.replace(/subagent_type="general-purpose"/g, 'subagent_type="general"');
+    if (transformed !== before1) changed = true;
+    // Rewrite Agent(subagent_type="xxx", prompt="yyy") to subagent({agent: "xxx", task: "yyy"})
+    const before2 = transformed;
+    transformed = transformed.replace(
+      /Agent\(subagent_type="([^"]+)",\s*prompt="([\s\S]*?)"\)/g,
+      (_match, agentType: string, promptText: string) => {
+        return `subagent({agent: "${agentType}", task: "${promptText}"})`;
+      },
+    );
+    if (transformed !== before2) changed = true;
+    return transformed;
+  }).join("");
+
+  return changed ? result : input;
+}

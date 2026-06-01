@@ -6,7 +6,7 @@ Scan all phases for pending, skipped, blocked, and human_needed UAT items. Cross
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/audit-uat.md
+@generated/workflows/workflows/audit-uat.md
 </execution_context>
 
 <context>

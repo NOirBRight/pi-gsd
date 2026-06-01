@@ -1,6 +1,7 @@
 ---
 description: Audit milestone completion against original intent before archiving
 argument-hint: '[version]'
+requires: '[execute-phase]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -16,7 +17,7 @@ Verify milestone achieved its definition of done. Check requirements coverage, c
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/audit-milestone.md
+@generated/workflows/workflows/audit-milestone.md
 </execution_context>
 
 <context>

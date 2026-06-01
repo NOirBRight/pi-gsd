@@ -1,6 +1,7 @@
 ---
 description: Generate or update project documentation verified against the codebase
 argument-hint: '[--force] [--verify-only]'
+requires: '[update]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -22,7 +23,7 @@ Flag handling rule:
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/docs-update.md
+@generated/workflows/workflows/docs-update.md
 </execution_context>
 
 <context>

@@ -1,13 +1,14 @@
 ---
 description: 'Extract decisions, lessons, patterns, and surprises from completed phase artifacts'
 argument-hint: '<phase-number>'
+requires: '[phase]'
 ---
 <objective>
 Extract structured learnings from completed phase artifacts (PLAN.md, SUMMARY.md, VERIFICATION.md, UAT.md, STATE.md) into a LEARNINGS.md file that captures decisions, lessons learned, patterns discovered, and surprises encountered.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/extract-learnings.md
+@generated/workflows/workflows/extract-learnings.md
 </execution_context>
 
-Execute the extract-learnings workflow from @~/.claude/get-shit-done/workflows/extract-learnings.md end-to-end.
+Execute the extract-learnings workflow from @generated/workflows/workflows/extract-learnings.md end-to-end.

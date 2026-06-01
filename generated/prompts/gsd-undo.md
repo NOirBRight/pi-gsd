@@ -1,6 +1,7 @@
 ---
 description: Safe git revert. Roll back phase or plan commits using the phase manifest with dependency checks.
 argument-hint: '--last N | --phase NN | --plan NN-MM'
+requires: '[phase]'
 ---
 
 <objective>
@@ -13,9 +14,9 @@ Three modes:
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/undo.md
-@~/.claude/get-shit-done/references/ui-brand.md
-@~/.claude/get-shit-done/references/gate-prompts.md
+@generated/workflows/workflows/undo.md
+@generated/workflows/references/ui-brand.md
+@generated/workflows/references/gate-prompts.md
 </execution_context>
 
 <context>

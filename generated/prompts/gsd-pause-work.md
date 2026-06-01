@@ -1,6 +1,7 @@
 ---
 description: Create context handoff when pausing work mid-phase
 argument-hint: '[--report]'
+requires: '[phase, progress]'
 ---
 
 <objective>
@@ -15,7 +16,7 @@ Routes to the pause-work workflow which handles:
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/pause-work.md
+@generated/workflows/workflows/pause-work.md
 </execution_context>
 
 <context>
@@ -24,7 +25,7 @@ State and phase progress are gathered in-workflow with targeted reads.
 
 <process>
 If `--report` is in $ARGUMENTS:
-Read and execute `~/.claude/get-shit-done/workflows/session-report.md` end-to-end.
+Read and execute `generated/workflows/workflows/session-report.md` end-to-end.
 
 **Follow the pause-work workflow**.
 

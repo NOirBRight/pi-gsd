@@ -1,6 +1,7 @@
 ---
 description: 'Check progress, advance workflow, or dispatch freeform intent — the unified GSD situational command'
 argument-hint: '[--forensic | --next | --do \"task description\"]'
+requires: '[phase]'
 ---
 <objective>
 Check project progress, summarize recent work and what's ahead, then intelligently route to the next action.
@@ -21,10 +22,10 @@ Three modes:
 </flags>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/progress.md
-@~/.claude/get-shit-done/workflows/next.md
-@~/.claude/get-shit-done/workflows/do.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/progress.md
+@generated/workflows/workflows/next.md
+@generated/workflows/workflows/do.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <process>

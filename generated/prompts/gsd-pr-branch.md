@@ -1,6 +1,7 @@
 ---
 description: Create a clean PR branch by filtering out .planning/ commits — ready for code review
 argument-hint: '[target branch, default: main]'
+requires: '[review]'
 ---
 
 <objective>
@@ -12,7 +13,7 @@ changes that are irrelevant to code review.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/pr-branch.md
+@generated/workflows/workflows/pr-branch.md
 </execution_context>
 
 <process>

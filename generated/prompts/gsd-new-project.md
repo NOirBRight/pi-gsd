@@ -1,6 +1,7 @@
 ---
 description: Initialize a new project with deep context gathering and PROJECT.md
 argument-hint: '[--auto]'
+requires: '[config, phase, plan-phase]'
 ---
 <runtime_note>
 **Copilot (VS Code):** Use `vscode_askquestions` wherever this workflow calls `AskUserQuestion`. They are equivalent — `vscode_askquestions` is the VS Code Copilot implementation of the same interactive question API.
@@ -26,11 +27,11 @@ Initialize a new project through unified flow: questioning → research (optiona
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/new-project.md
-@~/.claude/get-shit-done/references/questioning.md
-@~/.claude/get-shit-done/references/ui-brand.md
-@~/.claude/get-shit-done/templates/project.md
-@~/.claude/get-shit-done/templates/requirements.md
+@generated/workflows/workflows/new-project.md
+@generated/workflows/references/questioning.md
+@generated/workflows/references/ui-brand.md
+@generated/workflows/templates/project.md
+@generated/workflows/templates/requirements.md
 </execution_context>
 
 <process>

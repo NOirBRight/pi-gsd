@@ -8,3 +8,4 @@ export * from "./generator.js";
 export * from "./doctor.js";
 export * from "./pi-subagents.js";
 export * from "./runtime-rewrites.js";
+export * from "./orchestrator/index.js";

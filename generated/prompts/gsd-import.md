@@ -11,10 +11,10 @@ Import external plan files into the GSD planning system with conflict detection 
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/import.md
-@~/.claude/get-shit-done/references/ui-brand.md
-@~/.claude/get-shit-done/references/gate-prompts.md
-@~/.claude/get-shit-done/references/doc-conflict-engine.md
+@generated/workflows/workflows/import.md
+@generated/workflows/references/ui-brand.md
+@generated/workflows/references/gate-prompts.md
+@generated/workflows/references/doc-conflict-engine.md
 </execution_context>
 
 <context>

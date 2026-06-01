@@ -1,6 +1,7 @@
 ---
 description: Execute all plans in a phase with wave-based parallelization
 argument-hint: '<phase-number> [--wave N] [--gaps-only] [--interactive] [--tdd]'
+requires: '[phase, verify-work]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -27,8 +28,8 @@ Context budget: ~15% orchestrator, 100% fresh per subagent.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/execute-phase.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/execute-phase.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <runtime_note>
@@ -50,7 +51,7 @@ Phase: $ARGUMENTS
 - If none of these tokens appear, run the standard full-phase execution flow with no flag-specific filtering
 - Do not infer that a flag is active just because it is documented in this prompt
 
-Context files are resolved inside the workflow via `gsd-sdk query init.execute-phase` and per-subagent `<files_to_read>` blocks.
+Context files are resolved inside the workflow via `gsd-tools query init.execute-phase` and per-subagent `<files_to_read>` blocks.
 </context>
 
 <process>

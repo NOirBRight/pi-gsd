@@ -14,7 +14,7 @@ import { join as join3 } from "path";
 import { existsSync, readFileSync, statSync } from "fs";
 import { createRequire } from "module";
 import { dirname, join } from "path";
-var OFFICIAL_PACKAGE_NAME = "@opengsd/get-shit-done-redux";
+var OFFICIAL_PACKAGE_NAME = "@opengsd/gsd-core";
 var OfficialPackageError = class extends Error {
   constructor(message) {
     super(message);
@@ -134,6 +134,385 @@ function mentionsPositiveSubagentDelegation(input) {
 function mentionsGsdSubagentPair(input) {
   return /\bgsd-[a-z0-9-]+\b[\s\S]{0,80}\bsubagents?\b/i.test(input) || /\bsubagents?\b[\s\S]{0,80}\bgsd-[a-z0-9-]+\b/i.test(input);
 }
+function splitCodeFences(text) {
+  const parts = [];
+  const regex = /(`{3}[\s\S]*?`{3})/g;
+  let lastIdx = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push({ segment: text.slice(lastIdx, match.index), isCode: false });
+    }
+    parts.push({ segment: match[1], isCode: true });
+    lastIdx = regex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    parts.push({ segment: text.slice(lastIdx), isCode: false });
+  }
+  if (parts.length === 0) {
+    parts.push({ segment: text, isCode: false });
+  }
+  return parts;
+}
+function transformAskUserQuestionForPi(input) {
+  if (input.includes("ask_user_question")) return input;
+  const segments = splitCodeFences(input);
+  let changed = false;
+  const result = segments.map(({ segment, isCode }) => {
+    if (isCode) return segment;
+    const transformed = rewriteAskUserQuestionInSegment(segment);
+    if (transformed !== segment) changed = true;
+    return transformed;
+  }).join("");
+  return changed ? result : input;
+}
+function rewriteAskUserQuestionInSegment(segment) {
+  let result = segment;
+  let safety = 100;
+  let searchFrom = 0;
+  while (safety-- > 0) {
+    const match = /AskUserQuestion\s*\(/.exec(result.slice(searchFrom));
+    if (!match || match.index === void 0) break;
+    const callStart = searchFrom + match.index;
+    const argsStart = callStart + match[0].length - 1;
+    const argsText = extractBalancedParens(result, argsStart);
+    if (!argsText) {
+      searchFrom = argsStart + 1;
+      continue;
+    }
+    const callEnd = argsStart + argsText.length + 2;
+    const rewritten = transformAskUserQuestionCall(argsText);
+    if (rewritten === null) {
+      searchFrom = argsStart + 1;
+      continue;
+    }
+    result = result.slice(0, callStart) + rewritten + result.slice(callEnd);
+    searchFrom = callStart + rewritten.length;
+  }
+  if (safety <= 0) {
+    console.warn("[pi-gsd] rewriteAskUserQuestionInSegment: safety limit reached \u2014 possible unbalanced AskUserQuestion in input");
+  }
+  return result;
+}
+function extractBalancedParens(text, openParenPos) {
+  let depth = 0;
+  let inString = false;
+  let stringChar = "";
+  let i = openParenPos;
+  for (; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") {
+        i++;
+        continue;
+      }
+      if (ch === stringChar) {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringChar = ch;
+      continue;
+    }
+    if (ch === "(") {
+      depth++;
+    } else if (ch === ")") {
+      depth--;
+      if (depth === 0) {
+        return text.slice(openParenPos + 1, i);
+      }
+    }
+  }
+  return null;
+}
+function transformAskUserQuestionCall(argsText) {
+  const trimmed = argsText.trim();
+  if (trimmed.startsWith("[")) {
+    return transformArrayQuestionForm(trimmed);
+  }
+  const namedParsed = parseNamedParams(trimmed);
+  if (namedParsed) {
+    return formatAskUserQuestion(namedParsed);
+  }
+  const positionalParsed = parsePositionalArgs(trimmed);
+  if (positionalParsed) {
+    return formatAskUserQuestion(positionalParsed);
+  }
+  return null;
+}
+function escapeDoubleQuotedString(s) {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+function unescapeDoubleQuotedString(s) {
+  return s.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+}
+function formatAskUserQuestion(questions) {
+  const formattedQuestions = questions.map((q) => {
+    const opts = q.options.map((o) => `{ label: "${escapeDoubleQuotedString(o.label)}", description: "${escapeDoubleQuotedString(o.description)}" }`).join(", ");
+    const parts = [
+      `question: "${escapeDoubleQuotedString(q.question)}"`,
+      `header: "${escapeDoubleQuotedString(q.header)}"`,
+      `options: [${opts}]`
+    ];
+    if (q.multiSelect) {
+      parts.push("multiSelect: true");
+    }
+    return `{ ${parts.join(", ")} }`;
+  });
+  return `ask_user_question({ questions: [${formattedQuestions.join(", ")}] })`;
+}
+function parseNamedParams(argsText) {
+  const headerMatch = argsText.match(/header:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  const questionMatch = argsText.match(/question:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  if (!headerMatch || !questionMatch) return null;
+  const header = unescapeDoubleQuotedString(headerMatch[1]);
+  const question = unescapeDoubleQuotedString(questionMatch[1]);
+  const questionBlockMatch = argsText.match(/question:\s*\|\n?([\s\S]*?)\n\s*\|?/);
+  const finalQuestion = questionBlockMatch ? questionBlockMatch[1].trim() : question;
+  const options = parseOptionsBlock(argsText);
+  if (!options) return null;
+  const multiSelectMatch = argsText.match(/multiSelect:\s*(true|false)/);
+  const multiSelect = multiSelectMatch ? multiSelectMatch[1] === "true" : void 0;
+  return [{ header, question: finalQuestion, options, multiSelect }];
+}
+function parsePositionalArgs(argsText) {
+  const topTokens = tokenizeTopLevel(argsText);
+  if (topTokens.length < 3) return null;
+  const header = unquote(topTokens[0]);
+  if (header === null) return null;
+  const question = unquote(topTokens[1]);
+  if (question === null) return null;
+  const optionsRaw = topTokens[2];
+  if (!optionsRaw.startsWith("[")) return null;
+  const options = parseOptionsArray(optionsRaw);
+  if (!options) return null;
+  let multiSelect;
+  for (let i = 3; i < topTokens.length; i++) {
+    const ms = topTokens[i].trim();
+    if (ms.startsWith("multiSelect")) {
+      const val = ms.match(/multiSelect\s*:\s*(true|false)/);
+      if (val) multiSelect = val[1] === "true";
+    }
+  }
+  return [{ header, question, options, multiSelect }];
+}
+function tokenizeTopLevel(text) {
+  const tokens = [];
+  let current = "";
+  let depth = 0;
+  let inString = false;
+  let stringChar = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      current += ch;
+      if (ch === "\\" && i + 1 < text.length) {
+        current += text[++i];
+        continue;
+      }
+      if (ch === stringChar) {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringChar = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "[" || ch === "{" || ch === "(") {
+      depth++;
+      current += ch;
+      continue;
+    }
+    if (ch === "]" || ch === "}" || ch === ")") {
+      if (depth > 0) depth--;
+      current += ch;
+      continue;
+    }
+    if (ch === "," && depth === 0) {
+      tokens.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) {
+    tokens.push(current.trim());
+  }
+  return tokens;
+}
+function unquote(s) {
+  const trimmed = s.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1);
+  }
+  return null;
+}
+function parseOptionsArray(raw) {
+  const inner = raw.trim().slice(1, -1).trim();
+  if (!inner) return [];
+  if (inner.includes("{")) {
+    return parseObjectOptions(inner);
+  }
+  const strings = [];
+  let inStr = false;
+  let sChar = "";
+  let token = "";
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (inStr) {
+      if (ch === "\\" && i + 1 < inner.length) {
+        token += inner[++i];
+        continue;
+      }
+      if (ch === sChar) {
+        strings.push(token);
+        token = "";
+        inStr = false;
+        continue;
+      }
+      token += ch;
+    } else {
+      if (ch === '"' || ch === "'") {
+        inStr = true;
+        sChar = ch;
+      }
+    }
+  }
+  if (strings.length > 0) {
+    return strings.map((s) => ({ label: s, description: s }));
+  }
+  return null;
+}
+function parseObjectOptions(inner) {
+  const options = [];
+  const objPattern = /\{\s*label:\s*"((?:[^"\\]|\\.)*)"\s*,\s*description:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+  let match;
+  while ((match = objPattern.exec(inner)) !== null) {
+    options.push({ label: match[1], description: match[2] });
+  }
+  return options.length > 0 ? options : null;
+}
+function parseOptionsBlock(argsText) {
+  const optionsIdx = argsText.search(/\boptions:/);
+  if (optionsIdx === -1) return null;
+  const bracketStart = argsText.indexOf("[", optionsIdx);
+  if (bracketStart === -1) return null;
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = bracketStart; i < argsText.length; i++) {
+    if (argsText[i] === "[") depth++;
+    else if (argsText[i] === "]") {
+      depth--;
+      if (depth === 0) {
+        endIdx = i;
+        break;
+      }
+    }
+  }
+  if (endIdx === -1) return null;
+  const optionsRaw = argsText.slice(bracketStart, endIdx + 1);
+  return parseOptionsArray(optionsRaw);
+}
+function transformArrayQuestionForm(trimmed) {
+  const questions = [];
+  let depth = 0;
+  let blockStart = -1;
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === "{") {
+      if (depth === 0) blockStart = i;
+      depth++;
+    } else if (trimmed[i] === "}") {
+      depth--;
+      if (depth === 0 && blockStart !== -1) {
+        const block = trimmed.slice(blockStart, i + 1);
+        const parsed = parseQuestionObject(block);
+        if (parsed) questions.push(parsed);
+        blockStart = -1;
+      }
+    }
+  }
+  if (questions.length === 0) return null;
+  return formatAskUserQuestion(questions);
+}
+function parseQuestionObject(block) {
+  const headerMatch = block.match(/header:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  const questionMatch = block.match(/question:\s*"((?:[^"]*\\.)*[^"]*)"/);
+  if (!headerMatch || !questionMatch) return null;
+  const header = unescapeDoubleQuotedString(headerMatch[1]);
+  const question = unescapeDoubleQuotedString(questionMatch[1]);
+  const options = parseOptionsBlock(block);
+  if (!options) return null;
+  const multiSelectMatch = block.match(/multiSelect:\s*(true|false)/);
+  const multiSelect = multiSelectMatch ? multiSelectMatch[1] === "true" : void 0;
+  return { header, question, options, multiSelect };
+}
+function transformSkillDispatchForPi(input) {
+  const segments = splitCodeFences(input);
+  let changed = false;
+  const result = segments.map(({ segment, isCode }) => {
+    if (isCode) return segment;
+    const transformed = rewriteSkillDispatchInSegment(segment);
+    if (transformed !== segment) changed = true;
+    return transformed;
+  }).join("");
+  return changed ? result : input;
+}
+function rewriteSkillDispatchInSegment(segment) {
+  segment = segment.replace(
+    /Skill\(skill=\\"([a-z0-9-]+)\\"(?:,\s*args=\\"([^\\"]*)\\")?\)/g,
+    (_match, name, args) => {
+      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
+      const invokePart = args ? `invoke via slash command ${slashCmd} in Pi` : `invoke via slash command /${name} in Pi`;
+      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+    }
+  );
+  segment = segment.replace(
+    /Skill\(skill='([a-z0-9-]+)'(?:,\s*args='([^']*)')?\)/g,
+    (_match, name, args) => {
+      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
+      const invokePart = args ? `invoke via slash command ${slashCmd} in Pi` : `invoke via slash command /${name} in Pi`;
+      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+    }
+  );
+  segment = segment.replace(
+    /Skill\(skill="([a-z0-9-]+)"(?:,\s*args="([^"]*)")?\)/g,
+    (_match, name, args) => {
+      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
+      const invokePart = args ? `invoke via slash command ${slashCmd} in Pi` : `invoke via slash command /${name} in Pi`;
+      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+    }
+  );
+  return segment;
+}
+function transformSubagentDispatchForPi(input) {
+  const segments = splitCodeFences(input);
+  let changed = false;
+  const result = segments.map(({ segment, isCode }) => {
+    if (isCode) return segment;
+    let transformed = segment;
+    const before1 = transformed;
+    transformed = transformed.replace(/subagent_type="general-purpose"/g, 'subagent_type="general"');
+    if (transformed !== before1) changed = true;
+    const before2 = transformed;
+    transformed = transformed.replace(
+      /Agent\(subagent_type="([^"]+)",\s*prompt="([\s\S]*?)"\)/g,
+      (_match, agentType, promptText) => {
+        return `subagent({agent: "${agentType}", task: "${promptText}"})`;
+      }
+    );
+    if (transformed !== before2) changed = true;
+    return transformed;
+  }).join("");
+  return changed ? result : input;
+}
 
 // src/runtime-rewrites.ts
 function rewriteOfficialClaudePaths(input, officialRoot) {
@@ -159,7 +538,10 @@ import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 var _catalogCache = null;
 function loadModelCatalog(gsdPackageRoot) {
   if (_catalogCache) return _catalogCache;
+  const normalizedRoot = gsdPackageRoot.split("get-shit-done-redux").join("gsd-core");
   const candidates = [
+    join2(normalizedRoot, "get-shit-done", "bin", "shared", "model-catalog.json"),
+    join2(normalizedRoot, "sdk", "shared", "model-catalog.json"),
     join2(gsdPackageRoot, "get-shit-done", "bin", "shared", "model-catalog.json"),
     join2(gsdPackageRoot, "sdk", "shared", "model-catalog.json")
   ];
@@ -578,7 +960,6 @@ function buildPiSubagentsTempRoot() {
   return join3(tmpdir(), `pi-subagents-user-${sanitized}`);
 }
 function guardPiSubagentsTempDirs(options) {
-  delete globalThis.__piSubagentsTempAclBroken;
   try {
     const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync2 };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
@@ -586,11 +967,7 @@ function guardPiSubagentsTempDirs(options) {
       const dirPath = join3(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
-      } catch (accessError) {
-        const errorCode = typeof accessError === "object" && accessError !== null && "code" in accessError ? accessError.code : "";
-        if (errorCode !== "EACCES" && errorCode !== "EPERM") {
-          continue;
-        }
+      } catch {
         try {
           fsImpl.rmSync(dirPath, { recursive: true, force: true });
           fsImpl.mkdirSync(dirPath, { recursive: true });
@@ -617,9 +994,6 @@ function piGsdExtension(pi) {
   }
   pi.on("session_start", (_event, ctx) => {
     guardPiSubagentsTempDirs();
-    if (globalThis.__piSubagentsTempAclBroken) {
-      notify(ctx, "pi-gsd: pi-subagents temp directories have ACL corruption that could not be auto-repaired. Run 'pi gsd doctor' for repair instructions.", "warning");
-    }
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (pkgRoot) {
       try {
@@ -719,6 +1093,10 @@ export {
   commandFileToPiPromptName,
   normalizeGsdSlashReferences,
   addPiSubagentGuidance,
+  splitCodeFences,
+  transformAskUserQuestionForPi,
+  transformSkillDispatchForPi,
+  transformSubagentDispatchForPi,
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
   resolveOfficialPackage,

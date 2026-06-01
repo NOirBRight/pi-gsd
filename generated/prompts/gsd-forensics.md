@@ -1,6 +1,7 @@
 ---
 description: Post-mortem investigation for failed GSD workflows — diagnoses what went wrong.
 argument-hint: '[problem description]'
+requires: '[phase, progress, update]'
 ---
 
 <objective>
@@ -11,7 +12,7 @@ Output: Forensic report saved to `.planning/forensics/`, presented inline, with 
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/forensics.md
+@generated/workflows/workflows/forensics.md
 </execution_context>
 
 <context>

@@ -5,8 +5,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { runDoctor } from "./doctor.js";
-import { generateAll, generatePrompts } from "./generator.js";
+import { generateAll, generatePrompts, generateWorkflows } from "./generator.js";
 import { resolveOfficialPackage } from "./official.js";
+import { createDispatchAdapter } from "./orchestrator/dispatch.js";
+import { createAutoOrchestrator, type OrchestratorResult } from "./orchestrator/index.js";
+import { createJournalAdapter } from "./orchestrator/journal.js";
+import { createStateDigestAdapter } from "./orchestrator/state-digest.js";
 
 export interface CliIO {
   stdout(text: string): void;
@@ -18,13 +22,14 @@ const defaultIO: CliIO = {
   stderr: (text) => process.stderr.write(text),
 };
 
-const usage = `Usage: pi-gsd-redux <command> [options]
+const usage = `Usage: pi-gsd-core <command> [options]
 
 Commands:
   generate [--out <dir>] [--prompts <dir>] [--agents <dir>] [--cwd <dir>]
-  doctor [--prompts <dir>] [--agents [dir]] [--scope project|user] [--cwd <dir>]
+  doctor [--prompts <dir>] [--agents [dir]] [--workflows [dir]] [--scope project|user] [--cwd <dir>]
   sync-agents [--scope project|user] [--agents <dir>] [--cwd <dir>] [--dry-run] [--check]
   official [--cwd <dir>] [--] [...args]
+  orchestrate (--auto|--chain|--resume|--status|--stop <reason>) --phase <phase> [--cwd <dir>]
 `;
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -49,17 +54,22 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
         agentsDir: resolve(cwd, options.agents ?? "generated/agents"),
         safeRoot: cwd,
       });
-      io.stdout(`generated ${result.prompts.written.length} prompt(s) and ${result.agents.written.length} agent(s)\n`);
+      io.stdout(`generated ${result.prompts.written.length} prompt(s), ${result.agents.written.length} agent(s), and ${result.workflows?.written.length ?? 0} workflow file(s)\n`);
       return 0;
     }
 
     if (command === "doctor") {
-      const options = parseOptions(args, { prompts: true, agents: "optional", scope: true, cwd: true });
+      const options = parseOptions(args, { prompts: true, agents: "optional", workflows: "optional", scope: true, cwd: true });
       const cwd = resolve(options.cwd ?? process.cwd());
       const generatedPromptsDir = resolveGeneratedResourceDir(cwd, options.prompts, "generated/prompts");
       const result = runDoctor({
         startDir: cwd,
         generatedPromptsDir,
+        ...(options.workflows
+          ? {
+              generatedWorkflowsDir: resolveGeneratedResourceDir(cwd, options.workflows === "true" ? undefined : options.workflows, "generated/workflows"),
+            }
+          : {}),
         ...(options.agents
           ? {
               generatedAgentsDir: resolveGeneratedResourceDir(cwd, options.agents === "true" ? undefined : options.agents, "generated/agents"),
@@ -123,6 +133,10 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
       }
 
       return child.status ?? 1;
+    }
+
+    if (command === "orchestrate") {
+      return runOrchestratorCli(args, io);
     }
 
     io.stderr(usage);
@@ -199,6 +213,95 @@ function parseSyncScope(scope: string): AgentSyncScope {
     return scope;
   }
   throw new Error(`Invalid sync scope: ${scope}`);
+}
+
+function runOrchestratorCli(args: string[], io: CliIO): number {
+  const options = parseOptions(args, { auto: false, chain: false, resume: false, status: false, stop: true, phase: true, cwd: true });
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const phase = options.phase;
+  const mode = Object.hasOwn(options, "auto") ? "auto" : "chain";
+  const orchestrator = createProductionOrchestrator(cwd);
+
+  if (!phase) {
+    io.stderr("Missing value for --phase\n");
+    return 2;
+  }
+
+  let result: OrchestratorResult;
+  if (Object.hasOwn(options, "status")) {
+    const resumed = orchestrator.resume();
+    const status = resumed.snapshot ? resumed.status : orchestrator.getStatus();
+    printStatus(status ?? orchestrator.getStatus(), io);
+    return resumed.ok || Boolean(resumed.snapshot) || resumed.messages.includes("orchestration journal not found") ? 0 : 1;
+  }
+
+  if (Object.hasOwn(options, "stop")) {
+    if (!options.stop || options.stop === "true") {
+      io.stderr("Missing value for --stop\n");
+      return 2;
+    }
+    orchestrator.resume();
+    result = orchestrator.stop(options.stop);
+  } else if (Object.hasOwn(options, "resume")) {
+    result = runUntilSettled(orchestrator.resume(), orchestrator);
+  } else if (Object.hasOwn(options, "auto") || Object.hasOwn(options, "chain")) {
+    result = runUntilSettled(orchestrator.start({ phase, mode, cwd }), orchestrator);
+  } else {
+    io.stderr(usage);
+    return 2;
+  }
+
+  for (const message of result.messages) {
+    io.stdout(`${message}\n`);
+  }
+  if (result.status) printStatus(result.status, io);
+  return result.ok ? 0 : 1;
+}
+
+function createProductionOrchestrator(cwd: string) {
+  return createAutoOrchestrator({
+    journal: createJournalAdapter({ cwd }),
+    stateDigest: createStateDigestAdapter({ cwd }),
+    dispatch: createDispatchAdapter({
+      cwd,
+      runner: createCliDispatchRunner(cwd),
+    }),
+  });
+}
+
+function createCliDispatchRunner(cwd: string) {
+  return (request: Parameters<Parameters<typeof createDispatchAdapter>[0]["runner"]>[0]): OrchestratorResult => {
+    const command = process.env.PI_GSD_DISPATCH_COMMAND;
+    if (!command) {
+      return { ok: false, messages: ["PI_GSD_DISPATCH_COMMAND is required for CLI orchestrator dispatch"] };
+    }
+    const child = spawnSync(command, {
+      cwd,
+      encoding: "utf8",
+      input: `${JSON.stringify({ unit: request.unit, snapshot: request.snapshot, target: request.target })}\n`,
+      shell: true,
+      env: { ...process.env, ...request.env },
+    });
+    if (child.error) return { ok: false, messages: [`dispatch failed: ${child.error.message}`] };
+    if (child.status !== 0) return { ok: false, messages: [`dispatch failed (${child.status ?? "signal"}): ${(child.stderr || child.stdout || "").trim()}`] };
+    return { ok: true, messages: [(child.stdout || `dispatched ${request.unit.type}`).trim()] };
+  };
+}
+
+function runUntilSettled(initial: OrchestratorResult, orchestrator: ReturnType<typeof createAutoOrchestrator>): OrchestratorResult {
+  let result = initial;
+  let guard = 0;
+  while (result.ok && result.status?.status === "running" && guard < 100) {
+    result = orchestrator.advance();
+    guard += 1;
+  }
+  return result;
+}
+
+function printStatus(status: NonNullable<OrchestratorResult["status"]>, io: CliIO) {
+  io.stdout(`status: ${status.status}\n`);
+  if (status.currentUnit) io.stdout(`currentUnit: ${status.currentUnit.type}\n`);
+  if (status.resumeHint) io.stdout(`resumeHint: ${status.resumeHint}\n`);
 }
 
 function parseOfficialArgs(args: string[]) {

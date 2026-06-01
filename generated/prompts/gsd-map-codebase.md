@@ -1,6 +1,7 @@
 ---
 description: Analyze codebase with parallel mapper agents to produce .planning/codebase/ documents
 argument-hint: '[--fast [--focus tech|arch|quality|concerns]] [--query <term>|status|diff|refresh] [area]'
+requires: '[config, new-project, plan-phase]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -19,7 +20,7 @@ Output: .planning/codebase/ folder with 7 structured documents about the codebas
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/map-codebase.md
+@generated/workflows/workflows/map-codebase.md
 </execution_context>
 
 <flags>

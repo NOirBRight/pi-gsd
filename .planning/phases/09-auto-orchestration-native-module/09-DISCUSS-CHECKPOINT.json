@@ -1,0 +1,67 @@
+{
+  "phase": "9",
+  "padded_phase": "09",
+  "phase_name": "Auto Orchestration Native Module",
+  "updated_at": "2026-06-01",
+  "areas_selected": [
+    "Unit boundary",
+    "State journal",
+    "Native vs CLI",
+    "Observability"
+  ],
+  "areas_completed": [
+    "Unit boundary"
+  ],
+  "decisions": [
+    {
+      "area": "Unit boundary",
+      "decision": "Unit granularity is Workflow step: Plan, Execute, Verify, Closeout, and settings-gated workflow steps are modeled as explicit units rather than agent-turn units.",
+      "status": "locked"
+    },
+    {
+      "area": "Unit boundary",
+      "decision": "Optional gates and pipeline shape must reference /gsd-settings and .planning/config.json workflow toggles; exact precedence between settings, roadmap indicators, and user confirmation is not fully locked yet and should be revisited in planning.",
+      "status": "partially_locked"
+    },
+    {
+      "area": "Unit boundary",
+      "decision": "If a Unit fails, Phase 9 should use existing settings-driven retry/repair controls first, especially workflow.node_repair and workflow.node_repair_budget, then pause/escalate when the budget is exhausted or behavior is ambiguous.",
+      "status": "locked"
+    }
+  ],
+  "discussion_log": [
+    {
+      "area": "Unit boundary",
+      "question": "Phase 9 first native orchestrator coverage",
+      "answer": "Reference /gsd-settings and all global/project settings, not just phase flags. Need thoroughly inspect settings and relevant parameters."
+    },
+    {
+      "area": "Unit boundary",
+      "question": "Unit granularity",
+      "answer": "Workflow step"
+    },
+    {
+      "area": "Unit boundary",
+      "question": "Optional gates behavior",
+      "answer": "Reference settings; if unclear use AskUserQuestion to confirm; original version likely has this behavior."
+    },
+    {
+      "area": "Unit boundary",
+      "question": "Failure behavior",
+      "answer": "Use settings retry"
+    }
+  ],
+  "canonical_refs": [
+    ".planning/REQUIREMENTS.md",
+    ".planning/ROADMAP.md",
+    ".planning/PROJECT.md",
+    ".planning/STATE.md",
+    ".planning/phases/07-pi-runtime-spike-gsd-pi-module-mapping/spike/pi-argv.md",
+    ".planning/phases/07-pi-runtime-spike-gsd-pi-module-mapping/spike/gsd-pi-module-map.md",
+    ".planning/phases/07-pi-runtime-spike-gsd-pi-module-mapping/spike/upstream-1.2.0-impact.md",
+    "generated/prompts/gsd-settings.md",
+    "generated/workflows/workflows/settings.md",
+    "generated/workflows/references/planning-config.md",
+    "generated/workflows/workflows/autonomous.md"
+  ]
+}

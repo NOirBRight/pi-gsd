@@ -1,6 +1,7 @@
 ---
 description: Retroactively audit and fill Nyquist validation gaps for a completed phase
 argument-hint: '[phase number]'
+requires: '[phase]'
 ---
 <objective>
 Audit Nyquist validation coverage for a completed phase. Three states:
@@ -12,7 +13,7 @@ Output: updated VALIDATION.md + generated test files.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/validate-phase.md
+@generated/workflows/workflows/validate-phase.md
 </execution_context>
 
 <context>

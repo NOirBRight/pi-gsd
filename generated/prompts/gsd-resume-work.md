@@ -15,7 +15,7 @@ Routes to the resume-project workflow which handles:
   </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/resume-project.md
+@generated/workflows/workflows/resume-project.md
 </execution_context>
 
 <process>

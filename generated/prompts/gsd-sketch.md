@@ -1,6 +1,7 @@
 ---
 description: 'Sketch UI/design ideas with throwaway HTML mockups, or propose what to sketch next (frontier mode)'
 argument-hint: '[design idea to explore] [--quick] [--text] [--wrap-up] or [frontier]'
+requires: '[spike]'
 ---
 <objective>
 Explore design directions through throwaway HTML mockups before committing to implementation.
@@ -16,13 +17,13 @@ Does not require prior new-project setup — auto-creates `.planning/sketches/` 
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/sketch.md
-@~/.claude/get-shit-done/workflows/sketch-wrap-up.md
-@~/.claude/get-shit-done/references/ui-brand.md
-@~/.claude/get-shit-done/references/sketch-theme-system.md
-@~/.claude/get-shit-done/references/sketch-interactivity.md
-@~/.claude/get-shit-done/references/sketch-tooling.md
-@~/.claude/get-shit-done/references/sketch-variant-patterns.md
+@generated/workflows/workflows/sketch.md
+@generated/workflows/workflows/sketch-wrap-up.md
+@generated/workflows/references/ui-brand.md
+@generated/workflows/references/sketch-theme-system.md
+@generated/workflows/references/sketch-interactivity.md
+@generated/workflows/references/sketch-tooling.md
+@generated/workflows/references/sketch-variant-patterns.md
 </execution_context>
 
 <runtime_note>

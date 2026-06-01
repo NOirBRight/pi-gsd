@@ -1,5 +1,6 @@
 ---
 description: Configure GSD workflow toggles and model profile
+requires: '[quick]'
 ---
 
 <objective>
@@ -14,7 +15,7 @@ Routes to the settings workflow which handles:
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/settings.md
+@generated/workflows/workflows/settings.md
 </execution_context>
 
 <process>

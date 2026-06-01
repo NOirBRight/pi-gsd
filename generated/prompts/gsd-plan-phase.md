@@ -1,6 +1,7 @@
 ---
 description: Create detailed phase plan (PLAN.md) with verification loop
 argument-hint: '[phase] [--auto] [--research] [--skip-research] [--research-phase <N>] [--view] [--gaps] [--skip-verify] [--prd <file>] [--ingest <path-or-glob>] [--ingest-format <auto|nygard|madr|narrative>] [--reviews] [--text] [--tdd] [--mvp]'
+requires: '[discuss-phase, phase, review, update]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -25,8 +26,8 @@ Create executable phase prompts (PLAN.md files) for a roadmap phase with integra
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/plan-phase.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/plan-phase.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <runtime_note>

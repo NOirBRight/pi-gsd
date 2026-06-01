@@ -88,7 +88,7 @@ describe("runCli", () => {
     });
 
     expect(code).toBe(0);
-    expect(stdout.join("")).toContain("official package: @opengsd/get-shit-done-redux@1.2.3");
+    expect(stdout.join("")).toContain("official package: @opengsd/gsd-core@1.2.3");
   });
 
   it("does not check project synced agents unless doctor agents option is provided", async () => {
@@ -246,6 +246,37 @@ describe("runCli", () => {
     expect(stderr.join("")).toContain("bad official");
   });
 
+  it("runs orchestrate --chain through the full native queue and persists status", async () => {
+    const fixture = createOfficialFixture();
+    writeOrchestratorFixture(fixture.root);
+    const dispatchScript = writeDispatchScript(fixture.root);
+    const oldDispatchCommand = process.env.PI_GSD_DISPATCH_COMMAND;
+    process.env.PI_GSD_DISPATCH_COMMAND = `"${process.execPath}" "${dispatchScript}"`;
+    const stdout: string[] = [];
+
+    const code = await runCli(["orchestrate", "--chain", "--phase", "09", "--cwd", fixture.root], {
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    });
+    if (oldDispatchCommand === undefined) delete process.env.PI_GSD_DISPATCH_COMMAND;
+    else process.env.PI_GSD_DISPATCH_COMMAND = oldDispatchCommand;
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("status: completed");
+    const journal = JSON.parse(readFileSync(join(fixture.root, ".planning", "orchestration-state.json"), "utf8"));
+    expect(journal.snapshot.status).toBe("completed");
+    expect(journal.events.map((event: { type: string }) => event.type)).toEqual(expect.arrayContaining(["orchestration_started", "unit_ended"]));
+
+    const statusOut: string[] = [];
+    const statusCode = await runCli(["orchestrate", "--status", "--phase", "09", "--cwd", fixture.root], {
+      stdout: (text) => statusOut.push(text),
+      stderr: () => undefined,
+    });
+
+    expect(statusCode).toBe(0);
+    expect(statusOut.join("")).toContain("status: completed");
+  });
+
   it("returns usage for unknown commands", async () => {
     const stderr: string[] = [];
 
@@ -255,7 +286,7 @@ describe("runCli", () => {
     });
 
     expect(code).toBe(2);
-    expect(stderr.join("")).toContain("Usage: pi-gsd-redux");
+    expect(stderr.join("")).toContain("Usage: pi-gsd-core");
   });
 
   it("catches errors and returns one", async () => {
@@ -290,7 +321,7 @@ describe("runCli", () => {
     const fixture = createOfficialFixture();
     writePlanCommand(fixture.packageRoot);
     const output = join(fixture.root, "linked-output");
-    const linkedPackage = join(fixture.root, "linked-pi-gsd-redux");
+    const linkedPackage = join(fixture.root, "linked-pi-gsd-core");
     symlinkSync(process.cwd(), linkedPackage, process.platform === "win32" ? "junction" : "dir");
 
     ensureBuiltCli();
@@ -331,6 +362,37 @@ function writePlanCommand(packageRoot: string) {
 
 function writeAgent(packageRoot: string) {
   writeFileSync(join(packageRoot, "agents", "gsd-planner.md"), "---\nname: gsd-planner\ndescription: Plans\n---\nBody\n", "utf8");
+}
+
+function writeOrchestratorFixture(root: string) {
+  mkdirSync(join(root, ".planning", "phases", "09-fixture"), { recursive: true });
+  writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: true, ui_phase: false, ui_review: false } }), "utf8");
+
+  const promptsDir = join(root, "generated", "prompts");
+  const agentsDir = join(root, "generated", "agents");
+  mkdirSync(promptsDir, { recursive: true });
+  mkdirSync(agentsDir, { recursive: true });
+  for (const prompt of ["gsd-plan-phase.md", "gsd-execute-phase.md", "gsd-verify-work.md", "gsd-ship.md"]) {
+    writeFileSync(join(promptsDir, prompt), `# ${prompt}\n`, "utf8");
+  }
+  for (const agent of ["gsd-planner.md", "gsd-executor.md", "gsd-verifier.md"]) {
+    writeFileSync(join(agentsDir, agent), `---\nname: ${agent.replace(/\.md$/, "")}\n---\n`, "utf8");
+  }
+}
+
+function writeDispatchScript(root: string) {
+  const script = join(root, "dispatch.cjs");
+  writeFileSync(script, `
+const fs = require('node:fs');
+const path = require('node:path');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const phaseDir = path.join(process.cwd(), '.planning', 'phases', '09-fixture');
+fs.mkdirSync(phaseDir, { recursive: true });
+if (input.unit.type === 'plan') fs.writeFileSync(path.join(phaseDir, '09-PLAN.md'), 'plan\\n');
+if (input.unit.type === 'execute') fs.writeFileSync(path.join(phaseDir, '09-SUMMARY.md'), 'summary\\n');
+if (input.unit.type === 'verify') fs.writeFileSync(path.join(phaseDir, '09-VERIFICATION.md'), 'verification\\n');
+`, "utf8");
+  return script;
 }
 
 function ensureBuiltCli() {

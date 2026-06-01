@@ -17,7 +17,7 @@ Accepts an optional topic argument: `/gsd-explore authentication strategy`
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/explore.md
+@generated/workflows/workflows/explore.md
 </execution_context>
 
 <process>

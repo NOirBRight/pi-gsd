@@ -1,6 +1,7 @@
 ---
 description: Start a new milestone cycle — update PROJECT.md and route to requirements
 argument-hint: "[milestone name, e.g., 'v1.1 Notifications']"
+requires: '[new-project, phase, plan-phase]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -25,11 +26,11 @@ Brownfield equivalent of new-project. Project exists, PROJECT.md has history. Ga
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/new-milestone.md
-@~/.claude/get-shit-done/references/questioning.md
-@~/.claude/get-shit-done/references/ui-brand.md
-@~/.claude/get-shit-done/templates/project.md
-@~/.claude/get-shit-done/templates/requirements.md
+@generated/workflows/workflows/new-milestone.md
+@generated/workflows/references/questioning.md
+@generated/workflows/references/ui-brand.md
+@generated/workflows/templates/project.md
+@generated/workflows/templates/requirements.md
 </execution_context>
 
 <context>

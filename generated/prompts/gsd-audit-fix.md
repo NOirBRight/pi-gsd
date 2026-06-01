@@ -1,6 +1,7 @@
 ---
 description: 'Autonomous audit-to-fix pipeline — find issues, classify, fix, test, commit'
 argument-hint: '--source <audit-uat> [--severity <medium|high|all>] [--max N] [--dry-run]'
+requires: '[audit-uat]'
 ---
 <objective>
 Run an audit, classify findings as auto-fixable vs manual-only, then autonomously fix
@@ -14,7 +15,7 @@ Flags:
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/audit-fix.md
+@generated/workflows/workflows/audit-fix.md
 </execution_context>
 
 <process>

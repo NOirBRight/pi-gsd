@@ -1,6 +1,7 @@
 ---
 description: Validate built features through conversational UAT
 argument-hint: "[phase number, e.g., '4'] [--ws <name>]"
+requires: '[execute-phase, phase]'
 ---
 <objective>
 Validate built features through conversational testing with persistent state.
@@ -11,8 +12,8 @@ Output: {phase_num}-UAT.md tracking all test results. If issues found: diagnosed
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/verify-work.md
-@~/.claude/get-shit-done/templates/UAT.md
+@generated/workflows/workflows/verify-work.md
+@generated/workflows/templates/UAT.md
 </execution_context>
 
 <context>

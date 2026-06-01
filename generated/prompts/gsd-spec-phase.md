@@ -1,6 +1,7 @@
 ---
 description: Clarify WHAT a phase delivers with ambiguity scoring; produces a SPEC.md before discuss-phase.
 argument-hint: '<phase> [--auto] [--text]'
+requires: '[discuss-phase, execute-phase, phase, plan-phase]'
 ---
 
 <objective>
@@ -20,8 +21,8 @@ Clarify phase requirements through structured Socratic questioning with quantita
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/spec-phase.md
-@~/.claude/get-shit-done/templates/spec.md
+@generated/workflows/workflows/spec-phase.md
+@generated/workflows/templates/spec.md
 </execution_context>
 
 <runtime_note>

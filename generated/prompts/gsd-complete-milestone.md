@@ -1,6 +1,7 @@
 ---
 description: Archive completed milestone and prepare for next version
 argument-hint: '<version>'
+requires: '[audit-milestone, discuss-phase, execute-phase, new-milestone, phase, plan-phase, stats, update]'
 ---
 
 <objective>
@@ -13,8 +14,8 @@ Output: Milestone archived (roadmap + requirements), PROJECT.md evolved, git tag
 <execution_context>
 **Load these files NOW (before proceeding):**
 
-- @~/.claude/get-shit-done/workflows/complete-milestone.md (main workflow)
-- @~/.claude/get-shit-done/templates/milestone-archive.md (archive template)
+- @generated/workflows/workflows/complete-milestone.md (main workflow)
+- @generated/workflows/templates/milestone-archive.md (archive template)
   </execution_context>
 
 <context>

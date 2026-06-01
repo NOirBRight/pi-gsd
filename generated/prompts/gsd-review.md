@@ -1,6 +1,7 @@
 ---
 description: Request cross-AI peer review of phase plans from external AI CLIs
 argument-hint: '--phase N [--gemini] [--claude] [--codex] [--opencode] [--qwen] [--cursor] [--all]'
+requires: '[config, phase, plan-phase]'
 ---
 
 <objective>
@@ -12,7 +13,7 @@ planning via /gsd-plan-phase --reviews.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/review.md
+@generated/workflows/workflows/review.md
 </execution_context>
 
 <context>

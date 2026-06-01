@@ -1,6 +1,7 @@
 ---
 description: 'Execute a trivial task inline — no subagents, no planning overhead'
 argument-hint: '[task description]'
+requires: '[config, quick]'
 ---
 
 <objective>
@@ -14,7 +15,7 @@ you could describe in one sentence and execute in under 2 minutes.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/fast.md
+@generated/workflows/workflows/fast.md
 </execution_context>
 
 <process>

@@ -1,6 +1,7 @@
 ---
 description: Retroactive 6-pillar visual audit of implemented frontend code
 argument-hint: '[phase]'
+requires: '[phase]'
 ---
 <objective>
 Conduct a retroactive 6-pillar visual audit. Produces UI-REVIEW.md with
@@ -9,8 +10,8 @@ Output: {phase_num}-UI-REVIEW.md
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/ui-review.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/ui-review.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <context>

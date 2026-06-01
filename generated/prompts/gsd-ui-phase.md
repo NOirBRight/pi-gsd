@@ -1,6 +1,7 @@
 ---
 description: Generate UI design contract (UI-SPEC.md) for frontend phases
 argument-hint: '[phase]'
+requires: '[phase]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -16,8 +17,8 @@ Flow: Validate → Research UI → Verify UI-SPEC → Done
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/ui-phase.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/ui-phase.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <context>

@@ -1,6 +1,7 @@
 ---
 description: Interactive command center for managing multiple phases from one terminal
 argument-hint: '[--analyze-deps]'
+requires: '[phase]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -22,19 +23,19 @@ Designed for power users who want to parallelize work across phases from one ter
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/manager.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/manager.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <context>
 No arguments required. Requires an active milestone with ROADMAP.md and STATE.md.
 
-Project context, phase list, dependencies, and recommendations are resolved inside the workflow using `gsd-sdk query init.manager`. No upfront context loading needed.
+Project context, phase list, dependencies, and recommendations are resolved inside the workflow using `gsd-tools query init.manager`. No upfront context loading needed.
 </context>
 
 <process>
 If `--analyze-deps` is in $ARGUMENTS:
-Read and execute `~/.claude/get-shit-done/workflows/analyze-dependencies.md` end-to-end.
+Read and execute `generated/workflows/workflows/analyze-dependencies.md` end-to-end.
 
 Execute end-to-end.
 Maintain the dashboard refresh loop until the user exits or all phases complete.

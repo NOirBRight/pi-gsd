@@ -1,6 +1,7 @@
 ---
 description: "Audit an executed AI phase's evaluation coverage and produce an EVAL-REVIEW.md remediation plan."
 argument-hint: '[phase number]'
+requires: '[phase]'
 ---
 <objective>
 Conduct a retroactive evaluation coverage audit of a completed AI phase.
@@ -9,8 +10,8 @@ Produces EVAL-REVIEW.md with score, verdict, gaps, and remediation plan.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/eval-review.md
-@~/.claude/get-shit-done/references/ai-evals.md
+@generated/workflows/workflows/eval-review.md
+@generated/workflows/references/ai-evals.md
 </execution_context>
 
 <context>

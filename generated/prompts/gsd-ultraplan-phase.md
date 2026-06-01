@@ -1,6 +1,7 @@
 ---
 description: "[BETA] Offload plan phase to Claude Code's ultraplan cloud; review in browser and import back."
 argument-hint: '[phase-number]'
+requires: '[import, phase, plan-phase]'
 ---
 
 <objective>
@@ -14,8 +15,8 @@ Requirements: Claude Code v2.1.91+, claude.ai account, GitHub repository.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/ultraplan-phase.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/ultraplan-phase.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <context>

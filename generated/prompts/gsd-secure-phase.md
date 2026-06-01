@@ -1,6 +1,7 @@
 ---
 description: Retroactively verify threat mitigations for a completed phase
 argument-hint: '[phase number]'
+requires: '[phase]'
 ---
 <objective>
 Verify threat mitigations for a completed phase. Three states:
@@ -12,7 +13,7 @@ Output: updated SECURITY.md.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/secure-phase.md
+@generated/workflows/workflows/secure-phase.md
 </execution_context>
 
 <context>

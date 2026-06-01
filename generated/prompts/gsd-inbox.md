@@ -1,6 +1,7 @@
 ---
 description: Triage and review open GitHub issues and PRs against project templates and contribution guidelines.
 argument-hint: '[--issues] [--prs] [--label] [--close-incomplete] [--repo owner/repo]'
+requires: '[review]'
 ---
 <objective>
 One-command triage of the project's GitHub inbox. Fetches all open issues and PRs,
@@ -12,7 +13,7 @@ and optionally applies labels or closes non-compliant submissions.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/inbox.md
+@generated/workflows/workflows/inbox.md
 </execution_context>
 
 <context>

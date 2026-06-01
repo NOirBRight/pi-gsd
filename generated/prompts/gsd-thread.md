@@ -1,6 +1,7 @@
 ---
 description: Manage persistent context threads for cross-session work
 argument-hint: '[list [--open | --resolved] | close <slug> | status <slug> | name | description]'
+requires: '[phase]'
 ---
 
 <objective>
@@ -10,7 +11,7 @@ doesn't belong to any specific phase.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/thread.md
+@generated/workflows/workflows/thread.md
 </execution_context>
 
 <process>

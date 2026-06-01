@@ -23,10 +23,10 @@ Mode routing:
 </routing>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/new-workspace.md
-@~/.claude/get-shit-done/workflows/list-workspaces.md
-@~/.claude/get-shit-done/workflows/remove-workspace.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/new-workspace.md
+@generated/workflows/workflows/list-workspaces.md
+@generated/workflows/workflows/remove-workspace.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <context>

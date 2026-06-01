@@ -1,6 +1,7 @@
 ---
 description: Generate an AI-SPEC.md design contract for phases that involve building AI systems.
 argument-hint: '[phase number]'
+requires: '[phase]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -16,9 +17,9 @@ Flow: Select Framework → Research Docs → Research Domain → Design Eval Str
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/ai-integration-phase.md
-@~/.claude/get-shit-done/references/ai-frameworks.md
-@~/.claude/get-shit-done/references/ai-evals.md
+@generated/workflows/workflows/ai-integration-phase.md
+@generated/workflows/references/ai-frameworks.md
+@generated/workflows/references/ai-evals.md
 </execution_context>
 
 <context>

@@ -27,12 +27,12 @@ Mode routing:
 </routing>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/add-todo.md
-@~/.claude/get-shit-done/workflows/note.md
-@~/.claude/get-shit-done/workflows/add-backlog.md
-@~/.claude/get-shit-done/workflows/plant-seed.md
-@~/.claude/get-shit-done/workflows/check-todos.md
-@~/.claude/get-shit-done/references/ui-brand.md
+@generated/workflows/workflows/add-todo.md
+@generated/workflows/workflows/note.md
+@generated/workflows/workflows/add-backlog.md
+@generated/workflows/workflows/plant-seed.md
+@generated/workflows/workflows/check-todos.md
+@generated/workflows/references/ui-brand.md
 </execution_context>
 
 <context>

@@ -1,6 +1,7 @@
 ---
 description: Cross-AI plan convergence loop — replan with review feedback until no HIGH concerns remain.
 argument-hint: '<phase> [--codex] [--gemini] [--claude] [--opencode] [--ollama] [--lm-studio] [--llama-cpp] [--text] [--ws <name>] [--all] [--max-cycles N]'
+requires: '[phase, review]'
 ---
 <pi_subagents_runtime_note>
 Pi runtime: when this workflow calls for spawning GSD subagents, use the Pi `subagent` tool from `pi-subagents`.
@@ -22,10 +23,10 @@ Replaces gsd-plan-phase's internal gsd-plan-checker with external AI reviewers (
 </objective>
 
 <execution_context>
-@$HOME/.claude/get-shit-done/workflows/plan-review-convergence.md
-@$HOME/.claude/get-shit-done/references/revision-loop.md
-@$HOME/.claude/get-shit-done/references/gates.md
-@$HOME/.claude/get-shit-done/references/agent-contracts.md
+@generated/workflows/workflows/plan-review-convergence.md
+@generated/workflows/references/revision-loop.md
+@generated/workflows/references/gates.md
+@generated/workflows/references/agent-contracts.md
 </execution_context>
 
 <runtime_note>
