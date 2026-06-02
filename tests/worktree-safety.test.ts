@@ -31,7 +31,7 @@ function input(root: string, extra: Partial<PrepareUnitRootInput> = {}): Prepare
 describe("worktree safety", () => {
   it("classifies source-writing and read-only units explicitly", () => {
     expect(isSourceWritingUnit("execute")).toBe(true);
-    for (const type of ["discuss", "research", "plan", "plan-check"] as const) {
+    for (const type of ["discuss", "research", "plan", "plan-check", "code-review"] as const) {
       expect(isSourceWritingUnit(type)).toBe(false);
     }
   });

@@ -547,15 +547,7 @@ increases monotonically across waves. `{status}` is `complete` (success),
    ```
 
    ```text
-   Agent(
-     subagent_type="gsd-executor",
-     description="Execute plan {plan_number} of phase {phase_number}",
-     # Only include model= when executor_model is an explicit model name.
-     # When executor_model is "inherit", omit this parameter entirely so
-     # Claude Code inherits the orchestrator model automatically.
-     model="{executor_model}",  # omit this line when executor_model == "inherit"
-     isolation="worktree",
-     prompt="
+   Use the Pi subagent tool: subagent({agent: "gsd-executor", task: "
        <objective>
        Execute plan {plan_number} of phase {phase_number}-{phase_name}.
        Commit each task atomically. Create SUMMARY.md.
@@ -564,26 +556,26 @@ increases monotonically across waves. `{status}` is `complete` (success),
 
        <worktree_branch_check>
        FIRST ACTION: HEAD assertion MUST run before any reset/checkout. Worktrees
-       spawned by Claude Code's `isolation="worktree"` use the `worktree-agent-<id>`
+       spawned by Claude Code's `isolation=\"worktree\"` use the `worktree-agent-<id>`
        namespace. If HEAD is on a protected ref (main/master/develop/trunk/release/*)
        or detached, HALT — do NOT self-recover by force-rewinding via `git update-ref`,
        that destroys concurrent commits in multi-active scenarios (#2924). Only after
        Step 1 passes is `git reset --hard` safe (#2015 — affects all platforms).
        ```bash
-       HEAD_REF=$(git symbolic-ref --quiet HEAD || echo "DETACHED")
+       HEAD_REF=$(git symbolic-ref --quiet HEAD || echo \"DETACHED\")
        ACTUAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-       if [ "$HEAD_REF" = "DETACHED" ] || echo "$ACTUAL_BRANCH" | grep -Eq '^(main|master|develop|trunk|release/.*)$'; then
-         echo "FATAL: worktree HEAD on '$ACTUAL_BRANCH' (expected worktree-agent-*); refusing to self-recover via 'git update-ref' (#2924)." >&2
+       if [ \"$HEAD_REF\" = \"DETACHED\" ] || echo \"$ACTUAL_BRANCH\" | grep -Eq '^(main|master|develop|trunk|release/.*)$'; then
+         echo \"FATAL: worktree HEAD on '$ACTUAL_BRANCH' (expected worktree-agent-*); refusing to self-recover via 'git update-ref' (#2924).\" >&2
          exit 1
        fi
-       if ! echo "$ACTUAL_BRANCH" | grep -Eq '^worktree-agent-[A-Za-z0-9._/-]+$'; then
-         echo "FATAL: worktree HEAD '$ACTUAL_BRANCH' is not in the worktree-agent-* namespace; refusing to commit (#2924)." >&2
+       if ! echo \"$ACTUAL_BRANCH\" | grep -Eq '^worktree-agent-[A-Za-z0-9._/-]+$'; then
+         echo \"FATAL: worktree HEAD '$ACTUAL_BRANCH' is not in the worktree-agent-* namespace; refusing to commit (#2924).\" >&2
          exit 1
        fi
        ACTUAL_BASE=$(git merge-base HEAD {EXPECTED_BASE})
-       if [ "$ACTUAL_BASE" != "{EXPECTED_BASE}" ]; then
+       if [ \"$ACTUAL_BASE\" != \"{EXPECTED_BASE}\" ]; then
          git reset --hard {EXPECTED_BASE}
-         [ "$(git rev-parse HEAD)" != "{EXPECTED_BASE}" ] && { echo "ERROR: could not correct worktree base"; exit 1; }
+         [ \"$(git rev-parse HEAD)\" != \"{EXPECTED_BASE}\" ] && { echo \"ERROR: could not correct worktree base\"; exit 1; }
        fi
        ```
        Per-commit HEAD/cwd-drift/path-guard: `agents/gsd-executor.md` steps 0/0a/0b + `references/worktree-path-safety.md` (in <execution_context>).
@@ -620,7 +612,7 @@ increases monotonically across waves. `{status}` is `complete` (success),
        <files_to_read>
        Read these files at execution start using the Read tool.
        First resolve repo root so every path is anchored:
-       \`PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)\`
+       \\`PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)\\`
        - ${PROJECT_ROOT}/{phase_dir}/{plan_file} (Plan)
        - ${PROJECT_ROOT}/.planning/PROJECT.md (Project context — core value, requirements, evolution rules)
        - ${PROJECT_ROOT}/.planning/STATE.md (State)
@@ -649,8 +641,7 @@ increases monotonically across waves. `{status}` is `complete` (success),
        - [ ] SUMMARY.md created in plan directory
        - [ ] No modifications to shared orchestrator artifacts (the orchestrator handles all post-wave shared-file writes)
        </success_criteria>
-     "
-   )
+     "}). Wait for the subagent result before continuing this workflow.
    ```
 
    Immediately after each worktree `Agent()` spawn returns metadata, atomically append `{agent_id, worktree_path, branch, expected_base}` to `WAVE_WORKTREE_MANIFEST`. If any field is missing, stop and ask for recovery instead of scanning all agent worktrees.
@@ -1140,7 +1131,7 @@ If `CODE_REVIEW_ENABLED` is `"false"`: display "Code review skipped (workflow.co
 
 **Invoke review:**
 ```
-Skill("gsd-code-review", args="${PHASE_NUMBER}")
+Invoke /gsd-code-review ${PHASE_NUMBER} in Pi
 ```
 
 **Check results using deterministic path (not glob):**
@@ -1369,9 +1360,7 @@ VERIFIER_SKILLS=$(gsd_run query agent-skills gsd-verifier)
 ```
 
 ```
-Agent(
-  description="Verify phase {phase_number} goal achievement",
-  prompt="Verify phase {phase_number} goal achievement.
+Use the Pi subagent tool: subagent({agent: "gsd-verifier", task: "Verify phase {phase_number} goal achievement.
 Phase directory: {phase_dir}
 Phase goal: {goal from ROADMAP.md}
 Phase requirement IDs: {phase_req_ids}
@@ -1390,10 +1379,7 @@ ${CONTEXT_WINDOW >= 500000 ? `- {phase_dir}/*-CONTEXT.md (User decisions — ver
 ` : ''}
 </files_to_read>
 
-${VERIFIER_SKILLS}",
-  subagent_type="gsd-verifier",
-  model="{verifier_model}"
-)
+${VERIFIER_SKILLS}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.

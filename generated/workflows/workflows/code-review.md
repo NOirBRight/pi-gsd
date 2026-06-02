@@ -449,7 +449,7 @@ fi
 Spawn the gsd-code-reviewer agent:
 
 ```
-Agent(subagent_type="gsd-code-reviewer", prompt="
+Use the Pi subagent tool: subagent({agent: "gsd-code-reviewer", task: "
 <files_to_read>
 ${FILES_TO_READ}
 </files_to_read>
@@ -467,7 +467,7 @@ ${CONFIG_FILES}
 
 Review the listed source files at ${REVIEW_DEPTH} depth. Write findings to ${REVIEW_PATH}.
 Do NOT commit the output — the orchestrator handles that.
-")
+"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -545,7 +545,7 @@ if [ "$FIX_FLAG" = "true" ]; then
   # The fix workflow is the canonical implementation for all fix logic:
   # gsd-code-fixer agent dispatch, --auto iteration loop, REVIEW-FIX.md commit,
   # and result presentation. Do not duplicate that logic here.
-  Workflow(workflow="get-shit-done/workflows/code-review-fix.md", args="${FIX_ARGS}")
+  Read and execute generated/workflows/workflows/code-review-fix.md with arguments ${FIX_ARGS}
 
   # Exit after fix workflow completes — present_results is for review-only output.
   # The fix workflow has its own present_results step.

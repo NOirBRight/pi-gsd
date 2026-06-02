@@ -101,17 +101,12 @@ Call AskUserQuestion with threat table and options:
 - `register_authored_at_plan_time: false` (retroactive-STRIDE mode) — **Retroactive-STRIDE: build a STRIDE register from implementation files first, then verify mitigations.** The phase was authored before formal threat modelling; the auditor must construct the register from scratch before verifying.
 
 ```
-Agent(
-  prompt="Read ~/.claude/agents/gsd-security-auditor.md for instructions.\n\n" +
-    "<files_to_read>{PLAN, SUMMARY, impl files, SECURITY.md}</files_to_read>" +
-    "<threat_register>{threat register}</threat_register>" +
-    "<config>asvs_level: {SECURITY_ASVS}, block_on: {SECURITY_BLOCK_ON}</config>" +
-    "<constraints>Never modify implementation files. Verify mitigations exist — do not scan for new threats. Escalate implementation gaps.</constraints>" +
-    "${AGENT_SKILLS_AUDITOR}",
-  subagent_type="gsd-security-auditor",
-  model="{AUDITOR_MODEL}",
-  description="Verify threat mitigations for Phase {N}"
-)
+Use the Pi subagent tool: subagent({agent: "gsd-security-auditor", task: "Read ~/.claude/agents/gsd-security-auditor.md for instructions.\\n\\n\" +
+    \"<files_to_read>{PLAN, SUMMARY, impl files, SECURITY.md}</files_to_read>\" +
+    \"<threat_register>{threat register}</threat_register>\" +
+    \"<config>asvs_level: {SECURITY_ASVS}, block_on: {SECURITY_BLOCK_ON}</config>\" +
+    \"<constraints>Never modify implementation files. Verify mitigations exist — do not scan for new threats. Escalate implementation gaps.</constraints>\" +
+    \"${AGENT_SKILLS_AUDITOR}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.

@@ -661,7 +661,7 @@ AUTO_CHAIN=$(gsd_run query check auto-mode --pick auto_chain_active 2>/dev/null 
 
 Auto-generate UI-SPEC without prompting:
 ```
-Skill("gsd-ui-phase", args="${PHASE} --auto ${GSD_WS}")
+Invoke /gsd-ui-phase ${PHASE} --auto ${GSD_WS} in Pi
 ```
 After `gsd-ui-phase` returns, re-read:
 ```bash
@@ -846,11 +846,7 @@ Extract the list of files to be created/modified from CONTEXT.md and RESEARCH.md
 
 Spawn with:
 ```
-Agent(
-  prompt="{above}",
-  subagent_type="gsd-pattern-mapper",
-  model="{researcher_model}",
-)
+Use the Pi subagent tool: subagent({agent: "gsd-pattern-mapper", task: "{above}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -1054,8 +1050,7 @@ Spawn the planner in **outline-only** mode — it must write only the outline ma
 PLAN.md files:
 
 ```javascript
-Agent(
-  prompt="{same planning_context as step 8, plus:}
+Use the Pi subagent tool: subagent({agent: "gsd-planner", task: "{same planning_context as step 8, plus:}
 
   **Chunked mode: outline-only.**
   Do NOT write any PLAN.md files in this Task.
@@ -1064,11 +1059,7 @@ Agent(
   The outline must be a markdown table with columns:
   Plan ID | Objective | Wave | Depends On | Requirements
 
-  Return: ## OUTLINE COMPLETE with plan count.",
-  subagent_type="gsd-planner",
-  model="{planner_model}",
-  description="Outline Phase {phase} (chunked)"
-)
+  Return: ## OUTLINE COMPLETE with plan count."}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -1099,8 +1090,7 @@ For each plan entry extracted from `PLAN-OUTLINE.md`:
 
 3. Spawn the planner in **single-plan** mode — it must write exactly one PLAN.md file:
    ```javascript
-   Agent(
-     prompt="{same planning_context as step 8, plus:}
+   Use the Pi subagent tool: subagent({agent: "gsd-planner", task: "{same planning_context as step 8, plus:}
 
      **Chunked mode: single-plan.**
      Write exactly ONE plan file: {PHASE_DIR}/{plan_id}-PLAN.md
@@ -1108,11 +1098,7 @@ For each plan entry extracted from `PLAN-OUTLINE.md`:
      Wave: {wave} | Depends on: {depends_on}
      Phase requirement IDs to cover in this plan: {plan_requirements}
 
-     Return: ## PLAN COMPLETE with the plan ID.",
-     subagent_type="gsd-planner",
-     model="{planner_model}",
-     description="Plan {plan_id} (chunked {k}/{N})"
-   )
+     Return: ## PLAN COMPLETE with the plan ID."}). Wait for the subagent result before continuing this workflow.
    ```
 
    > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -1708,7 +1694,7 @@ Plans ready. Launching execute-phase...
 
 Launch execute-phase using the Skill tool to avoid nested Task sessions (which cause runtime freezes due to deep agent nesting):
 ```
-Skill("gsd-execute-phase", args="${PHASE} --auto --no-transition ${GSD_WS}")
+Invoke /gsd-execute-phase ${PHASE} --auto --no-transition ${GSD_WS} in Pi
 ```
 
 The `--no-transition` flag tells execute-phase to return status after verification instead of chaining further. This keeps the auto-advance chain flat — each phase runs at the same nesting level rather than spawning deeper Task agents.

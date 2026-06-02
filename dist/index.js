@@ -13,7 +13,7 @@ import {
   syncAgents,
   transformOfficialAgentMarkdown,
   writeOfficialVersionStamp
-} from "./chunk-MYLJCXPV.js";
+} from "./chunk-KDM534GD.js";
 import {
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
@@ -53,8 +53,9 @@ import {
   transformGsdRunLauncher,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi,
+  transformWorkflowDispatchForPi,
   writeFrontmatter
-} from "./chunk-VVO6HX3Q.js";
+} from "./chunk-O6URY27T.js";
 export {
   OFFICIAL_PACKAGE_NAME,
   OFFICIAL_ROOT_PLACEHOLDER,
@@ -107,6 +108,7 @@ export {
   transformOfficialAgentMarkdown,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi,
+  transformWorkflowDispatchForPi,
   writeFrontmatter,
   writeOfficialVersionStamp
 };

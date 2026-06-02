@@ -57,7 +57,7 @@ _GSD_SHIM_NAME="gsd-tools.cjs"; GSD_TOOLS="$(node -e "console.log(require.resolv
    Launch plan-phase using the Skill tool to avoid nested Task sessions
    (which cause runtime freezes due to deep agent nesting — see #686):
    ```
-   Skill("gsd-plan-phase", args="${PHASE} --auto ${GSD_WS}")
+   Invoke /gsd-plan-phase ${PHASE} --auto ${GSD_WS} in Pi
    ```
 
    This keeps the auto-advance chain flat — discuss, plan, and execute all

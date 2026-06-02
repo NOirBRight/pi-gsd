@@ -191,6 +191,7 @@ describe("orchestrator chain e2e", () => {
     ]);
   });
 
+
   it("pauses before dispatch when native reconciliation reports summary-count-mismatch", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-chain-blocked-"));
     writeFixture(cwd);

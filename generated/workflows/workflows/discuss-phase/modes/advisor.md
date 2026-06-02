@@ -98,8 +98,7 @@ research agents.
 2. For EACH user-selected gray area, spawn a `Agent()` in parallel:
 
    ```
-   Agent(
-     prompt="First, read @~/.claude/agents/gsd-advisor-researcher.md for your role and instructions.
+   Use the Pi subagent tool: subagent({agent: "general", task: "First, read @~/.claude/agents/gsd-advisor-researcher.md for your role and instructions.
 
      <gray_area>{area_name}: {area_description from gray area identification}</gray_area>
      <phase_context>{phase_goal and description from ROADMAP.md}</phase_context>
@@ -107,11 +106,7 @@ research agents.
      <calibration_tier>{resolved calibration tier: full_maturity | standard | minimal_decisive}</calibration_tier>
 
      Research this gray area and return a structured comparison table with rationale.
-     ${AGENT_SKILLS_ADVISOR}",
-     subagent_type="general-purpose",
-     model="{ADVISOR_MODEL}",
-     description="Research: {area_name}"
-   )
+     ${AGENT_SKILLS_ADVISOR}"}). Wait for the subagent result before continuing this workflow.
    ```
 
    All `Agent()` calls spawn simultaneously — do NOT wait for one before

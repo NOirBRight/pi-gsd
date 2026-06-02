@@ -4,6 +4,7 @@ import {
   addPiSubagentGuidance,
   buildPiSubagentsTempRoot,
   commandFileToPiPromptName,
+  compileToolContracts,
   loadOfficialWorkflowConfig,
   normalizeGsdSlashReferences,
   resolveOfficialPackage,
@@ -13,8 +14,11 @@ import {
   transformGsdRunLauncher,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi,
-  writeFrontmatter
-} from "./chunk-VVO6HX3Q.js";
+  transformWorkflowDispatchForPi,
+  verifyToolContractSnapshot,
+  writeFrontmatter,
+  writeToolContractSnapshot
+} from "./chunk-O6URY27T.js";
 
 // src/agent-transform.ts
 var OFFICIAL_ROOT_PLACEHOLDER = "__PI_GSD_OFFICIAL_ROOT__";
@@ -300,6 +304,25 @@ function applyPromptTransforms(body, _packageName) {
     )
   );
 }
+function applyWorkflowTransforms(body, packageName, workflowPath) {
+  const transformed = normalizeWorkflowDispatchInstructionPhrases(applyEscapedWorkflowDispatchTransforms(
+    applyPromptTransforms(transformWorkflowDispatchForPi(body), packageName)
+  ));
+  return workflowPath === "workflows/code-review-fix.md" ? fixReviewFixReportPathEnv(transformed) : transformed;
+}
+function applyEscapedWorkflowDispatchTransforms(body) {
+  return body.replace(/\b(?:Skill|Workflow|SlashCommand|Agent)\((?:[^()\\]|\\.)*\)/g, (call) => {
+    const normalized = call.replace(/\\"/g, '"').replace(/\\'/g, "'");
+    const transformed = transformWorkflowDispatchForPi(normalized);
+    return transformed === normalized ? call : transformed;
+  });
+}
+function normalizeWorkflowDispatchInstructionPhrases(body) {
+  return body.replace(/\binvoke Invoke\s+/g, "invoke ");
+}
+function fixReviewFixReportPathEnv(body) {
+  return body.replace(/\bREVIEW_PATH="\$\{REVIEW_PATH\}" node -e/g, 'REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e');
+}
 function generatePrompts(options) {
   const officialRoot = resolve4(options.officialRoot);
   const outDir = resolve4(options.outDir);
@@ -339,8 +362,8 @@ function generateWorkflows(options) {
     for (const relativePath of files) {
       const sourcePath = join3(dir, relativePath);
       const source = readFileSync3(sourcePath, "utf8");
-      const pathRewritten = rewriteWorkflowPaths(source, OFFICIAL_PACKAGE_NAME).replace(/Skill\(skill=/g, "Skill(");
-      const transformed = applyPromptTransforms(pathRewritten, OFFICIAL_PACKAGE_NAME);
+      const pathRewritten = rewriteWorkflowPaths(source, OFFICIAL_PACKAGE_NAME);
+      const transformed = applyWorkflowTransforms(pathRewritten, OFFICIAL_PACKAGE_NAME, `${prefix}/${relativePath.replace(/\\/g, "/")}`);
       const targetPath = join3(outDir, prefix, relativePath);
       const targetDir = dirname(targetPath);
       mkdirSync3(targetDir, { recursive: true });
@@ -355,10 +378,13 @@ function generateAll(options) {
   const agents = generateAgents({ officialRoot: options.officialRoot, outDir: options.agentsDir, safeRoot: options.safeRoot });
   const workflowsDir = join3(dirname(options.promptsDir), "workflows");
   const workflows = generateWorkflows({ officialRoot: options.officialRoot, outDir: workflowsDir, safeRoot: options.safeRoot });
+  const projectRoot = options.safeRoot ?? dirname(resolve4(options.promptsDir));
   writeOfficialVersionStamp({
     officialRoot: resolve4(options.officialRoot),
     generatedRoot: dirname(resolve4(options.promptsDir))
   });
+  const contractSnapshot = compileToolContracts({ cwd: projectRoot });
+  writeToolContractSnapshot(contractSnapshot, { cwd: projectRoot });
   return { prompts, agents, workflows };
 }
 function writeOfficialVersionStamp(options) {
@@ -569,6 +595,11 @@ function runDoctor(options) {
       });
       ok = ok && workflowsOk;
       if (workflowsOk) messages.push("generated workflows: ok");
+      const dispatchSyntaxOk = checkGeneratedWorkflowDispatchSyntax({
+        actualDir: options.generatedWorkflowsDir,
+        messages
+      });
+      ok = ok && dispatchSyntaxOk;
     }
     if (options.generatedAgentsDir) {
       const expectedAgentsDir = join5(tempDir, "agents");
@@ -592,6 +623,23 @@ function runDoctor(options) {
       const syncScope = options.agentSyncScope ?? "project";
       messages.push(syncResult.ok ? `${syncScope} synced agents: ok` : `${syncScope} synced agents: stale or missing`);
       messages.push(...syncResult.messages);
+    }
+    const contractResult = verifyToolContractSnapshot({ cwd: options.startDir ?? process.cwd() });
+    if (contractResult.failures.length > 0) {
+      ok = false;
+      messages.push(`tool contracts: invalid (${contractResult.failures.length} dispatch-critical drift)`);
+      for (const failure of contractResult.failures) {
+        messages.push(`  unit:${failure.unitType} field:${failure.failedField}`);
+      }
+    } else if (contractResult.warnings.length > 0) {
+      messages.push(`tool contracts: warning (${contractResult.warnings.length} prose/docs drift)`);
+      for (const warning of contractResult.warnings) {
+        messages.push(`  unit:${warning.unitType} field:${warning.field}`);
+      }
+    } else if (contractResult.snapshotPresent) {
+      messages.push("tool contracts: ok");
+    } else {
+      messages.push("tool contracts: skipped (no snapshot; run `npm run generate` to enable)");
     }
     return { ok, messages };
   } finally {
@@ -665,6 +713,31 @@ function compareGeneratedFiles(options) {
     }
   }
   return ok;
+}
+function checkGeneratedWorkflowDispatchSyntax(options) {
+  const residualPatterns = [
+    /Skill\(\s*(?:skill\s*=|["'][a-z0-9-]+["'])/,
+    /Workflow\(\s*workflow\s*=/,
+    /SlashCommand\(/,
+    /^\s*Agent\(\s*subagent_type\s*=\s*["']/
+  ];
+  const findings = [];
+  for (const fileName of readGeneratedMarkdownFileNames(options.actualDir)) {
+    const filePath = join5(options.actualDir, fileName);
+    const content = readFileSync6(filePath, "utf8");
+    const lines = normalizeLineEndings(content).split("\n");
+    for (const [index, line] of lines.entries()) {
+      if (residualPatterns.some((pattern) => pattern.test(line))) {
+        findings.push(`${fileName}:${index + 1}`);
+      }
+    }
+  }
+  if (findings.length > 0) {
+    options.messages.push(`dispatch syntax drift: ${findings.join(", ")}`);
+    return false;
+  }
+  options.messages.push("generated workflow dispatch syntax: ok");
+  return true;
 }
 function isMissingFileError(error) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";

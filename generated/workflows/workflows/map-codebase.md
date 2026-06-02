@@ -154,12 +154,7 @@ Use Agent tool with `subagent_type="gsd-codebase-mapper"`, `model="{mapper_model
 **Agent 1: Tech Focus**
 
 ```text
-Agent(
-  subagent_type="gsd-codebase-mapper",
-  model="{mapper_model}",
-  run_in_background=true,
-  description="Map codebase tech stack",
-  prompt="Focus: tech
+Use the Pi subagent tool: subagent({agent: "gsd-codebase-mapper", task: "Focus: tech
 Today's date: {date}
 
 Analyze this codebase for technology stack and external integrations.
@@ -173,19 +168,13 @@ IMPORTANT: Use {date} for all [YYYY-MM-DD] date placeholders in documents.
 Scope: ${PATH_SCOPE_HINT:-(full repo)} — when --paths is supplied, restrict exploration to those prefixes only.
 
 Explore thoroughly. Write documents directly using templates. Return confirmation only.
-${AGENT_SKILLS_MAPPER}"
-)
+${AGENT_SKILLS_MAPPER}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Agent 2: Architecture Focus**
 
 ```text
-Agent(
-  subagent_type="gsd-codebase-mapper",
-  model="{mapper_model}",
-  run_in_background=true,
-  description="Map codebase architecture",
-  prompt="Focus: arch
+Use the Pi subagent tool: subagent({agent: "gsd-codebase-mapper", task: "Focus: arch
 Today's date: {date}
 
 Analyze this codebase architecture and directory structure.
@@ -199,19 +188,13 @@ IMPORTANT: Use {date} for all [YYYY-MM-DD] date placeholders in documents.
 Scope: ${PATH_SCOPE_HINT:-(full repo)} — when --paths is supplied, restrict exploration to those prefixes only.
 
 Explore thoroughly. Write documents directly using templates. Return confirmation only.
-${AGENT_SKILLS_MAPPER}"
-)
+${AGENT_SKILLS_MAPPER}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Agent 3: Quality Focus**
 
 ```text
-Agent(
-  subagent_type="gsd-codebase-mapper",
-  model="{mapper_model}",
-  run_in_background=true,
-  description="Map codebase conventions",
-  prompt="Focus: quality
+Use the Pi subagent tool: subagent({agent: "gsd-codebase-mapper", task: "Focus: quality
 Today's date: {date}
 
 Analyze this codebase for coding conventions and testing patterns.
@@ -225,19 +208,13 @@ IMPORTANT: Use {date} for all [YYYY-MM-DD] date placeholders in documents.
 Scope: ${PATH_SCOPE_HINT:-(full repo)} — when --paths is supplied, restrict exploration to those prefixes only.
 
 Explore thoroughly. Write documents directly using templates. Return confirmation only.
-${AGENT_SKILLS_MAPPER}"
-)
+${AGENT_SKILLS_MAPPER}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Agent 4: Concerns Focus**
 
 ```
-Agent(
-  subagent_type="gsd-codebase-mapper",
-  model="{mapper_model}",
-  run_in_background=true,
-  description="Map codebase concerns",
-  prompt="Focus: concerns
+Use the Pi subagent tool: subagent({agent: "gsd-codebase-mapper", task: "Focus: concerns
 Today's date: {date}
 
 Analyze this codebase for technical debt, known issues, and areas of concern.
@@ -250,8 +227,7 @@ IMPORTANT: Use {date} for all [YYYY-MM-DD] date placeholders in documents.
 Scope: ${PATH_SCOPE_HINT:-(full repo)} — when --paths is supplied, restrict exploration to those prefixes only.
 
 Explore thoroughly. Write document directly using template. Return confirmation only.
-${AGENT_SKILLS_MAPPER}"
-)
+${AGENT_SKILLS_MAPPER}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling all 4 Agent() calls above with `run_in_background=true`, do NOT read any source files, analyze the codebase, or write any mapping documents independently while the subagents are active. Wait for all 4 agents to complete before proceeding to collect_confirmations. This prevents duplicate work and wasted context.

@@ -54,21 +54,32 @@ describe("E2E: workflow generation fidelity", () => {
       expect(residualCount).toBe(0);
     });
 
-    it("produces zero residual Skill(skill= calls", () => {
+    it("produces zero residual dispatch-critical pseudo calls in generated workflows", () => {
       generateWorkflowsToTemp();
       const wfDir = join(tempDir, "workflows");
       const files = readdirSync(wfDir, { recursive: true })
         .filter((f): f is string => typeof f === "string" && f.endsWith(".md"));
 
-      let residualCount = 0;
+      const residuals: string[] = [];
+      const dispatchPatterns = [
+        /Skill\(\s*(?:skill\s*=|["'][a-z0-9-]+["'])/g,
+        /Workflow\(\s*workflow\s*=/g,
+        /SlashCommand\(/g,
+        /^\s*Agent\(\s*subagent_type\s*=\s*["']/g,
+      ];
+
       for (const file of files) {
         const content = readFileSync(join(wfDir, file), "utf8");
-        const matches = content.match(/Skill\(skill=["']/g);
-        if (matches) {
-          residualCount += matches.length;
+        const lines = content.split("\n");
+        for (const [index, line] of lines.entries()) {
+          if (dispatchPatterns.some((pattern) => pattern.test(line))) {
+            residuals.push(`${file}:${index + 1}:${line.trim()}`);
+          }
+          for (const pattern of dispatchPatterns) pattern.lastIndex = 0;
         }
       }
-      expect(residualCount).toBe(0);
+
+      expect(residuals).toEqual([]);
     });
 
     it("does not produce retired gsd_query calls in plan-phase workflow", () => {
@@ -77,6 +88,22 @@ describe("E2E: workflow generation fidelity", () => {
       const content = readFileSync(planPath, "utf8");
       expect(content).not.toContain("gsd_query");
       expect(content).toContain("gsd_run");
+    });
+
+    it("preserves code-review --fix --auto loop through Pi-safe workflow dispatch", () => {
+      generateWorkflowsToTemp();
+
+      const codeReview = readFileSync(join(tempDir, "workflows", "code-review.md"), "utf8");
+      const codeReviewFix = readFileSync(join(tempDir, "workflows", "code-review-fix.md"), "utf8");
+
+      expect(codeReview).toContain("Read and execute generated/workflows/workflows/code-review-fix.md");
+      expect(codeReview).toContain("with arguments ${FIX_ARGS}");
+      expect(codeReview).not.toContain("Workflow(");
+
+      expect(codeReviewFix).toContain("MAX_ITERATIONS=3");
+      expect(codeReviewFix).toContain("Use the Pi subagent tool: subagent");
+      expect(codeReviewFix).not.toContain("Agent(subagent_type=");
+      expect(codeReviewFix).not.toContain("Workflow(");
     });
   });
 });

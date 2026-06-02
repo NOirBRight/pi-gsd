@@ -3,33 +3,33 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Runtime Refactor
 status: Ready to plan
-last_updated: "2026-06-02T04:12:53.603Z"
+last_updated: "2026-06-02T08:04:43.095Z"
 last_activity: 2026-06-02
 progress:
   total_phases: 7
-  completed_phases: 5
-  total_plans: 16
-  completed_plans: 16
-  percent: 71
+  completed_phases: 6
+  total_plans: 18
+  completed_plans: 18
+  percent: 86
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-02 after Phase 11 verification)
+See: .planning/PROJECT.md (updated 2026-06-02 after Phase 12 closeout)
 
 **Core value:** Pi adapter for Get Shit Done (GSD) — transparent upstream compatibility on content axis; native Pi orchestration on runtime axis (v2.0 direction)
-**Current focus:** Phase 12 — Tool Contract + Settings Bridge
+**Current focus:** Phase 13 — SDK Bridge Retirement + v2.0 Release
 
 ## Current Position
 
 Milestone: v2.0 Runtime Refactor (executing)
-Phase: 12
+Phase: 13
 Plan: Not started
 Last activity: 2026-06-02
 
-Progress: [██████████████░░░░░░] 71% (5/7 phases completed, 16/16 completed plans so far) — Phase 12 is next
+Progress: [█████████████████░░░] 86% (6/7 phases completed, 18/18 completed plans so far) — Phase 13 is next
 
 ## Accumulated Context
 
@@ -61,6 +61,9 @@ Progress: [██████████████░░░░░░] 71% (5/
 | D-33 | New `transformGsdRunLauncher` prepends `require.resolve`-based fallback-0 to upstream's inline 4-fallback launcher block | Pi npm-install users can locate `gsd-tools.cjs` under `node_modules/` | ✓ Done |
 | D-37 | DispatchLogger not auto-enabled in Phase 8; add doctor `GSD_AUDIT=1` tip only | Respects upstream opt-in default; orchestrator-scoped audit is Phase 9's job | ✓ Done |
 | D-39 | Phase 8 split into 4 logical-layer commits: rename → package migration → bridge retirement → launcher transform | Logical wave summaries exist; final integration includes review fixes | ✓ Done |
+| D-40 | Phase 12 Tool Contract source is generated-first; Pi overlay is supplement-only | Snapshot/gate/doctor verify dispatch-critical drift without treating prompt prose as blocking | ✓ Done |
+| D-41 | `code-review-fix` remains workflow-layer only, not a native orchestration UnitType | Fix loop is delegated from generated `code-review.md`; native Unit contracts stay at 14 entries | ✓ Done |
+| D-42 | Phase 12 Settings Bridge follows upstream config source resolution | GSD context injection uses shared settings source and blocks malformed GSD/native auto only | ✓ Done |
 
 ### Carried Tech Debt from v1.0
 
@@ -82,13 +85,13 @@ Progress: [██████████████░░░░░░] 71% (5/
 
 ## Next Steps
 
-1. **Plan Phase 12: Tool Contract + Settings Bridge**
-   - Compile per-Unit tool / prompt / policy / schema contracts before dispatch.
-   - Gate native auto orchestration through the compiled contract.
-   - Bridge GSD `settings.json` into Pi prompt context and notify on changes.
-2. Keep Phase 11 closeout artifacts as evidence:
-   - `.planning/phases/11-worktree-safety-recovery-classification/11-VERIFICATION.md`
-   - `.planning/phases/11-worktree-safety-recovery-classification/11-REVIEW.md`
-   - `.planning/phases/11-worktree-safety-recovery-classification/11-UAT.md`
-   - `.planning/phases/11-worktree-safety-recovery-classification/11-SECURITY.md`
+1. **Plan Phase 13: SDK Bridge Retirement + v2.0 Release**
+   - Fully decouple from upstream binary interfaces.
+   - Decide whether the remaining `gsd_query` Pi tool is deleted or retained as a warn-and-shim.
+   - Prepare migration guide, release docs, and v2.0 publish checks.
+2. Keep Phase 12 closeout artifacts as evidence:
+   - `.planning/phases/12-tool-contract-settings-bridge/12-VERIFICATION.md`
+   - `.planning/phases/12-tool-contract-settings-bridge/12-UAT.md`
+   - `.planning/phases/12-tool-contract-settings-bridge/12-01-SUMMARY.md`
+   - `.planning/phases/12-tool-contract-settings-bridge/12-02-SUMMARY.md`
 3. Before release, run ship/preflight and ensure generated artifacts remain synced after any final version bump.

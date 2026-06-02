@@ -6,9 +6,9 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 });
 
 // src/extension.ts
-import { accessSync, constants as fsConstants, mkdirSync as mkdirSync4, rmSync } from "fs";
+import { accessSync, constants as fsConstants, mkdirSync as mkdirSync5, rmSync } from "fs";
 import { tmpdir } from "os";
-import { dirname as dirname5, join as join13, resolve as resolve6 } from "path";
+import { dirname as dirname6, join as join17, resolve as resolve7 } from "path";
 import { fileURLToPath } from "url";
 
 // src/official.ts
@@ -363,6 +363,9 @@ function unquote(s) {
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
     return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
+  if (trimmed.startsWith('\\"') && trimmed.endsWith('\\"')) {
+    return trimmed.slice(2, -2).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
   if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
     return trimmed.slice(1, -1);
   }
@@ -472,38 +475,131 @@ function transformSkillDispatchForPi(input) {
   let changed = false;
   const result = segments.map(({ segment, isCode }) => {
     if (isCode) return segment;
-    const transformed = rewriteSkillDispatchInSegment(segment);
+    const transformed = rewriteSkillDispatchInSegment(segment, formatSkillDispatchInstruction);
     if (transformed !== segment) changed = true;
     return transformed;
   }).join("");
   return changed ? result : input;
 }
-function rewriteSkillDispatchInSegment(segment) {
-  segment = segment.replace(
-    /Skill\(skill=\\"([a-z0-9-]+)\\"(?:,\s*args=\\"([^\\"]*)\\")?\)/g,
-    (_match, name, args) => {
-      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
-      const invokePart = args ? `invoke via slash command ${slashCmd} in Pi` : `invoke via slash command /${name} in Pi`;
-      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+function rewriteSkillDispatchInSegment(segment, formatter) {
+  return rewriteBalancedCalls(segment, "Skill", (argsText) => {
+    const dispatch = parseDispatchArgs(argsText, "skill");
+    return dispatch ? formatter(dispatch) : null;
+  });
+}
+function formatSkillDispatchInstruction(dispatch) {
+  if (dispatch.isPositional) {
+    return formatWorkflowSkillDispatchInstruction(dispatch);
+  }
+  const slashCmd = formatSlashInvocation(dispatch);
+  const invokePart = dispatch.args ? `invoke via slash command ${slashCmd} in Pi` : `invoke via slash command /${dispatch.name} in Pi`;
+  return `Use the /${dispatch.name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+}
+function formatWorkflowSkillDispatchInstruction(dispatch) {
+  return `Invoke ${formatSlashInvocation(dispatch)} in Pi`;
+}
+function formatSlashInvocation(dispatch) {
+  return dispatch.args ? `/${dispatch.name} ${dispatch.args}` : `/${dispatch.name}`;
+}
+function parseDispatchArgs(argsText, nameKey) {
+  const tokens = tokenizeTopLevel(argsText);
+  if (tokens.length === 0) return null;
+  let name;
+  let args;
+  let isPositional = false;
+  const firstPositional = unquote(tokens[0]);
+  if (firstPositional !== null) {
+    name = firstPositional;
+    isPositional = true;
+  }
+  for (const token of tokens) {
+    const named = parseNamedAssignment(token);
+    if (!named) continue;
+    if (named.key === nameKey) {
+      name = named.value;
+    } else if (named.key === "args") {
+      args = named.value;
     }
-  );
-  segment = segment.replace(
-    /Skill\(skill='([a-z0-9-]+)'(?:,\s*args='([^']*)')?\)/g,
-    (_match, name, args) => {
-      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
-      const invokePart = args ? `invoke via slash command ${slashCmd} in Pi` : `invoke via slash command /${name} in Pi`;
-      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+  }
+  return name ? { name, args, isPositional } : null;
+}
+function parseNamedAssignment(token) {
+  const match = token.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]+)$/);
+  if (!match) return null;
+  const value = unquote(match[2].trim());
+  if (value === null) return null;
+  return { key: match[1], value };
+}
+function rewriteBalancedCalls(segment, functionName, transform) {
+  let result = segment;
+  let safety = 100;
+  let searchFrom = 0;
+  const callPattern = new RegExp(`\\b${functionName}\\s*\\(`);
+  while (safety-- > 0) {
+    const match = callPattern.exec(result.slice(searchFrom));
+    if (!match || match.index === void 0) break;
+    const callStart = searchFrom + match.index;
+    const argsStart = callStart + match[0].length - 1;
+    const argsText = extractBalancedParens(result, argsStart);
+    if (!argsText) {
+      searchFrom = argsStart + 1;
+      continue;
     }
-  );
-  segment = segment.replace(
-    /Skill\(skill="([a-z0-9-]+)"(?:,\s*args="([^"]*)")?\)/g,
-    (_match, name, args) => {
-      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
-      const invokePart = args ? `invoke via slash command ${slashCmd} in Pi` : `invoke via slash command /${name} in Pi`;
-      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+    const rewritten = transform(argsText);
+    if (rewritten === null) {
+      searchFrom = argsStart + 1;
+      continue;
     }
-  );
-  return segment;
+    const callEnd = argsStart + argsText.length + 2;
+    result = result.slice(0, callStart) + rewritten + result.slice(callEnd);
+    searchFrom = callStart + rewritten.length;
+  }
+  if (safety <= 0) {
+    console.warn(`[pi-gsd] rewriteBalancedCalls: safety limit reached for ${functionName}`);
+  }
+  return result;
+}
+function transformWorkflowDispatchForPi(input) {
+  let result = rewriteSkillDispatchInSegment(input, formatWorkflowSkillDispatchInstruction);
+  result = rewriteBalancedCalls(result, "Workflow", (argsText) => {
+    const dispatch = parseDispatchArgs(argsText, "workflow");
+    if (!dispatch) return null;
+    const workflowPath = formatGeneratedWorkflowPath(dispatch.name);
+    const argsPart = dispatch.args ? ` with arguments ${dispatch.args}` : "";
+    return `Read and execute ${workflowPath}${argsPart}`;
+  });
+  result = rewriteBalancedCalls(result, "SlashCommand", (argsText) => {
+    const tokens = tokenizeTopLevel(argsText);
+    if (tokens.length === 0) return null;
+    const command = unquote(tokens[0]);
+    if (command === null) return null;
+    return `Invoke ${normalizeGsdSlashReferences(command)} in Pi`;
+  });
+  result = rewriteAgentDispatchInSegment(result);
+  return result;
+}
+function formatGeneratedWorkflowPath(path) {
+  return path.replace(/^get-shit-done\/workflows\//, "generated/workflows/workflows/").replace(/^workflows\//, "generated/workflows/workflows/");
+}
+function rewriteAgentDispatchInSegment(segment) {
+  return rewriteBalancedCalls(segment, "Agent", (argsText) => {
+    const parsed = parseAgentDispatchArgs(argsText);
+    if (!parsed) return null;
+    const agent = parsed.agentType === "general-purpose" ? "general" : parsed.agentType;
+    return `Use the Pi subagent tool: subagent({agent: "${escapeDoubleQuotedString(agent)}", task: "${escapeDoubleQuotedString(parsed.prompt)}"}). Wait for the subagent result before continuing this workflow.`;
+  });
+}
+function parseAgentDispatchArgs(argsText) {
+  const tokens = tokenizeTopLevel(argsText);
+  let agentType;
+  let prompt;
+  for (const token of tokens) {
+    const named = parseNamedAssignment(token);
+    if (!named) continue;
+    if (named.key === "subagent_type") agentType = named.value;
+    if (named.key === "prompt") prompt = named.value;
+  }
+  return agentType && prompt ? { agentType, prompt } : null;
 }
 function transformSubagentDispatchForPi(input) {
   const segments = splitCodeFences(input);
@@ -1051,20 +1147,99 @@ function parseOutcomeData(value) {
 }
 
 // src/orchestrator/settings.ts
-import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync4 } from "fs";
-import { join as join5 } from "path";
+import { readdirSync, readFileSync as readFileSync5 } from "fs";
+import { join as join6 } from "path";
+
+// src/settings-bridge/source.ts
+import { existsSync as existsSync4, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
+import { createHash } from "crypto";
+import { isAbsolute, join as join4, resolve } from "path";
+function resolveGsdConfigSource(options) {
+  const projectRoot = resolve(options.projectRoot ?? options.cwd);
+  if (options.configPath) {
+    const absolutePath = isAbsolute(options.configPath) ? options.configPath : resolve(projectRoot, options.configPath);
+    return readSource(absolutePath, "explicit");
+  }
+  const activeWorkstreamPath = join4(projectRoot, ".planning", "active-workstream");
+  if (existsSync4(activeWorkstreamPath)) {
+    try {
+      const slug = readFileSync3(activeWorkstreamPath, "utf8").trim();
+      if (isSafeWorkstreamSlug(slug)) {
+        const workstreamConfigPath = join4(projectRoot, ".planning", "workstreams", slug, "config.json");
+        if (existsSync4(workstreamConfigPath)) {
+          return readSource(workstreamConfigPath, "active-workstream");
+        }
+      }
+    } catch {
+    }
+  }
+  const planningConfigPath = join4(projectRoot, ".planning", "config.json");
+  if (existsSync4(planningConfigPath)) {
+    return readSource(planningConfigPath, "planning-config");
+  }
+  const rootConfigPath = join4(projectRoot, "config.json");
+  if (existsSync4(rootConfigPath)) {
+    return readSource(rootConfigPath, "root-config");
+  }
+  return {
+    path: void 0,
+    kind: "default",
+    hash: void 0,
+    mtimeMs: void 0,
+    config: void 0
+  };
+}
+function isSafeWorkstreamSlug(slug) {
+  return /^(?=.*[A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9._-]*$/.test(slug) && slug !== "." && slug !== "..";
+}
+function readSource(path, kind) {
+  try {
+    const content = readFileSync3(path, "utf8");
+    const stat = statSync2(path);
+    const hash = createHash("sha256").update(content, "utf8").digest("hex");
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (error) {
+      return {
+        path,
+        kind,
+        hash,
+        mtimeMs: stat.mtimeMs,
+        config: void 0,
+        parseError: error instanceof Error ? error.message : String(error)
+      };
+    }
+    return {
+      path,
+      kind,
+      hash,
+      mtimeMs: stat.mtimeMs,
+      config: parsed
+    };
+  } catch (error) {
+    return {
+      path,
+      kind,
+      hash: void 0,
+      mtimeMs: void 0,
+      config: void 0,
+      parseError: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
 
 // src/orchestrator/official-config.ts
-import { readFileSync as readFileSync3 } from "fs";
-import { join as join4 } from "path";
+import { readFileSync as readFileSync4 } from "fs";
+import { join as join5 } from "path";
 function loadOfficialWorkflowConfig(options = {}) {
   const official = options.officialRoot ? {
     packageName: OFFICIAL_PACKAGE_NAME,
     version: readPackageVersion(options.officialRoot),
     packageRoot: options.officialRoot,
     paths: {
-      configDefaultsManifest: join4(options.officialRoot, "get-shit-done", "bin", "shared", "config-defaults.manifest.json"),
-      configSchemaManifest: join4(options.officialRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json")
+      configDefaultsManifest: join5(options.officialRoot, "get-shit-done", "bin", "shared", "config-defaults.manifest.json"),
+      configSchemaManifest: join5(options.officialRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json")
     }
   } : resolveOfficialPackage({ startDir: options.startDir });
   const defaults = readJson(official.paths.configDefaultsManifest);
@@ -1086,14 +1261,14 @@ function loadOfficialWorkflowConfig(options = {}) {
 }
 function readPackageVersion(officialRoot) {
   try {
-    const parsed = readJson(join4(officialRoot, "package.json"));
+    const parsed = readJson(join5(officialRoot, "package.json"));
     return typeof parsed.version === "string" ? parsed.version : "unknown";
   } catch {
     return "unknown";
   }
 }
 function readJson(path) {
-  return JSON.parse(readFileSync3(path, "utf8"));
+  return JSON.parse(readFileSync4(path, "utf8"));
 }
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1120,12 +1295,15 @@ function resolveWorkflowSettings(options = {}) {
   };
   const sources = Object.fromEntries(Object.keys(workflow).map((key) => [key, "default"]));
   const rawWorkflow = { ...officialConfig.defaults.workflow };
-  const configPath = options.configPath ?? join5(options.cwd ?? process.cwd(), ".planning", "config.json");
-  const fallbackConfigPath = options.configPath ? void 0 : join5(options.cwd ?? process.cwd(), "config.json");
-  const actualConfigPath = existsSync4(configPath) ? configPath : fallbackConfigPath && existsSync4(fallbackConfigPath) ? fallbackConfigPath : void 0;
-  if (actualConfigPath) {
-    const config = readConfig(actualConfigPath);
-    const configWorkflow = isRecord2(config) && isRecord2(config.workflow) ? config.workflow : {};
+  const configSource = resolveGsdConfigSource({
+    cwd: options.cwd ?? process.cwd(),
+    ...options.configPath ? { configPath: options.configPath } : {}
+  });
+  if (configSource.parseError) {
+    throw new OrchestratorSettingsError(`Could not read orchestrator settings from ${configSource.path ?? "resolved config source"}: ${configSource.parseError}`);
+  }
+  if (configSource.config) {
+    const configWorkflow = isRecord2(configSource.config) && isRecord2(configSource.config.workflow) ? configSource.config.workflow : {};
     Object.assign(rawWorkflow, configWorkflow);
     applyKnownWorkflowConfig(configWorkflow, workflow, sources);
   }
@@ -1138,7 +1316,13 @@ function resolveWorkflowSettings(options = {}) {
       officialRoot: officialConfig.official.packageRoot,
       schemaKeys: officialConfig.schema.workflowKeys
     },
-    sources
+    sources,
+    settingsSource: {
+      path: configSource.path,
+      kind: configSource.kind,
+      hash: configSource.hash,
+      mtimeMs: configSource.mtimeMs
+    }
   };
 }
 function buildUnitQueue(input) {
@@ -1218,7 +1402,7 @@ function settingForType(type) {
 }
 function inferPhaseSignals(options) {
   const cwd = options.cwd ?? process.cwd();
-  const phaseRoot = join5(cwd, ".planning", "phases");
+  const phaseRoot = join6(cwd, ".planning", "phases");
   const phaseText = readPhaseSignalText(phaseRoot, options.phase).toLowerCase();
   return {
     isUiPhase: /(?:requires|phase[_ -]signals?):[^\n]*(?:ui|frontend)|(?:^|\n)phase-kind:\s*(?:ui|frontend)/.test(phaseText),
@@ -1232,22 +1416,15 @@ function readPhaseSignalText(phaseRoot, phase) {
   try {
     const direct = readdirSync(phaseRoot, { withFileTypes: true }).find((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`));
     if (!direct) return "";
-    return readdirSync(join5(phaseRoot, direct.name)).filter((name) => /(^|-)PLAN\.md$/i.test(name) || /^phase-signals\.(md|json|ya?ml)$/i.test(name)).map((name) => {
+    return readdirSync(join6(phaseRoot, direct.name)).filter((name) => /(^|-)PLAN\.md$/i.test(name) || /^phase-signals\.(md|json|ya?ml)$/i.test(name)).map((name) => {
       try {
-        return readFileSync4(join5(phaseRoot, direct.name, name), "utf8");
+        return readFileSync5(join6(phaseRoot, direct.name, name), "utf8");
       } catch {
         return "";
       }
     }).filter((text) => /(?:requires|phase[_ -]signals?|phase-kind):/i.test(text)).join("\n");
   } catch {
     return "";
-  }
-}
-function readConfig(configPath) {
-  try {
-    return JSON.parse(readFileSync4(configPath, "utf8"));
-  } catch (error) {
-    throw new OrchestratorSettingsError(`Could not read orchestrator settings from ${configPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 function normalizeOfficialWorkflowDefaults(source) {
@@ -1363,7 +1540,7 @@ function isRecord2(value) {
 
 // src/worktree-safety/git.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync5, lstatSync, mkdirSync as mkdirSync2, readFileSync as readFileSync5, unlinkSync, writeFileSync as writeFileSync2 } from "fs";
+import { existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync2, readFileSync as readFileSync6, unlinkSync, writeFileSync as writeFileSync2 } from "fs";
 import { hostname } from "os";
 function readCurrentBranch(root) {
   try {
@@ -1376,9 +1553,9 @@ function hasGitMarker(root, deps = defaultWorktreeSafetyDeps) {
   return deps.existsSync(`${root}/.git`);
 }
 var defaultWorktreeSafetyDeps = {
-  existsSync: existsSync5,
+  existsSync: existsSync6,
   lstatSync,
-  readFileSync: (path) => readFileSync5(path, "utf8"),
+  readFileSync: (path) => readFileSync6(path, "utf8"),
   writeFileSync: (path, content) => writeFileSync2(path, content, "utf8"),
   unlinkSync,
   mkdirSync: mkdirSync2,
@@ -1400,7 +1577,7 @@ var defaultWorktreeSafetyDeps = {
 };
 
 // src/worktree-safety/lease.ts
-import { dirname as dirname3, isAbsolute, relative, resolve } from "path";
+import { dirname as dirname3, isAbsolute as isAbsolute2, relative, resolve as resolve2 } from "path";
 
 // src/recovery/types.ts
 var RECOVERY_CLASSES = [
@@ -1640,18 +1817,18 @@ function isOwner(record2, expected) {
   return record2.unitId === expected.unitId && record2.sessionId === expected.sessionId && record2.phase === expected.phase && record2.branch === expected.branch && record2.root === expected.root && record2.host === expected.host && record2.pid === expected.pid;
 }
 function resolveLeasePath(root, leasePath) {
-  const planningDir = resolve(root, ".planning");
-  const candidate = resolve(root, leasePath ?? `.planning/worktree-leases/lease.json`);
+  const planningDir = resolve2(root, ".planning");
+  const candidate = resolve2(root, leasePath ?? `.planning/worktree-leases/lease.json`);
   if (!isInsideOrSame(planningDir, candidate)) return { ok: false, message: `refusing lease path outside .planning: ${candidate}` };
   return { ok: true, path: candidate };
 }
 function isInsideOrSame(parent, child) {
   const rel = relative(parent, child);
-  return rel === "" || !rel.startsWith("..") && !isAbsolute(rel);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute2(rel);
 }
 
 // src/worktree-safety/prepare-unit-root.ts
-import { resolve as resolve2 } from "path";
+import { resolve as resolve3 } from "path";
 var SOURCE_WRITING_UNITS = {
   discuss: false,
   research: false,
@@ -1673,12 +1850,12 @@ function isSourceWritingUnit(unitType) {
   return SOURCE_WRITING_UNITS[unitType] === true;
 }
 function resolveExpectedUnitRoot(input, deps) {
-  return resolve2(input.unitRoot ?? input.projectRoot ?? deps.cwd());
+  return resolve3(input.unitRoot ?? input.projectRoot ?? deps.cwd());
 }
 function prepareUnitRoot(unitTypeOrInput, unitId2, options = {}) {
   const input = typeof unitTypeOrInput === "string" ? { ...options, unitType: unitTypeOrInput, unitId: unitId2 ?? `${options.phase ?? "unit"}:${unitTypeOrInput}` } : unitTypeOrInput;
   const deps = { ...defaultWorktreeSafetyDeps, ...input.deps };
-  const projectRoot = resolve2(input.projectRoot ?? deps.env("GSD_PROJECT_ROOT") ?? deps.cwd());
+  const projectRoot = resolve3(input.projectRoot ?? deps.env("GSD_PROJECT_ROOT") ?? deps.cwd());
   const root = resolveExpectedUnitRoot({ ...input, projectRoot }, deps);
   const branch = deps.currentBranch(root);
   if (!isSourceWritingUnit(input.unitType)) {
@@ -1688,7 +1865,7 @@ function prepareUnitRoot(unitTypeOrInput, unitId2, options = {}) {
     return fail("missing-git-marker", "Worktree root is missing a .git marker.", "Recover or recreate the expected Git root before dispatch.", input, root, branch);
   }
   const envRoot = deps.env("GSD_PROJECT_ROOT");
-  if (envRoot && resolve2(envRoot) !== projectRoot) {
+  if (envRoot && resolve3(envRoot) !== projectRoot) {
     return fail("project-root-mismatch", "GSD_PROJECT_ROOT does not match the expected project root.", "Run from the expected project root or update GSD_PROJECT_ROOT before dispatch.", input, root, branch, { expectedProjectRoot: projectRoot, actualCwd: deps.cwd(), resolvedUnitRoot: root });
   }
   if (input.expectedBranch && branch !== input.expectedBranch) {
@@ -1725,11 +1902,13 @@ function fail(reasonCode, message, remediation, input, root, branch, extra = {})
 }
 
 // src/orchestrator/gates.ts
-import { existsSync as existsSync12, readdirSync as readdirSync3, readFileSync as readFileSync12, statSync as statSync3 } from "fs";
-import { basename as basename2, isAbsolute as isAbsolute3, join as join11, resolve as resolve4 } from "path";
+import { existsSync as existsSync16, readdirSync as readdirSync3, readFileSync as readFileSync15, statSync as statSync4 } from "fs";
+import { basename as basename3, isAbsolute as isAbsolute4, join as join15, resolve as resolve5 } from "path";
 
-// src/orchestrator/outcomes.ts
-import { readFileSync as readFileSync6 } from "fs";
+// src/tool-contract/compile.ts
+import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
+import { createHash as createHash3 } from "crypto";
+import { basename, join as join8, posix, relative as relative2 } from "path";
 
 // src/frontmatter.ts
 var supportedPromptKeys = [
@@ -1867,7 +2046,505 @@ function needsQuoting(value) {
   return value === "" || value !== value.trim() || /[:[\]{}#,&*!|>'"%@`]/.test(value);
 }
 
+// src/tool-contract/snapshot.ts
+import { existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
+import { dirname as dirname4, join as join7 } from "path";
+import { createHash as createHash2 } from "crypto";
+function writeToolContractSnapshot(snapshot, options) {
+  const outDir = options.outDir ?? join7(options.cwd, "generated");
+  const outFileName = options.outFileName ?? "tool-contracts.json";
+  const outPath = join7(outDir, outFileName);
+  mkdirSync3(outDir, { recursive: true });
+  const contentHash = calculateToolContractHash(snapshot);
+  const stamped = { ...snapshot, contractHash: contentHash };
+  const stampedJson = stableStringify(stamped);
+  writeFileSync3(outPath, `${stampedJson}
+`, "utf8");
+  return outPath;
+}
+function calculateToolContractHash(snapshot) {
+  return createHash2("sha256").update(stableStringify({ ...snapshot, contractHash: "" }), "utf8").digest("hex");
+}
+function stableStringify(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(",")}}`;
+}
+
+// src/tool-contract/compile.ts
+var PROMPT_OBLIGATION_MARKERS = [
+  { marker: /SUMMARY\.md/i, obligation: "write-phase-summary" },
+  { marker: /PLAN\.md/i, obligation: "produce-plan-artifact" },
+  { marker: /VERIFICATION\.md/i, obligation: "produce-verification" },
+  { marker: /REVIEW\.md/i, obligation: "produce-review" },
+  { marker: /RESEARCH\.md/i, obligation: "produce-research" },
+  { marker: /CONTEXT\.md/i, obligation: "produce-context" },
+  { marker: /UI-SPEC\.md/i, obligation: "produce-ui-spec" },
+  { marker: /VALIDATION\.md/i, obligation: "produce-validation" }
+];
+var CLOSEOUT_REQUIREMENTS = ["update-roadmap", "update-state", "phase-summary-exists"];
+function compileToolContracts(options) {
+  const cwd = options.cwd;
+  const generatedRoot = join8(cwd, "generated");
+  const official = resolveOfficialPackage({ startDir: cwd });
+  const officialConfig = loadOfficialWorkflowConfig({ startDir: cwd });
+  const schemaKeys = officialConfig.schema.workflowKeys;
+  const contracts = [];
+  const unitTypes = [
+    "discuss",
+    "research",
+    "plan",
+    "plan-check",
+    "execute",
+    "code-review",
+    "verify",
+    "ui-review",
+    "security-review",
+    "nyquist-validation",
+    "ai-integration",
+    "ui-safety-gate",
+    "closeout",
+    "settings-gate"
+  ];
+  for (const unitType of unitTypes) {
+    const target = resolveUnitDispatchTarget({ type: unitType, id: `${unitType}-compile`, status: "pending", phase: "compile", label: unitType, required: true, source: "default" });
+    const promptRelative = target.prompt;
+    const promptAbs = join8(cwd, promptRelative);
+    if (!existsSync8(promptAbs)) continue;
+    const promptContent = readFileSync8(promptAbs, "utf8");
+    const promptHash = hashContent(promptContent);
+    const agent = target.agent;
+    let allowedTools = [];
+    let agentPath;
+    if (agent) {
+      const agentRel = posix.join("generated", "agents", `${agent}.md`);
+      const agentAbs = join8(cwd, agentRel);
+      if (existsSync8(agentAbs)) {
+        agentPath = agentRel;
+        const agentContent = readFileSync8(agentAbs, "utf8");
+        const parsed = splitFrontmatter(agentContent);
+        allowedTools = parseToolList(parsed.data.tools);
+      }
+    }
+    const promptObligations = extractPromptObligations(promptContent);
+    const validationRequirements = [];
+    for (const key of schemaKeys) {
+      if (key.includes(`${unitType}`) || key.includes(`workflow.${unitType.replace(/-/g, "_")}`)) {
+        validationRequirements.push(key);
+      }
+    }
+    if (validationRequirements.length === 0) validationRequirements.push("dispatch-target-present");
+    const closeoutRequirements = unitType === "closeout" ? [...CLOSEOUT_REQUIREMENTS] : [];
+    const sourcePaths = Array.from(/* @__PURE__ */ new Set([promptRelative, ...agentPath ? [agentPath] : []]));
+    const base = {
+      unitType,
+      promptName: basename(promptRelative),
+      promptPath: promptRelative,
+      promptHash,
+      ...agent ? { agent } : {},
+      ...agentPath ? { agentPath } : {},
+      allowedTools,
+      schemaKeys: validationRequirements,
+      validationRequirements,
+      closeoutRequirements,
+      sourcePaths
+    };
+    contracts.push(applyOverlay(base, options.overlay?.[unitType]));
+  }
+  const snapshot = {
+    contractVersion: 1,
+    contractHash: "",
+    officialPackage: official.packageName,
+    officialVersion: official.version,
+    generatedRoot: relative2(cwd, generatedRoot) || "generated",
+    contracts
+  };
+  snapshot.contractHash = calculateToolContractHash(snapshot);
+  return snapshot;
+}
+function applyOverlay(base, overlayEntry) {
+  if (!overlayEntry) return base;
+  if (overlayEntry.allowedTools) {
+    const overlaySet = new Set(overlayEntry.allowedTools);
+    const baseSet = new Set(base.allowedTools);
+    let isRelaxation = false;
+    if (baseSet.size > 0) {
+      for (const tool of baseSet) {
+        if (!overlaySet.has(tool)) {
+          isRelaxation = true;
+          break;
+        }
+      }
+    }
+    if (isRelaxation) {
+      throw new Error(
+        `Tool Contract overlay cannot relax upstream allowed tools for unit ${base.unitType} (D-02).`
+      );
+    }
+  }
+  if (overlayEntry.validationRequirements) {
+    const overlaySet = new Set(overlayEntry.validationRequirements);
+    for (const req of base.validationRequirements) {
+      if (!overlaySet.has(req)) {
+        throw new Error(
+          `Tool Contract overlay cannot relax upstream validation requirements for unit ${base.unitType} (D-02).`
+        );
+      }
+    }
+  }
+  if (overlayEntry.closeoutRequirements) {
+    const overlaySet = new Set(overlayEntry.closeoutRequirements);
+    for (const req of base.closeoutRequirements) {
+      if (!overlaySet.has(req)) {
+        throw new Error(
+          `Tool Contract overlay cannot relax upstream closeout requirements for unit ${base.unitType} (D-02).`
+        );
+      }
+    }
+  }
+  const merged = {
+    ...base,
+    ...overlayEntry.allowedTools ? { allowedTools: [.../* @__PURE__ */ new Set([...base.allowedTools, ...overlayEntry.allowedTools])] } : {},
+    ...overlayEntry.validationRequirements ? { validationRequirements: [.../* @__PURE__ */ new Set([...base.validationRequirements, ...overlayEntry.validationRequirements])] } : {},
+    ...overlayEntry.closeoutRequirements ? { closeoutRequirements: [.../* @__PURE__ */ new Set([...base.closeoutRequirements, ...overlayEntry.closeoutRequirements])] } : {}
+  };
+  return merged;
+}
+function extractPromptObligations(promptContent) {
+  const obligations = /* @__PURE__ */ new Set();
+  for (const { marker, obligation } of PROMPT_OBLIGATION_MARKERS) {
+    if (marker.test(promptContent)) obligations.add(obligation);
+  }
+  return Array.from(obligations);
+}
+function parseToolList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map((tool) => tool.trim()).filter(Boolean);
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return trimmed.slice(1, -1).split(",").map((tool) => tool.trim()).filter(Boolean);
+  }
+  return trimmed.split(",").map((tool) => tool.trim()).filter(Boolean);
+}
+function hashContent(content) {
+  return createHash3("sha256").update(content, "utf8").digest("hex");
+}
+function verifyToolContractSnapshot(options) {
+  const cwd = options.cwd;
+  const snapshot = options.snapshot ?? readSnapshot(cwd);
+  if (!snapshot) {
+    return {
+      ok: true,
+      failures: [],
+      warnings: [],
+      snapshotPresent: false
+    };
+  }
+  const failures = [];
+  const warnings = [];
+  const expectedHash = calculateToolContractHash(snapshot);
+  if (snapshot.contractHash !== expectedHash) {
+    failures.push({
+      unitType: "snapshot",
+      contractHash: snapshot.contractHash,
+      contractVersion: snapshot.contractVersion,
+      failedField: "contractHash",
+      expected: expectedHash,
+      actual: snapshot.contractHash,
+      sourcePaths: ["generated/tool-contracts.json"]
+    });
+  }
+  for (const contract of snapshot.contracts) {
+    const promptAbs = join8(cwd, contract.promptPath);
+    if (!existsSync8(promptAbs)) {
+      failures.push({
+        unitType: contract.unitType,
+        contractHash: snapshot.contractHash,
+        contractVersion: snapshot.contractVersion,
+        failedField: "promptPath",
+        expected: contract.promptPath,
+        actual: "missing",
+        sourcePaths: [contract.promptPath]
+      });
+      continue;
+    }
+    const currentPromptHash = hashContent(readFileSync8(promptAbs, "utf8"));
+    if (currentPromptHash !== contract.promptHash) {
+      const currentPrompt = readFileSync8(promptAbs, "utf8");
+      const currentObligations = extractPromptObligations(currentPrompt);
+      const missing = contract.validationRequirements.filter((req) => {
+        if (req === "dispatch-target-present") return false;
+        return false;
+      });
+      if (missing.length > 0) {
+        failures.push({
+          unitType: contract.unitType,
+          contractHash: snapshot.contractHash,
+          contractVersion: snapshot.contractVersion,
+          failedField: "validationRequirements",
+          expected: contract.validationRequirements.join(","),
+          actual: missing.join(","),
+          sourcePaths: [contract.promptPath]
+        });
+      } else if (currentObligations.length === 0) {
+        warnings.push({
+          unitType: contract.unitType,
+          field: "promptHash",
+          expected: contract.promptHash.slice(0, 12),
+          actual: currentPromptHash.slice(0, 12),
+          sourcePaths: [contract.promptPath]
+        });
+      } else {
+        warnings.push({
+          unitType: contract.unitType,
+          field: "promptHash",
+          expected: contract.promptHash.slice(0, 12),
+          actual: currentPromptHash.slice(0, 12),
+          sourcePaths: [contract.promptPath]
+        });
+      }
+    }
+    if (contract.agentPath) {
+      const agentAbs = join8(cwd, contract.agentPath);
+      if (!existsSync8(agentAbs)) {
+        failures.push({
+          unitType: contract.unitType,
+          contractHash: snapshot.contractHash,
+          contractVersion: snapshot.contractVersion,
+          failedField: "agentPath",
+          expected: contract.agentPath,
+          actual: "missing",
+          sourcePaths: [contract.agentPath]
+        });
+        continue;
+      }
+      const currentAgent = readFileSync8(agentAbs, "utf8");
+      const currentTools = parseToolList(splitFrontmatter(currentAgent).data.tools);
+      const contractToolSet = new Set(contract.allowedTools);
+      const currentToolSet = new Set(currentTools);
+      for (const tool of contractToolSet) {
+        if (!currentToolSet.has(tool)) {
+          failures.push({
+            unitType: contract.unitType,
+            contractHash: snapshot.contractHash,
+            contractVersion: snapshot.contractVersion,
+            failedField: "allowedTools",
+            expected: Array.from(contractToolSet).join(","),
+            actual: currentTools.join(","),
+            sourcePaths: [contract.agentPath]
+          });
+          break;
+        }
+      }
+      for (const tool of currentToolSet) {
+        if (!contractToolSet.has(tool)) {
+          warnings.push({
+            unitType: contract.unitType,
+            field: "allowedTools",
+            expected: Array.from(contractToolSet).join(","),
+            actual: currentTools.join(","),
+            sourcePaths: [contract.agentPath]
+          });
+          break;
+        }
+      }
+    }
+  }
+  return { ok: failures.length === 0, failures, warnings, snapshotPresent: true };
+}
+function readSnapshot(cwd) {
+  const path = join8(cwd, "generated", "tool-contracts.json");
+  if (!existsSync8(path)) return void 0;
+  try {
+    return JSON.parse(readFileSync8(path, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+
+// src/tool-contract/validate.ts
+import { existsSync as existsSync9 } from "fs";
+import { join as join9 } from "path";
+var MAX_FIELD_SUMMARY = 80;
+function validateUnitToolContract(unit2, options) {
+  const { snapshot } = options;
+  const expectedHash = calculateToolContractHash(snapshot);
+  if (snapshot.contractHash !== expectedHash) {
+    return {
+      ok: false,
+      failure: boundedFailure({
+        unitId: unit2.id,
+        unitType: String(unit2.type),
+        contractHash: snapshot.contractHash,
+        contractVersion: snapshot.contractVersion,
+        failedField: "contractHash",
+        expected: expectedHash,
+        actual: snapshot.contractHash,
+        sourcePaths: ["generated/tool-contracts.json"]
+      })
+    };
+  }
+  const contract = snapshot.contracts.find((entry) => entry.unitType === unit2.type);
+  if (!contract) {
+    return {
+      ok: false,
+      failure: boundedFailure({
+        unitId: unit2.id,
+        unitType: String(unit2.type),
+        contractHash: snapshot.contractHash,
+        contractVersion: snapshot.contractVersion,
+        failedField: "unitType",
+        expected: "known unit type",
+        actual: truncate(String(unit2.type)),
+        sourcePaths: []
+      })
+    };
+  }
+  return { ok: true, contract };
+}
+function validateUnitToolContractAgainstDisk(options) {
+  const { snapshot, unit: unit2, cwd } = options;
+  const cheap = validateUnitToolContract(unit2, { snapshot });
+  if (!cheap.ok) return cheap;
+  const contract = cheap.contract;
+  const target = resolveUnitDispatchTarget(unit2);
+  const expectedPromptRel = target.prompt;
+  const expectedAgent = target.agent;
+  if (contract.promptPath !== expectedPromptRel) {
+    return {
+      ok: false,
+      failure: boundedFailure({
+        unitId: unit2.id,
+        unitType: contract.unitType,
+        contractHash: snapshot.contractHash,
+        contractVersion: snapshot.contractVersion,
+        failedField: "promptPath",
+        expected: truncate(expectedPromptRel),
+        actual: truncate(contract.promptPath),
+        sourcePaths: [contract.promptPath, expectedPromptRel]
+      })
+    };
+  }
+  const promptAbs = join9(cwd, expectedPromptRel);
+  if (!existsSync9(promptAbs)) {
+    return {
+      ok: false,
+      failure: boundedFailure({
+        unitId: unit2.id,
+        unitType: contract.unitType,
+        contractHash: snapshot.contractHash,
+        contractVersion: snapshot.contractVersion,
+        failedField: "promptPath",
+        expected: truncate(expectedPromptRel),
+        actual: "missing",
+        sourcePaths: [expectedPromptRel]
+      })
+    };
+  }
+  if (contract.agent !== expectedAgent) {
+    return {
+      ok: false,
+      failure: boundedFailure({
+        unitId: unit2.id,
+        unitType: contract.unitType,
+        contractHash: snapshot.contractHash,
+        contractVersion: snapshot.contractVersion,
+        failedField: "agent",
+        expected: expectedAgent ?? "none",
+        actual: contract.agent ?? "none",
+        sourcePaths: [contract.agentPath, expectedAgent ? `generated/agents/${expectedAgent}.md` : void 0].filter((path) => Boolean(path))
+      })
+    };
+  }
+  if (expectedAgent) {
+    const expectedAgentPath = `generated/agents/${expectedAgent}.md`;
+    if (contract.agentPath !== expectedAgentPath) {
+      return {
+        ok: false,
+        failure: boundedFailure({
+          unitId: unit2.id,
+          unitType: contract.unitType,
+          contractHash: snapshot.contractHash,
+          contractVersion: snapshot.contractVersion,
+          failedField: "agentPath",
+          expected: truncate(expectedAgentPath),
+          actual: truncate(contract.agentPath ?? "missing"),
+          sourcePaths: [contract.agentPath, expectedAgentPath].filter((path) => Boolean(path))
+        })
+      };
+    }
+  } else if (contract.agentPath) {
+    return {
+      ok: false,
+      failure: boundedFailure({
+        unitId: unit2.id,
+        unitType: contract.unitType,
+        contractHash: snapshot.contractHash,
+        contractVersion: snapshot.contractVersion,
+        failedField: "agentPath",
+        expected: "none",
+        actual: truncate(contract.agentPath),
+        sourcePaths: [contract.agentPath]
+      })
+    };
+  }
+  if (contract.agent) {
+    if (!contract.agentPath) {
+      return {
+        ok: false,
+        failure: boundedFailure({
+          unitId: unit2.id,
+          unitType: contract.unitType,
+          contractHash: snapshot.contractHash,
+          contractVersion: snapshot.contractVersion,
+          failedField: "agentPath",
+          expected: "agentPath present",
+          actual: "missing",
+          sourcePaths: [contract.agentPath ?? ""].filter(Boolean)
+        })
+      };
+    }
+    const agentAbs = join9(cwd, contract.agentPath);
+    if (!existsSync9(agentAbs)) {
+      return {
+        ok: false,
+        failure: boundedFailure({
+          unitId: unit2.id,
+          unitType: contract.unitType,
+          contractHash: snapshot.contractHash,
+          contractVersion: snapshot.contractVersion,
+          failedField: "agentPath",
+          expected: truncate(contract.agentPath),
+          actual: "missing",
+          sourcePaths: [contract.agentPath]
+        })
+      };
+    }
+  }
+  return { ok: true, contract };
+}
+function boundedFailure(failure) {
+  return {
+    unitId: failure.unitId,
+    unitType: failure.unitType,
+    contractHash: failure.contractHash,
+    contractVersion: failure.contractVersion,
+    failedField: failure.failedField,
+    expected: failure.expected ? truncate(failure.expected) : void 0,
+    actual: failure.actual ? truncate(failure.actual) : void 0,
+    sourcePaths: (failure.sourcePaths ?? []).map((path) => truncate(path, 160)).slice(0, 6)
+  };
+}
+function truncate(value, max = MAX_FIELD_SUMMARY) {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}...`;
+}
+
 // src/orchestrator/outcomes.ts
+import { readFileSync as readFileSync9 } from "fs";
 var POST_DISPATCH_POLICIES = {
   discuss: { artifactSuffix: "CONTEXT.md" },
   research: { artifactSuffix: "RESEARCH.md" },
@@ -1989,7 +2666,7 @@ function collectSignals(input) {
   };
   if (input.artifactPath) {
     evidence.push(`artifact:${input.artifactPath}`);
-    const parsed = splitFrontmatter(readFileSync6(input.artifactPath, "utf8"));
+    const parsed = splitFrontmatter(readFileSync9(input.artifactPath, "utf8"));
     for (const [key, value] of Object.entries(parsed.data)) {
       if (Array.isArray(value)) continue;
       addField(key, value);
@@ -2073,11 +2750,11 @@ function escapeRegExp(value) {
 }
 
 // src/orchestrator/reconciliation.ts
-import { relative as relative3 } from "path";
+import { relative as relative4 } from "path";
 
 // src/state-reconciliation/index.ts
-import { existsSync as existsSync11 } from "fs";
-import { join as join10 } from "path";
+import { existsSync as existsSync15 } from "fs";
+import { join as join14 } from "path";
 
 // src/state-reconciliation/drift/noncanonical-plan-like-file.ts
 function detectNoncanonicalPlanLikeFiles(input) {
@@ -2089,7 +2766,7 @@ function detectNoncanonicalPlanLikeFiles(input) {
 }
 
 // src/state-reconciliation/drift/completion-timestamp.ts
-import { readFileSync as readFileSync7 } from "fs";
+import { readFileSync as readFileSync10 } from "fs";
 function detectCompletionTimestampDrift(input) {
   if (!input.roadmap) return empty();
   const repairs = [];
@@ -2142,7 +2819,7 @@ function detectCompletionTimestampDrift(input) {
 function provenCompletionDate(summaryPaths) {
   const dates = /* @__PURE__ */ new Set();
   for (const path of summaryPaths) {
-    const match = /^completed:\s*["']?(?<date>\d{4}-\d{2}-\d{2})["']?\s*$/m.exec(readFileSync7(path, "utf8"));
+    const match = /^completed:\s*["']?(?<date>\d{4}-\d{2}-\d{2})["']?\s*$/m.exec(readFileSync10(path, "utf8"));
     if (match?.groups) dates.add(match.groups.date);
   }
   return dates.size === 1 ? [...dates][0] : void 0;
@@ -2271,7 +2948,7 @@ function empty4() {
 }
 
 // src/state-reconciliation/drift/summary-count-mismatch.ts
-import { basename } from "path";
+import { basename as basename2 } from "path";
 function detectSummaryCountMismatch(input) {
   const blockers = [];
   if (input.activeUnitId?.endsWith(":execute")) {
@@ -2287,7 +2964,7 @@ function detectSummaryCountMismatch(input) {
       phase: phase.phase,
       plan,
       artifact: "summary",
-      message: `Canonical plan ${basename(path)} has no matching ${phase.phase}-${plan}-SUMMARY.md artifact.`
+      message: `Canonical plan ${basename2(path)} has no matching ${phase.phase}-${plan}-SUMMARY.md artifact.`
     }));
     blockers.push({
       reasonCode: "summary-count-mismatch",
@@ -2302,7 +2979,7 @@ function detectSummaryCountMismatch(input) {
 }
 function artifactPlan(path, suffix) {
   const pattern = new RegExp(`^\\d{2}-(\\d{2})-${suffix}\\.md$`);
-  return pattern.exec(basename(path))?.[1];
+  return pattern.exec(basename2(path))?.[1];
 }
 
 // src/state-reconciliation/drift/unknown-drift.ts
@@ -2383,15 +3060,15 @@ function classifyDrift(input) {
 }
 
 // src/state-reconciliation/journal.ts
-import { existsSync as existsSync6, readFileSync as readFileSync8 } from "fs";
-import { join as join6 } from "path";
+import { existsSync as existsSync10, readFileSync as readFileSync11 } from "fs";
+import { join as join10 } from "path";
 function readJournalState(basePath) {
-  const path = join6(basePath, ".planning", "orchestration-state.json");
-  if (!existsSync6(path)) {
+  const path = join10(basePath, ".planning", "orchestration-state.json");
+  if (!existsSync10(path)) {
     return { ok: true, path, blockers: [] };
   }
   try {
-    const parsed = JSON.parse(readFileSync8(path, "utf8"));
+    const parsed = JSON.parse(readFileSync11(path, "utf8"));
     if (!isJournal(parsed)) {
       return blocked(path, "orchestration-state.json has an invalid journal shape.");
     }
@@ -2436,22 +3113,22 @@ function blocked(path, message) {
 }
 
 // src/state-reconciliation/repair.ts
-import { existsSync as existsSync9, readFileSync as readFileSync11, writeFileSync as writeFileSync3 } from "fs";
-import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve3 } from "path";
+import { existsSync as existsSync13, readFileSync as readFileSync14, writeFileSync as writeFileSync4 } from "fs";
+import { isAbsolute as isAbsolute3, relative as relative3, resolve as resolve4 } from "path";
 
 // src/state-reconciliation/roadmap.ts
-import { existsSync as existsSync7, readFileSync as readFileSync9 } from "fs";
-import { join as join7 } from "path";
+import { existsSync as existsSync11, readFileSync as readFileSync12 } from "fs";
+import { join as join11 } from "path";
 function readRoadmapState(basePath) {
-  const path = join7(basePath, ".planning", "ROADMAP.md");
-  if (!existsSync7(path)) {
+  const path = join11(basePath, ".planning", "ROADMAP.md");
+  if (!existsSync11(path)) {
     return {
       path,
       phases: [],
       blockers: [metadataBlocker("roadmap", path, "Missing ROADMAP.md metadata file.")]
     };
   }
-  const lines = readFileSync9(path, "utf8").split(/\r?\n/);
+  const lines = readFileSync12(path, "utf8").split(/\r?\n/);
   const phases = [];
   for (const [index, line] of lines.entries()) {
     const cells = parseTableRow(line);
@@ -2529,11 +3206,11 @@ function metadataBlocker(artifact, path, message) {
 }
 
 // src/state-reconciliation/state.ts
-import { existsSync as existsSync8, readFileSync as readFileSync10 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync12, readFileSync as readFileSync13 } from "fs";
+import { join as join12 } from "path";
 function readStateDigest(basePath) {
-  const path = join8(basePath, ".planning", "STATE.md");
-  if (!existsSync8(path)) {
+  const path = join12(basePath, ".planning", "STATE.md");
+  if (!existsSync12(path)) {
     return {
       path,
       frontmatter: {},
@@ -2541,7 +3218,7 @@ function readStateDigest(basePath) {
       blockers: [metadataBlocker2(path, "Missing STATE.md metadata file.")]
     };
   }
-  const content = readFileSync10(path, "utf8");
+  const content = readFileSync13(path, "utf8");
   return {
     path,
     frontmatter: parseFrontmatter2(content),
@@ -2687,10 +3364,10 @@ function checkPreconditions(basePath, repair, fs) {
   return void 0;
 }
 function isInsidePlanning(basePath, path) {
-  const planningRoot = resolve3(basePath, ".planning");
-  const target = resolve3(path);
-  const rel = relative2(planningRoot, target);
-  return rel === "" || !!rel && !rel.startsWith("..") && !isAbsolute2(rel);
+  const planningRoot = resolve4(basePath, ".planning");
+  const target = resolve4(path);
+  const rel = relative3(planningRoot, target);
+  return rel === "" || !!rel && !rel.startsWith("..") && !isAbsolute3(rel);
 }
 function repairBlocker(message, repair) {
   return {
@@ -2718,14 +3395,14 @@ function repairKind(path) {
   return void 0;
 }
 var defaultFileSystem = {
-  exists: existsSync9,
-  readFile: (path) => readFileSync11(path, "utf8"),
-  writeFile: (path, content) => writeFileSync3(path, content, "utf8")
+  exists: existsSync13,
+  readFile: (path) => readFileSync14(path, "utf8"),
+  writeFile: (path, content) => writeFileSync4(path, content, "utf8")
 };
 
 // src/state-reconciliation/scan.ts
-import { existsSync as existsSync10, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync14, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join13 } from "path";
 
 // src/state-reconciliation/artifacts.ts
 var PLAN_ARTIFACT = /^(?<phase>\d{2})-(?<plan>\d{2})-PLAN\.md$/;
@@ -2769,8 +3446,8 @@ function canonical(filename, kind, phase, plan) {
 
 // src/state-reconciliation/scan.ts
 function scanPlanningArtifacts(basePath) {
-  const phasesPath = join9(basePath, ".planning", "phases");
-  if (!existsSync10(phasesPath)) {
+  const phasesPath = join13(basePath, ".planning", "phases");
+  if (!existsSync14(phasesPath)) {
     const blocker = {
       reasonCode: "unknown-drift",
       artifact: "state",
@@ -2785,11 +3462,11 @@ function scanPlanningArtifacts(basePath) {
   const blockers = [];
   for (const entry of readdirSync2(phasesPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (!entry.isDirectory()) continue;
-    const phaseDir = join9(phasesPath, entry.name);
+    const phaseDir = join13(phasesPath, entry.name);
     for (const file of readdirSync2(phaseDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       if (!file.isFile()) continue;
-      const path = join9(phaseDir, file.name);
-      if (!statSync2(path).isFile()) continue;
+      const path = join13(phaseDir, file.name);
+      if (!statSync3(path).isFile()) continue;
       const classification = classifyArtifactName(file.name);
       if (classification.canonical) {
         const phase = getOrCreatePhase(phases, classification.phase, phaseDir);
@@ -2943,10 +3620,10 @@ function totalsFor(phases) {
   };
 }
 function readOptionalRoadmapState(basePath) {
-  return existsSync11(join10(basePath, ".planning", "ROADMAP.md")) ? readRoadmapState(basePath) : void 0;
+  return existsSync15(join14(basePath, ".planning", "ROADMAP.md")) ? readRoadmapState(basePath) : void 0;
 }
 function readOptionalStateDigest(basePath) {
-  return existsSync11(join10(basePath, ".planning", "STATE.md")) ? readStateDigest(basePath) : void 0;
+  return existsSync15(join14(basePath, ".planning", "STATE.md")) ? readStateDigest(basePath) : void 0;
 }
 
 // src/orchestrator/reconciliation.ts
@@ -3032,7 +3709,7 @@ function evidenceToStrings(evidence, basePath) {
   return values;
 }
 function safeRelativePath(basePath, path) {
-  const rel = relative3(basePath, path);
+  const rel = relative4(basePath, path);
   return rel && !rel.startsWith("..") ? rel : path;
 }
 function truncateEvidence(value) {
@@ -3059,9 +3736,9 @@ function runPreDispatchGates(snapshot, unit2, overrides = {}) {
   return { ok: true, gate: "persistRuntimeState", evidence: [...orderedGates.map(([name]) => name), ...releaseEvidence], journalEvents: journalEvents.length ? journalEvents : void 0 };
 }
 function runPostDispatchGate(snapshot, unit2, options = {}) {
-  const exists = options.exists ?? existsSync12;
+  const exists = options.exists ?? existsSync16;
   const cwd = options.cwd ?? process.cwd();
-  const phaseDir = join11(cwd, ".planning", "phases");
+  const phaseDir = join15(cwd, ".planning", "phases");
   if (unit2.type === "verify") {
     if (options.verifierSkip || !snapshot.settings.workflow.verifier) return pass("artifact", "verifier skipped by settings");
   }
@@ -3101,8 +3778,77 @@ function decideDispatch(_snapshot, unit2) {
   }
   return pass("decideDispatch", `dispatch:${unit2.type}`);
 }
-function validateToolContract(_snapshot, unit2) {
-  return pass("validateToolContract", `phase-12-contract-seam:${unit2.type}`);
+function validateToolContract(snapshot, unit2) {
+  const cwd = snapshot.cwd ?? process.cwd();
+  let contractSnapshot = readSnapshot(cwd);
+  if (!contractSnapshot) {
+    try {
+      contractSnapshot = compileToolContracts({ cwd });
+    } catch (error) {
+      return toolContractGateFailure(unit2, {
+        unitId: unit2.id,
+        unitType: unit2.type,
+        failedField: "snapshot",
+        expected: "generated/tool-contracts.json or upstream package",
+        actual: error instanceof Error ? error.message : String(error),
+        sourcePaths: ["generated/tool-contracts.json"]
+      });
+    }
+  }
+  if (contractSnapshot.contracts.length === 0) {
+    return pass("validateToolContract", `contract:empty-snapshot:${unit2.type}`);
+  }
+  if (!contractSnapshot.contracts.some((entry) => entry.unitType === unit2.type)) {
+    return toolContractGateFailure(unit2, {
+      unitId: unit2.id,
+      unitType: unit2.type,
+      failedField: "unitType",
+      expected: "known unit type",
+      actual: String(unit2.type),
+      sourcePaths: ["generated/tool-contracts.json"]
+    });
+  }
+  const cheap = validateUnitToolContract(unit2, { snapshot: contractSnapshot });
+  if (!cheap.ok) {
+    return toolContractGateFailure(unit2, cheap.failure);
+  }
+  const disk = validateUnitToolContractAgainstDisk({ cwd, snapshot: contractSnapshot, unit: unit2 });
+  if (!disk.ok) {
+    return toolContractGateFailure(unit2, disk.failure);
+  }
+  return pass("validateToolContract", `contract:${unit2.type}:${disk.contract.promptHash.slice(0, 12)}`);
+}
+function toolContractGateFailure(unit2, failure) {
+  const recoveryDecision = classifyFailure({
+    kind: "dispatch",
+    reason: "dispatch-contract-invalid",
+    evidence: {
+      reasonCode: "dispatch-contract-invalid",
+      unitId: unit2.id,
+      unitType: unit2.type,
+      contractHash: failure.contractHash,
+      contractVersion: failure.contractVersion,
+      failedField: failure.failedField,
+      expected: failure.expected,
+      actual: failure.actual,
+      sourcePaths: failure.sourcePaths
+    }
+  });
+  return {
+    ok: false,
+    gate: "validateToolContract",
+    reason: recoveryDecision.class,
+    retryable: false,
+    resumeHint: recoveryDecision.remediation,
+    evidence: [
+      `failedField:${failure.failedField}`,
+      `unitId:${unit2.id}`,
+      failure.contractHash ? `contractHash:${failure.contractHash}` : void 0,
+      ...(failure.sourcePaths ?? []).map((path) => `path:${path}`)
+    ].filter((item) => Boolean(item)),
+    recoveryDecision,
+    exitReason: recoveryDecision.class
+  };
 }
 function prepareUnitRoot2(snapshot, unit2) {
   const result = prepareUnitRoot({
@@ -3175,10 +3921,10 @@ function findMatchingArtifact(cwd, phaseRoot, phase, suffix, exists, written, re
   const artifactPattern = new RegExp(`^${escapeRegExp2(phase)}(?:-\\d+)?-${escapeRegExp2(suffix)}$`);
   try {
     const candidates = [
-      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join11(phaseRoot, entry.name)),
-      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync3(join11(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join11(phaseRoot, entry.name, child.name)))
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join15(phaseRoot, entry.name)),
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync3(join15(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join15(phaseRoot, entry.name, child.name)))
     ];
-    return candidates.find((path) => artifactPattern.test(basename2(path)) && (!writtenSet || writtenSet.has(resolve4(path))) && exists(path));
+    return candidates.find((path) => artifactPattern.test(basename3(path)) && (!writtenSet || writtenSet.has(resolve5(path))) && exists(path));
   } catch {
     return void 0;
   }
@@ -3187,18 +3933,18 @@ function escapeRegExp2(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function normalizeWrittenPath(cwd, value) {
-  return resolve4(isAbsolute3(value) ? value : resolve4(cwd, value));
+  return resolve5(isAbsolute4(value) ? value : resolve5(cwd, value));
 }
 function closeoutEvidence(cwd, phase, written) {
   if (!written?.length) return false;
   const writtenSet = new Set(written.map((path) => normalizeWrittenPath(cwd, path)));
-  const roadmapPath = resolve4(cwd, ".planning", "ROADMAP.md");
-  const statePath = resolve4(cwd, ".planning", "STATE.md");
+  const roadmapPath = resolve5(cwd, ".planning", "ROADMAP.md");
+  const statePath = resolve5(cwd, ".planning", "STATE.md");
   if (!writtenSet.has(roadmapPath) || !writtenSet.has(statePath)) return false;
   try {
-    const roadmap = readFileSync12(roadmapPath, "utf8");
-    const state = readFileSync12(statePath, "utf8");
-    statSync3(join11(cwd, ".planning", "phases"));
+    const roadmap = readFileSync15(roadmapPath, "utf8");
+    const state = readFileSync15(statePath, "utf8");
+    statSync4(join15(cwd, ".planning", "phases"));
     return roadmapPhaseComplete(roadmap, phase) && statePhaseComplete(state, phase);
   } catch {
     return false;
@@ -3207,7 +3953,7 @@ function closeoutEvidence(cwd, phase, written) {
 function phaseVerificationPassed(cwd, phaseRoot, phase, exists) {
   const verificationPath = findMatchingArtifact(cwd, phaseRoot, phase, "VERIFICATION.md", exists, void 0, false);
   if (!verificationPath) return false;
-  const content = readFileSync12(verificationPath, "utf8");
+  const content = readFileSync15(verificationPath, "utf8");
   const status = /^status:\s*(\S+)/m.exec(content)?.[1]?.trim().toLowerCase();
   return status === "passed" || status === "pass";
 }
@@ -3750,8 +4496,8 @@ function withLastEvent(snapshot, event) {
 }
 
 // src/orchestrator/journal.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync3, readFileSync as readFileSync13, writeFileSync as writeFileSync4 } from "fs";
-import { dirname as dirname4, isAbsolute as isAbsolute4, resolve as resolve5, relative as relative4 } from "path";
+import { existsSync as existsSync17, mkdirSync as mkdirSync4, readFileSync as readFileSync16, writeFileSync as writeFileSync5 } from "fs";
+import { dirname as dirname5, isAbsolute as isAbsolute5, resolve as resolve6, relative as relative5 } from "path";
 var DEFAULT_JOURNAL_PATH = ".planning/orchestration-state.json";
 var allowedEventKeys = /* @__PURE__ */ new Set(["type", "event", "ts", "phase", "unitId", "status", "attempt", "reason", "resumeHint", "evidence", "recoveryDecision", "exitReason", "action", "recoveryClass", "reasonCode", "root", "branch", "paths", "written", "message", "host", "pid"]);
 var unsafeEventKeys = /* @__PURE__ */ new Set(["prompt", "userText", "env", "token", "secret", "password", "apiKey", "api_key", "authorization", "bearer", "args", "arguments", "rawArgs"]);
@@ -3780,11 +4526,11 @@ function createJournalAdapter(options) {
 function readJournal(options) {
   const resolved = resolveJournalPath(options);
   if (!resolved.ok) return { ok: false, messages: resolved.messages };
-  if (!existsSync13(resolved.path)) {
+  if (!existsSync17(resolved.path)) {
     return { ok: true, messages: ["orchestration journal not found"] };
   }
   try {
-    const parsed = JSON.parse(readFileSync13(resolved.path, "utf8"));
+    const parsed = JSON.parse(readFileSync16(resolved.path, "utf8"));
     const journal = normalizeJournal(parsed);
     if (!journal) {
       return { ok: false, messages: ["orchestration journal is invalid"] };
@@ -3894,8 +4640,8 @@ function redactUnit(unit2) {
 }
 function writeJournal(path, journal) {
   try {
-    mkdirSync3(dirname4(path), { recursive: true });
-    writeFileSync4(path, `${JSON.stringify(journal, null, 2)}
+    mkdirSync4(dirname5(path), { recursive: true });
+    writeFileSync5(path, `${JSON.stringify(journal, null, 2)}
 `, "utf8");
     return { ok: true, messages: ["orchestration journal written"], written: [path], snapshot: journal.snapshot, status: journal.snapshot ? void 0 : void 0 };
   } catch (error) {
@@ -3903,17 +4649,17 @@ function writeJournal(path, journal) {
   }
 }
 function resolveJournalPath(options) {
-  const cwd = resolve5(options.cwd);
-  const planningDir = resolve5(cwd, ".planning");
-  const candidate = resolve5(cwd, options.journalPath ?? DEFAULT_JOURNAL_PATH);
+  const cwd = resolve6(options.cwd);
+  const planningDir = resolve6(cwd, ".planning");
+  const candidate = resolve6(cwd, options.journalPath ?? DEFAULT_JOURNAL_PATH);
   if (!isInsideOrSame2(planningDir, candidate)) {
     return { ok: false, messages: [`refusing orchestration journal path outside .planning: ${candidate}`] };
   }
   return { ok: true, path: candidate };
 }
 function isInsideOrSame2(parent, child) {
-  const rel = relative4(parent, child);
-  return rel === "" || !rel.startsWith("..") && !isAbsolute4(rel);
+  const rel = relative5(parent, child);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute5(rel);
 }
 function normalizeJournal(value) {
   if (!value || typeof value !== "object") return void 0;
@@ -3928,9 +4674,9 @@ function normalizeJournal(value) {
   };
 }
 function safeString(value) {
-  return secretPattern.test(value) ? "[REDACTED]" : truncate(value);
+  return secretPattern.test(value) ? "[REDACTED]" : truncate2(value);
 }
-function truncate(value) {
+function truncate2(value) {
   return value.length <= maxStringLength ? value : `${value.slice(0, maxStringLength)}\u2026`;
 }
 
@@ -4037,8 +4783,263 @@ function createNativeAutoHandoff(options) {
   };
 }
 
+// src/settings-bridge/cache.ts
+import { createHash as createHash4 } from "crypto";
+
+// src/settings-bridge/format.ts
+function formatSettingsContext(resolved, options) {
+  const lines = [];
+  lines.push("## GSD Settings");
+  if (resolved.parseError) {
+    lines.push("");
+    lines.push(`\u26A0\uFE0F parse error: ${resolved.parseError}`);
+    lines.push("Settings context disabled. Run `/gsd-settings` to repair, or fix the JSON manually before GSD dispatch.");
+    return lines.join("\n");
+  }
+  if (!resolved.source.path) {
+    lines.push("");
+    lines.push("No GSD settings found. Default workflow toggles apply.");
+    return lines.join("\n");
+  }
+  lines.push("");
+  lines.push(`- source: ${resolved.source.path} (${resolved.source.kind})`);
+  if (resolved.source.hash) {
+    lines.push(`- hash: ${resolved.source.hash.slice(0, 16)}`);
+  }
+  if (typeof resolved.source.mtimeMs === "number") {
+    lines.push(`- mtime: ${new Date(resolved.source.mtimeMs).toISOString()}`);
+  }
+  if (options.packageName && options.packageVersion) {
+    lines.push(`- package: ${options.packageName}@${options.packageVersion}`);
+  }
+  if (resolved.model.profile) {
+    lines.push("");
+    lines.push(`### Model routing`);
+    lines.push(`- profile: ${resolved.model.profile}`);
+    if (Object.keys(resolved.model.overrides).length > 0) {
+      const overrideCount = Object.keys(resolved.model.overrides).length;
+      lines.push(`- overrides: ${overrideCount} agent mapping${overrideCount === 1 ? "" : "s"}`);
+    } else {
+      lines.push("- overrides: (none)");
+    }
+  } else {
+    lines.push("");
+    lines.push("### Model routing");
+    lines.push("- profile: inherit (uses Pi session model)");
+  }
+  if (Object.keys(resolved.workflow).length > 0) {
+    lines.push("");
+    lines.push("### Workflow toggles");
+    for (const key of Object.keys(resolved.workflow).sort()) {
+      const value = resolved.workflow[key];
+      lines.push(`- ${key}: ${formatScalar2(key, value)}`);
+    }
+  }
+  return lines.join("\n");
+}
+function formatScalar2(key, value) {
+  if (value === null) return "null";
+  if (typeof value === "string") return redactScalar(key, value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "[redacted non-scalar]";
+}
+function redactScalar(key, value) {
+  if (/token|secret|password|apikey|api_key|credential|command|script/i.test(key)) return "[redacted]";
+  if (/token|secret|password|apikey|api_key|credential|bearer\s+[a-z0-9._-]+|sk-[a-z0-9._-]+/i.test(value)) return "[redacted]";
+  return value;
+}
+
+// src/settings-bridge/cache.ts
+var SettingsBridgeCache = class {
+  constructor(options) {
+    this.options = options;
+    this.resolveOptions = {
+      cwd: options.cwd,
+      ...options.configPath ? { configPath: options.configPath } : {},
+      projectRoot: options.cwd
+    };
+  }
+  options;
+  resolved;
+  lastNotifiedHash;
+  notifications = [];
+  resolveOptions;
+  refresh() {
+    const source = resolveGsdConfigSource(this.resolveOptions);
+    const next = toResolvedSettings(source);
+    const previous = this.resolved;
+    if (source.hash && source.hash !== this.lastNotifiedHash) {
+      const previousHash = previous?.source.hash;
+      const isNewHash = previousHash !== source.hash;
+      if (isNewHash) {
+        if (next.parseError) {
+          this.notifications.push({
+            kind: "warning",
+            message: `pi-gsd: settings parse failed for ${source.path ?? "default"}. ${next.parseError}. Run \`/gsd-settings\` to repair, or fix the JSON manually.`,
+            observedHash: source.hash
+          });
+        } else if (previous) {
+          this.notifications.push({
+            kind: "info",
+            message: `pi-gsd: settings updated (${describeChange(previous.source, source)}). hash=${source.hash.slice(0, 12)}`,
+            observedHash: source.hash
+          });
+        }
+        this.lastNotifiedHash = source.hash;
+      }
+    }
+    this.resolved = next;
+    return next;
+  }
+  current() {
+    if (!this.resolved) return this.refresh();
+    return this.resolved;
+  }
+  isParseError() {
+    return Boolean(this.resolved?.parseError);
+  }
+  /**
+   * Refresh and throw if parsing failed. Used by the native auto orchestrator
+   * to block dispatch when settings are unparseable (D-16).
+   */
+  ensureGsdSettingsReady() {
+    const resolved = this.refresh();
+    if (resolved.parseError) {
+      const error = new Error(`GSD settings parse failed: ${resolved.parseError}`);
+      error.code = "GSD_SETTINGS_PARSE_ERROR";
+      throw error;
+    }
+    return resolved;
+  }
+  formatContext() {
+    const resolved = this.refresh();
+    return formatSettingsContext(resolved, {
+      packageName: this.options.officialPackageName,
+      packageVersion: this.options.officialPackageVersion
+    });
+  }
+  popNotifications() {
+    const drained = [...this.notifications];
+    this.notifications.length = 0;
+    return drained;
+  }
+  dispose() {
+    this.resolved = void 0;
+    this.lastNotifiedHash = void 0;
+    this.notifications.length = 0;
+  }
+};
+function toResolvedSettings(source) {
+  if (!source.path) {
+    return {
+      source,
+      parseError: void 0,
+      workflow: {},
+      model: { profile: null, overrides: {} }
+    };
+  }
+  if (!source.config) {
+    return {
+      source,
+      parseError: source.parseError ? `Could not parse JSON at ${source.path}: ${source.parseError}` : `Could not parse JSON at ${source.path}`,
+      workflow: {},
+      model: { profile: null, overrides: {} }
+    };
+  }
+  const workflow = isRecord3(source.config.workflow) ? filterSafeWorkflowSettings(source.config.workflow) : {};
+  const overrides = isRecord3(source.config.model_overrides) ? filterStringRecord(source.config.model_overrides) : {};
+  return {
+    source,
+    parseError: void 0,
+    workflow,
+    model: {
+      profile: typeof source.config.model_profile === "string" ? source.config.model_profile : null,
+      overrides
+    }
+  };
+}
+function isRecord3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var SAFE_WORKFLOW_KEYS = /* @__PURE__ */ new Set([
+  "_auto_chain_active",
+  "ai_integration_phase",
+  "auto_advance",
+  "auto_prune_state",
+  "code_review",
+  "code_review_depth",
+  "code_review_command",
+  "discuss_mode",
+  "inline_plan_threshold",
+  "max_discuss_passes",
+  "node_repair",
+  "node_repair_budget",
+  "nyquist_validation",
+  "pattern_mapper",
+  "plan_bounce",
+  "plan_bounce_passes",
+  "plan_check",
+  "plan_checker",
+  "plan_review_convergence",
+  "post_planning_gaps",
+  "research",
+  "research_before_questions",
+  "security_asvs_level",
+  "security_block_on",
+  "security_enforcement",
+  "skip_discuss",
+  "subagent_timeout",
+  "tdd_mode",
+  "text_mode",
+  "ui_phase",
+  "ui_review",
+  "ui_safety_gate",
+  "use_worktrees",
+  "verifier",
+  "worktrees"
+]);
+function filterSafeWorkflowSettings(source) {
+  const filtered = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (!SAFE_WORKFLOW_KEYS.has(key)) continue;
+    if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+}
+function filterStringRecord(source) {
+  return Object.fromEntries(
+    Object.entries(source).filter((entry) => typeof entry[1] === "string")
+  );
+}
+function describeChange(previous, next) {
+  if (previous.path !== next.path) {
+    return `source=${next.kind}`;
+  }
+  const changedKeys = [];
+  const previousConfig = previous.config ?? {};
+  const nextConfig = next.config ?? {};
+  const previousWorkflow = isRecord3(previousConfig.workflow) ? previousConfig.workflow : {};
+  const nextWorkflow = isRecord3(nextConfig.workflow) ? nextConfig.workflow : {};
+  for (const key of /* @__PURE__ */ new Set([...Object.keys(previousWorkflow), ...Object.keys(nextWorkflow)])) {
+    if (JSON.stringify(previousWorkflow[key]) !== JSON.stringify(nextWorkflow[key])) {
+      changedKeys.push(`workflow.${key}`);
+    }
+  }
+  if (previousConfig.model_profile !== nextConfig.model_profile) {
+    changedKeys.push("model_profile");
+  }
+  return changedKeys.length > 0 ? changedKeys.join(",") : "settings changed";
+}
+
+// src/settings-bridge/index.ts
+function createSettingsBridge(options) {
+  return new SettingsBridgeCache(options);
+}
+
 // src/extension.ts
-var piGsdPackageRoot = resolve6(dirname5(fileURLToPath(import.meta.url)), "..");
+var piGsdPackageRoot = resolve7(dirname6(fileURLToPath(import.meta.url)), "..");
 var TEMP_DIR_SUBDIRS = ["async-subagent-results", "async-subagent-runs"];
 function buildPiSubagentsTempRoot() {
   const username = (() => {
@@ -4055,14 +5056,14 @@ function buildPiSubagentsTempRoot() {
     return "unknown";
   })();
   const sanitized = username.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
-  return join13(tmpdir(), `pi-subagents-user-${sanitized}`);
+  return join17(tmpdir(), `pi-subagents-user-${sanitized}`);
 }
 function guardPiSubagentsTempDirs(options) {
   try {
-    const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync4 };
+    const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync5 };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
     for (const subdir of TEMP_DIR_SUBDIRS) {
-      const dirPath = join13(tempRoot, subdir);
+      const dirPath = join17(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
       } catch {
@@ -4079,16 +5080,31 @@ function guardPiSubagentsTempDirs(options) {
 }
 function piGsdExtension(pi) {
   let warnedResolveFailure = false;
-  let cachedPackageRoot = null;
+  const packageRootByCwd = /* @__PURE__ */ new Map();
+  const officialPackageByCwd = /* @__PURE__ */ new Map();
+  const settingsBridgeByCwd = /* @__PURE__ */ new Map();
   function getPackageRoot(startDir) {
-    if (cachedPackageRoot !== null) return cachedPackageRoot;
+    const cached = packageRootByCwd.get(startDir);
+    if (cached) return cached;
     try {
       const officialPackage = resolveOfficialPackage({ startDir });
-      cachedPackageRoot = officialPackage.packageRoot;
-      return cachedPackageRoot;
+      packageRootByCwd.set(startDir, officialPackage.packageRoot);
+      officialPackageByCwd.set(startDir, { packageName: officialPackage.packageName, version: officialPackage.version });
+      return officialPackage.packageRoot;
     } catch {
       return null;
     }
+  }
+  function getSettingsBridge(cwd) {
+    const cached = settingsBridgeByCwd.get(cwd);
+    if (cached) return cached;
+    const officialPackage = officialPackageByCwd.get(cwd);
+    const bridge = createSettingsBridge({
+      cwd,
+      ...officialPackage ? { officialPackageName: officialPackage.packageName, officialPackageVersion: officialPackage.version } : {}
+    });
+    settingsBridgeByCwd.set(cwd, bridge);
+    return bridge;
   }
   pi.on("session_start", (_event, ctx) => {
     guardPiSubagentsTempDirs();
@@ -4107,15 +5123,28 @@ function piGsdExtension(pi) {
       warnedResolveFailure = true;
       notify(ctx, "pi-gsd: failed to resolve official package", "warning");
     }
+    const bridge = getSettingsBridge(ctx.cwd);
+    bridge.refresh();
+    for (const notification of bridge.popNotifications()) {
+      notify(ctx, notification.message, notification.kind);
+    }
   });
   pi.on("context", (event, ctx) => {
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (!pkgRoot) return void 0;
     const messages = event.messages.map((message) => rewriteMessageForRuntime(message, pkgRoot));
-    return { messages };
+    if (!isGsdRelatedContext(event)) {
+      return { messages };
+    }
+    const bridge = getSettingsBridge(ctx.cwd);
+    const settingsContext = bridge.formatContext();
+    for (const notification of bridge.popNotifications()) {
+      notify(ctx, notification.message, notification.kind);
+    }
+    return { messages: appendSettingsContext(messages, settingsContext) };
   });
   pi.on("message_end", (event, ctx) => {
-    if (!isRecord3(event.message) || event.message.role !== "assistant") {
+    if (!isRecord4(event.message) || event.message.role !== "assistant") {
       return void 0;
     }
     const pkgRoot = getPackageRoot(ctx.cwd);
@@ -4123,11 +5152,19 @@ function piGsdExtension(pi) {
     return { message: rewriteMessageForRuntime(event.message, pkgRoot) };
   });
   pi.on("input", (event, ctx) => {
-    const text = isRecord3(event) && typeof event.text === "string" ? event.text : void 0;
+    const text = isRecord4(event) && typeof event.text === "string" ? event.text : void 0;
     if (!text) return { action: "continue" };
     const trigger = detectNativeAutoTrigger(text);
     if (!trigger) return { action: "continue" };
     if (!process.env.PI_GSD_DISPATCH_COMMAND) return { action: "continue" };
+    const bridge = getSettingsBridge(ctx.cwd);
+    bridge.refresh();
+    for (const notification of bridge.popNotifications()) {
+      notify(ctx, notification.message, notification.kind);
+    }
+    if (bridge.isParseError()) {
+      return { action: "handled" };
+    }
     const resourceRoot = piGsdPackageRoot;
     const handoff = createNativeAutoHandoff({
       cwd: ctx.cwd,
@@ -4172,8 +5209,35 @@ function piGsdExtension(pi) {
     }
   });
 }
+function isGsdRelatedContext(event) {
+  if (!Array.isArray(event.messages)) return false;
+  const gsdPattern = /\/gsd-|gsd-(?:planner|executor|verifier|code-reviewer|security-auditor|nyquist-auditor|ui-auditor|ui-checker|ui-researcher|plan-checker|roadmapper|debugger|debug-session-manager)/i;
+  for (const message of event.messages) {
+    if (!isRecord4(message)) continue;
+    if (typeof message.text === "string" && gsdPattern.test(message.text)) {
+      return true;
+    }
+    if (typeof message.content === "string" && gsdPattern.test(message.content)) {
+      return true;
+    }
+    if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (!isRecord4(block) || typeof block.text !== "string") continue;
+        if (gsdPattern.test(block.text)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+function appendSettingsContext(messages, context) {
+  if (!context) return messages;
+  const settingsBlock = { role: "system", content: context };
+  return [settingsBlock, ...messages];
+}
 function rewriteMessageForRuntime(message, officialRoot) {
-  if (!isRecord3(message)) {
+  if (!isRecord4(message)) {
     return message;
   }
   const content = message.content;
@@ -4189,12 +5253,12 @@ function rewriteMessageForRuntime(message, officialRoot) {
   return message;
 }
 function rewriteTextBlock(block, officialRoot) {
-  if (!isRecord3(block) || block.type !== "text" || typeof block.text !== "string") {
+  if (!isRecord4(block) || block.type !== "text" || typeof block.text !== "string") {
     return block;
   }
   return { ...block, text: rewriteRuntimeMessageText(block.text, officialRoot) };
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null;
 }
 function notify(ctx, message, type) {
@@ -4217,6 +5281,7 @@ export {
   splitCodeFences,
   transformAskUserQuestionForPi,
   transformSkillDispatchForPi,
+  transformWorkflowDispatchForPi,
   transformSubagentDispatchForPi,
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
@@ -4245,6 +5310,9 @@ export {
   isSourceWritingUnit,
   resolveExpectedUnitRoot,
   prepareUnitRoot,
+  writeToolContractSnapshot,
+  compileToolContracts,
+  verifyToolContractSnapshot,
   createAutoOrchestrator,
   start,
   advance,

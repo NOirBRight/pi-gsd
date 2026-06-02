@@ -114,7 +114,7 @@ Parse REVIEW.md frontmatter to check status and extract context for --auto loop:
 
 ```bash
 # Parse status field
-REVIEW_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" node -e "
+REVIEW_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e "
   const fs = require('fs');
   const content = fs.readFileSync(process.env.REVIEW_PATH, 'utf-8');
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -140,7 +140,7 @@ Warning: Could not parse REVIEW.md status. Proceeding with fix attempt.
 Extract review depth for --auto re-review:
 
 ```bash
-REVIEW_DEPTH=$(REVIEW_PATH="${REVIEW_PATH}" node -e "
+REVIEW_DEPTH=$(REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e "
   const fs = require('fs');
   const content = fs.readFileSync(process.env.REVIEW_PATH, 'utf-8');
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -159,7 +159,7 @@ Extract original review file list for --auto re-review scope persistence:
 REVIEW_FILES_ARRAY=()
 while IFS= read -r line; do
   [ -n "$line" ] && REVIEW_FILES_ARRAY+=("$line")
-done < <(REVIEW_PATH="${REVIEW_PATH}" node -e "
+done < <(REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e "
   const fs = require('fs');
   const content = fs.readFileSync(process.env.REVIEW_PATH, 'utf-8');
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -197,7 +197,7 @@ echo "Fix scope: ${FIX_SCOPE}"
 Use Agent() to spawn agent:
 
 ```text
-Agent(subagent_type="gsd-code-fixer", prompt="
+Use the Pi subagent tool: subagent({agent: "gsd-code-fixer", task: "
 <files_to_read>
 ${REVIEW_PATH}
 </files_to_read>
@@ -212,7 +212,7 @@ iteration: 1
 </config>
 
 Read REVIEW.md findings, apply fixes, commit each atomically, write REVIEW-FIX.md. Do NOT commit REVIEW-FIX.md (orchestrator handles that).
-")
+"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -280,7 +280,7 @@ if [ "$AUTO_MODE" = "true" ]; then
     
     # Spawn gsd-code-reviewer agent to re-review
     # (This overwrites REVIEW_PATH with latest review state)
-    Agent(subagent_type="gsd-code-reviewer", prompt="
+    Use the Pi subagent tool: subagent({agent: "gsd-code-reviewer", task: "
 <config>
 depth: ${REVIEW_DEPTH}
 phase_dir: ${PHASE_DIR}
@@ -290,11 +290,11 @@ ${FILES_CONFIG}
 
 Re-review the phase at ${REVIEW_DEPTH} depth. Write findings to ${REVIEW_PATH}.
 Do NOT commit the output — the orchestrator handles that.
-")
+"}). Wait for the subagent result before continuing this workflow.
     # ORCHESTRATOR RULE — CODEX RUNTIME: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result before proceeding.
     
     # Check new REVIEW.md status
-    NEW_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" node -e "
+    NEW_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e "
       const fs = require('fs');
       const content = fs.readFileSync(process.env.REVIEW_PATH, 'utf-8');
       const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -314,7 +314,7 @@ Do NOT commit the output — the orchestrator handles that.
     # Still has issues — spawn fixer again
     echo "Issues remain. Applying fixes for iteration ${ITERATION}..."
     
-    Agent(subagent_type="gsd-code-fixer", prompt="
+    Use the Pi subagent tool: subagent({agent: "gsd-code-fixer", task: "
 <files_to_read>
 ${REVIEW_PATH}
 </files_to_read>
@@ -329,7 +329,7 @@ iteration: ${ITERATION}
 </config>
 
 Read REVIEW.md findings, apply fixes, commit each atomically, write REVIEW-FIX.md (overwrite previous). Do NOT commit REVIEW-FIX.md.
-")
+"}). Wait for the subagent result before continuing this workflow.
     # ORCHESTRATOR RULE — CODEX RUNTIME: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result before proceeding.
     
     # Check if fixer succeeded
@@ -360,7 +360,7 @@ After ALL iterations complete (or single pass in non-auto mode), validate and co
 ```bash
 if [ -f "${FIX_REPORT_PATH}" ]; then
   # Validate REVIEW-FIX.md has valid YAML frontmatter with status field
-  HAS_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" node -e "
+  HAS_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e "
     const fs = require('fs');
     const content = fs.readFileSync(process.env.FIX_REPORT_PATH, 'utf-8');
     const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -417,7 +417,7 @@ Extract frontmatter fields:
 
 ```bash
 # Extract only the YAML frontmatter block (between first two --- lines)
-FIX_FRONTMATTER=$(REVIEW_PATH="${REVIEW_PATH}" node -e "
+FIX_FRONTMATTER=$(REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e "
   const fs = require('fs');
   const content = fs.readFileSync(process.env.FIX_REPORT_PATH, 'utf-8');
   const match = content.match(/^---\n([\s\S]*?)\n---/);

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveGsdConfigSource } from "../settings-bridge/source.js";
 import { loadOfficialWorkflowConfig } from "./official-config.js";
 import type { OrchestrationUnit, QueueBuildInput, QueueBuildResult, ResolvedWorkflowSettings, UnitType, WorkflowSettingSource } from "./types.js";
 
@@ -27,13 +28,20 @@ export function resolveWorkflowSettings(options: { cwd?: string; configPath?: st
   } as ResolvedWorkflowSettings["workflow"];
   const sources = Object.fromEntries(Object.keys(workflow).map((key) => [key, "default"])) as Record<WorkflowKey, WorkflowSettingSource>;
   const rawWorkflow: Record<string, unknown> = { ...officialConfig.defaults.workflow };
-  const configPath = options.configPath ?? join(options.cwd ?? process.cwd(), ".planning", "config.json");
-  const fallbackConfigPath = options.configPath ? undefined : join(options.cwd ?? process.cwd(), "config.json");
-  const actualConfigPath = existsSync(configPath) ? configPath : fallbackConfigPath && existsSync(fallbackConfigPath) ? fallbackConfigPath : undefined;
 
-  if (actualConfigPath) {
-    const config = readConfig(actualConfigPath);
-    const configWorkflow = isRecord(config) && isRecord(config.workflow) ? config.workflow : {};
+  // Use the shared Settings Bridge source resolver (D-13) to honor
+  // active-workstream precedence and produce source path/kind metadata.
+  const configSource = resolveGsdConfigSource({
+    cwd: options.cwd ?? process.cwd(),
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+  });
+
+  if (configSource.parseError) {
+    throw new OrchestratorSettingsError(`Could not read orchestrator settings from ${configSource.path ?? "resolved config source"}: ${configSource.parseError}`);
+  }
+
+  if (configSource.config) {
+    const configWorkflow = isRecord(configSource.config) && isRecord(configSource.config.workflow) ? configSource.config.workflow : {};
     Object.assign(rawWorkflow, configWorkflow);
     applyKnownWorkflowConfig(configWorkflow, workflow, sources);
   }
@@ -48,6 +56,12 @@ export function resolveWorkflowSettings(options: { cwd?: string; configPath?: st
       schemaKeys: officialConfig.schema.workflowKeys,
     },
     sources,
+    settingsSource: {
+      path: configSource.path,
+      kind: configSource.kind,
+      hash: configSource.hash,
+      mtimeMs: configSource.mtimeMs,
+    },
   };
 }
 

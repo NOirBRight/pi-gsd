@@ -82,6 +82,12 @@ export type ResolvedWorkflowSettings = {
     schemaKeys?: string[];
   };
   sources?: Partial<Record<keyof ResolvedWorkflowSettings["workflow"], WorkflowSettingSource>>;
+  settingsSource?: {
+    path?: string;
+    kind: string;
+    hash?: string;
+    mtimeMs?: number;
+  };
 };
 
 export type QueueBuildInput = {

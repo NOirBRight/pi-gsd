@@ -54,6 +54,21 @@ describe("orchestrator settings", () => {
     expect(result.units.every((unit) => unit.id.startsWith("09:"))).toBe(true);
   });
 
+  it("does not enqueue code-review-fix before code-review reports issues", () => {
+    const result = buildUnitQueue({ mode: "chain", phase: "09" });
+
+    expect(result.units.map((unit) => unit.type)).toEqual([
+      "discuss",
+      "research",
+      "plan",
+      "plan-check",
+      "execute",
+      "code-review",
+      "verify",
+      "closeout",
+    ]);
+  });
+
   it("attaches upstream args for chain mode", () => {
     const result = buildUnitQueue({
       mode: "chain",
@@ -289,6 +304,52 @@ describe("orchestrator settings", () => {
       requiresNyquistValidation: true,
       isAiPhase: true,
     });
+  });
+
+  it("resolves active-workstream config when .planning/active-workstream points to a slug", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-active-workstream-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(join(root, ".planning", "active-workstream"), "feature-x", "utf8");
+    mkdirSync(join(root, ".planning", "workstreams", "feature-x"), { recursive: true });
+    writeFileSync(join(root, ".planning", "workstreams", "feature-x", "config.json"), JSON.stringify({ workflow: { verifier: false, code_review: false } }), "utf8");
+    writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { verifier: true, code_review: true } }), "utf8");
+    writeFileSync(join(root, "config.json"), JSON.stringify({ workflow: { verifier: true } }), "utf8");
+
+    const settings = resolveWorkflowSettings({ cwd: root });
+
+    expect(settings.workflow.verifier).toBe(false);
+    expect(settings.workflow.code_review).toBe(false);
+    expect(settings.settingsSource).toMatchObject({ kind: "active-workstream" });
+    expect(settings.settingsSource?.path?.replace(/\\/g, "/")).toContain(".planning/workstreams/feature-x/config.json");
+  });
+
+  it("falls back to .planning/config.json when active-workstream slug has no config", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-active-workstream-missing-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(join(root, ".planning", "active-workstream"), "missing-slug", "utf8");
+    writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { verifier: true } }), "utf8");
+
+    const settings = resolveWorkflowSettings({ cwd: root });
+
+    expect(settings.workflow.verifier).toBe(true);
+    expect(settings.settingsSource).toMatchObject({ kind: "planning-config" });
+  });
+
+  it("includes source path/kind/hash/mtime in settingsSource", () => {
+    const cwd = writeConfig({ verifier: false });
+    const settings = resolveWorkflowSettings({ cwd });
+    expect(settings.settingsSource?.kind).toBe("root-config");
+    expect(settings.settingsSource?.path?.replace(/\\/g, "/")).toMatch(/config\.json$/);
+    expect(settings.settingsSource?.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(typeof settings.settingsSource?.mtimeMs).toBe("number");
+  });
+
+  it("throws instead of silently falling back to defaults when selected config is malformed", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-malformed-config-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(join(root, ".planning", "config.json"), "{not valid json", "utf8");
+
+    expect(() => resolveWorkflowSettings({ cwd: root })).toThrow(/Could not read orchestrator settings/);
   });
 
   it("pauses for user when a required phase signal conflicts with disabled settings", () => {

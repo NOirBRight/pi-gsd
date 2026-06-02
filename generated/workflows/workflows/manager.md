@@ -154,8 +154,8 @@ Ask user via AskUserQuestion:
 - **options:** "Verify work" / "Complete milestone" / "Exit manager"
 
 Handle responses:
-- "Verify work": `Skill("gsd-verify-work")`  then loop to dashboard.
-- "Complete milestone": `Skill("gsd-complete-milestone")` then exit.
+- "Verify work": `Invoke /gsd-verify-work in Pi`  then loop to dashboard.
+- "Complete milestone": `Invoke /gsd-complete-milestone in Pi` then exit.
 - "Exit manager": Go to exit step.
 
 **If NOT all_complete**, build compound options from `recommended_actions`:
@@ -232,7 +232,7 @@ When the user selects a compound option:
 2. **Then run the inline discuss:**
 
 ```
-Skill("gsd-discuss-phase", args="{PHASE_NUM} {manager_flags.discuss}")
+Invoke /gsd-discuss-phase {PHASE_NUM} {manager_flags.discuss} in Pi
 ```
 
 After discuss completes, loop back to dashboard step (background agents continue running).
@@ -242,7 +242,7 @@ After discuss completes, loop back to dashboard step (background agents continue
 Discussion is interactive — needs user input. Run inline with any configured flags:
 
 ```
-Skill("gsd-discuss-phase", args="{PHASE_NUM} {manager_flags.discuss}")
+Invoke /gsd-discuss-phase {PHASE_NUM} {manager_flags.discuss} in Pi
 ```
 
 After discuss completes, loop back to dashboard step.
@@ -263,7 +263,7 @@ Goal: {goal}
 Manager flags: {manager_flags.plan}
 
 Run the plan-phase Skill with any configured manager flags:
-Skill(\"gsd-plan-phase\", args=\"{N} --auto {manager_flags.plan}\")
+Invoke /gsd-plan-phase {N} --auto {manager_flags.plan} in Pi
 
 This delegates to the full plan-phase pipeline including local patches, research, plan-checker, and all quality gates.
 
@@ -297,7 +297,7 @@ Goal: {goal}
 Manager flags: {manager_flags.execute}
 
 Run the execute-phase Skill with any configured manager flags:
-Skill(\"gsd-execute-phase\", args=\"{N} {manager_flags.execute}\")
+Invoke /gsd-execute-phase {N} {manager_flags.execute} in Pi
 
 This delegates to the full execute-phase pipeline including local patches, branching, wave-based execution, verification, and all quality gates.
 
@@ -342,8 +342,8 @@ Classify the error:
 - Display the error clearly, then offer to fix it:
   - **question:** "Phase {N} failed — permission denied for `{tool_or_command}`. Want me to add it to settings.local.json so it's allowed?"
   - **options:** "Add permission and retry" / "Run this phase inline instead" / "Skip and continue"
-  - "Add permission and retry": Use `Skill("update-config")` to add the permission to `settings.local.json`, then re-spawn the background agent. Loop to dashboard.
-  - "Run this phase inline instead": Dispatch the same action inline via the appropriate Skill — use `Skill("gsd-plan-phase", args="{N}")` if the failed action was planning, or `Skill("gsd-execute-phase", args="{N}")` if the failed action was execution. Loop to dashboard after.
+  - "Add permission and retry": Use `Invoke /update-config in Pi` to add the permission to `settings.local.json`, then re-spawn the background agent. Loop to dashboard.
+  - "Run this phase inline instead": Dispatch the same action inline via the appropriate Skill — use `Invoke /gsd-plan-phase {N} in Pi` if the failed action was planning, or `Invoke /gsd-execute-phase {N} in Pi` if the failed action was execution. Loop to dashboard after.
   - "Skip and continue": Loop to dashboard (phase stays in current state).
 
 **Other errors** (git lock, file conflict, logic error, etc.):
@@ -351,7 +351,7 @@ Classify the error:
   - **question:** "Background agent for Phase {N} encountered an issue: {error}. What next?"
   - **options:** "Retry" / "Run inline instead" / "Skip and continue" / "View details"
   - "Retry": Re-spawn the same background agent. Loop to dashboard.
-  - "Run inline instead": Dispatch the action inline via the appropriate Skill — use `Skill("gsd-plan-phase", args="{N}")` if the failed action was planning, or `Skill("gsd-execute-phase", args="{N}")` if the failed action was execution. Loop to dashboard after.
+  - "Run inline instead": Dispatch the action inline via the appropriate Skill — use `Invoke /gsd-plan-phase {N} in Pi` if the failed action was planning, or `Invoke /gsd-execute-phase {N} in Pi` if the failed action was execution. Loop to dashboard after.
   - "Skip and continue": Loop to dashboard (phase stays in current state).
   - "View details": Read STATE.md blockers section, display, then re-present options.
 

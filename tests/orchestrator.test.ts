@@ -82,7 +82,7 @@ describe("orchestrator state machine", () => {
     });
 
     const result = advanceOrchestration(snapshot, {
-      gates: { reconcileBeforeDispatch: passReconcile },
+      gates: { reconcileBeforeDispatch: passReconcile, validateToolContract: pass("validateToolContract", []) },
       dispatch: () => ({ ok: true, messages: ["## ISSUES FOUND\n- blocker"], outcome: { marker: "issues_found" } }),
     });
 
@@ -105,7 +105,7 @@ describe("orchestrator state machine", () => {
     });
 
     const result = advanceOrchestration({ ...snapshot, loopState: { planCheckIterations: 3 } }, {
-      gates: { reconcileBeforeDispatch: passReconcile },
+      gates: { reconcileBeforeDispatch: passReconcile, validateToolContract: pass("validateToolContract", []) },
       dispatch: () => ({ ok: true, messages: ["## ISSUES FOUND\n- still blocked"], outcome: { marker: "issues_found" } }),
     });
 
@@ -114,6 +114,67 @@ describe("orchestrator state machine", () => {
     expect(result.snapshot?.currentUnit?.type).toBe("plan-check");
     expect(result.messages.join("\n")).toContain("Plan checker reached maximum iterations");
   });
+
+  it("continues to verify when code-review is clean", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-code-review-clean-"));
+    mkdirSync(join(cwd, ".planning", "phases", "09-fixture"), { recursive: true });
+    const reviewPath = join(cwd, ".planning", "phases", "09-fixture", "09-REVIEW.md");
+    writeFileSync(reviewPath, "---\nstatus: clean\n---\n\n# Review\n", "utf8");
+    const snapshot = startOrchestration({
+      phase: "09",
+      mode: "chain",
+      settings: { ...settings, workflow: { ...settings.workflow, worktrees: false } },
+      units: [unit("code-review"), unit("verify")],
+      cwd,
+    });
+
+    const result = advanceOrchestration(snapshot, {
+      gates: { reconcileBeforeDispatch: passReconcile },
+      dispatch: () => ({ ok: true, messages: ["review clean"], written: [reviewPath] }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.snapshot?.currentUnit?.type).toBe("verify");
+  });
+
+  it("blocks invalid Tool Contract dispatch before dispatch", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-contract-invalid-"));
+    const snapshot = startOrchestration({ phase: "12", mode: "chain", settings, units: [unit("plan", "12")], cwd });
+    let dispatchCount = 0;
+
+    // Simulate a fail-closed Tool Contract gate: this is what the real
+    // gate emits when the verified snapshot excludes the requested Unit type
+    // or the dispatch-critical fields are invalid (D-05, D-07).
+    const failContract = (): GateResult => ({
+      ok: false,
+      gate: "validateToolContract",
+      reason: "dispatch-contract-invalid",
+      retryable: false,
+      resumeHint: "Fix the dispatch contract before continuing.",
+      evidence: ["failedField:unitType", `unitId:${unit("plan", "12").id}`],
+      recoveryDecision: {
+        class: "dispatch-contract-invalid",
+        action: "stop",
+        message: "Dispatch contract was invalid.",
+        remediation: "Fix the dispatch contract before continuing.",
+      },
+      exitReason: "dispatch-contract-invalid",
+    });
+
+    const result = advanceOrchestration(snapshot, {
+      gates: { reconcileBeforeDispatch: passReconcile, validateToolContract: failContract },
+      dispatch: () => {
+        dispatchCount += 1;
+        return { ok: true, messages: ["should not dispatch"] };
+      },
+    });
+
+    expect(dispatchCount).toBe(0);
+    expect(result.ok).toBe(false);
+    expect(result.snapshot?.status).toBe("stopped");
+    expect(result.events?.find((event) => event.type === "gate_failed")).toEqual(expect.objectContaining({ exitReason: "dispatch-contract-invalid", recoveryDecision: expect.objectContaining({ class: "dispatch-contract-invalid", action: "stop" }) }));
+  });
+
 
   it("blocks invalid execute root with typed worktree recovery before dispatch", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-invalid-root-"));
@@ -324,7 +385,7 @@ describe("orchestrator state machine", () => {
   it("post-dispatch artifact gate failure prevents advancing and records evidence", () => {
     const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute"), unit("verify")] });
     const result = advanceOrchestration(snapshot, {
-      gates: { reconcileBeforeDispatch: passReconcile },
+      gates: { reconcileBeforeDispatch: passReconcile, prepareUnitRoot: pass("prepareUnitRoot", []) },
       dispatch: () => ({ ok: true, messages: ["dispatched"] }),
       postDispatchGate: () => ({ ok: false, gate: "artifact", reason: "gate-failed", retryable: false, resumeHint: "create SUMMARY.md", evidence: ["missing SUMMARY"] }),
     });
@@ -521,6 +582,13 @@ describe("Unit dispatch target", () => {
       expect(existsSync(join(process.cwd(), target.prompt)), `${type} prompt ${target.prompt}`).toBe(true);
       if (target.agent) expect(existsSync(join(process.cwd(), "generated", "agents", `${target.agent}.md`)), `${type} agent ${target.agent}`).toBe(true);
     }
+  });
+
+  it("maps plan-check to the generated plan review convergence prompt", () => {
+    const target = resolveUnitDispatchTarget(unit("plan-check"));
+
+    expect(target.agent).toBeUndefined();
+    expect(target.prompt).toBe("generated/prompts/gsd-plan-review-convergence.md");
   });
 
   it("validates dispatch resources from resourceRoot while using project cwd for execution", () => {

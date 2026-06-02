@@ -9,6 +9,7 @@ import { loadOfficialWorkflowConfig } from "./orchestrator/official-config.js";
 import { resolveOfficialPackage } from "./official.js";
 import { resolvePiSubagentsPackage } from "./pi-subagents.js";
 import { resolveRpivPackage, RPIV_PACKAGE_NAME } from "./rpiv.js";
+import { verifyToolContractSnapshot } from "./tool-contract/index.js";
 
 export type AclCheckOptions = {
   /** Override the temp root path (defaults to buildPiSubagentsTempRoot()) */
@@ -184,6 +185,11 @@ export function runDoctor(options: DoctorOptions): DoctorResult {
       });
       ok = ok && workflowsOk;
       if (workflowsOk) messages.push("generated workflows: ok");
+      const dispatchSyntaxOk = checkGeneratedWorkflowDispatchSyntax({
+        actualDir: options.generatedWorkflowsDir,
+        messages,
+      });
+      ok = ok && dispatchSyntaxOk;
     }
 
     if (options.generatedAgentsDir) {
@@ -209,6 +215,29 @@ export function runDoctor(options: DoctorOptions): DoctorResult {
       const syncScope = options.agentSyncScope ?? "project";
       messages.push(syncResult.ok ? `${syncScope} synced agents: ok` : `${syncScope} synced agents: stale or missing`);
       messages.push(...syncResult.messages);
+    }
+
+    // Tool Contract snapshot verification (D-03, D-06): fail on dispatch-critical
+    // drift, warn only for prose/docs drift. The snapshot itself is optional
+    // for doctor — projects that use `generate --out` (legacy) skip snapshot
+    // generation. The pre-dispatch validateToolContract gate enforces the
+    // contract for native auto orchestration (D-05).
+    const contractResult = verifyToolContractSnapshot({ cwd: options.startDir ?? process.cwd() });
+    if (contractResult.failures.length > 0) {
+      ok = false;
+      messages.push(`tool contracts: invalid (${contractResult.failures.length} dispatch-critical drift)`);
+      for (const failure of contractResult.failures) {
+        messages.push(`  unit:${failure.unitType} field:${failure.failedField}`);
+      }
+    } else if (contractResult.warnings.length > 0) {
+      messages.push(`tool contracts: warning (${contractResult.warnings.length} prose/docs drift)`);
+      for (const warning of contractResult.warnings) {
+        messages.push(`  unit:${warning.unitType} field:${warning.field}`);
+      }
+    } else if (contractResult.snapshotPresent) {
+      messages.push("tool contracts: ok");
+    } else {
+      messages.push("tool contracts: skipped (no snapshot; run `npm run generate` to enable)");
     }
 
     return { ok, messages };
@@ -299,6 +328,35 @@ function compareGeneratedFiles(options: { expectedPaths: string[]; expectedDir?:
   }
 
   return ok;
+}
+
+function checkGeneratedWorkflowDispatchSyntax(options: { actualDir: string; messages: string[] }) {
+  const residualPatterns = [
+    /Skill\(\s*(?:skill\s*=|["'][a-z0-9-]+["'])/,
+    /Workflow\(\s*workflow\s*=/,
+    /SlashCommand\(/,
+    /^\s*Agent\(\s*subagent_type\s*=\s*["']/,
+  ];
+  const findings: string[] = [];
+
+  for (const fileName of readGeneratedMarkdownFileNames(options.actualDir)) {
+    const filePath = join(options.actualDir, fileName);
+    const content = readFileSync(filePath, "utf8");
+    const lines = normalizeLineEndings(content).split("\n");
+    for (const [index, line] of lines.entries()) {
+      if (residualPatterns.some((pattern) => pattern.test(line))) {
+        findings.push(`${fileName}:${index + 1}`);
+      }
+    }
+  }
+
+  if (findings.length > 0) {
+    options.messages.push(`dispatch syntax drift: ${findings.join(", ")}`);
+    return false;
+  }
+
+  options.messages.push("generated workflow dispatch syntax: ok");
+  return true;
 }
 
 function isMissingFileError(error: unknown) {

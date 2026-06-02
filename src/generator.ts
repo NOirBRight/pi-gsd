@@ -9,8 +9,10 @@ import {
   transformGsdRunLauncher,
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi,
+  transformWorkflowDispatchForPi,
 } from "./prompt-transform.js";
 import { OFFICIAL_PACKAGE_NAME } from "./official.js";
+import { compileToolContracts, writeToolContractSnapshot } from "./tool-contract/index.js";
 import { generateAgents, type GenerateAgentsResult } from "./agent-generator.js";
 import { assertSafeOutDir } from "./safe-output.js";
 import { rewriteWorkflowPaths } from "./rewrite-workflow-paths.js";
@@ -60,6 +62,33 @@ function applyPromptTransforms(body: string, _packageName: string): string {
       ),
     ),
   );
+}
+
+/**
+ * Workflow files contain executable pseudo-code inside markdown fences, so
+ * dispatch transforms intentionally run across the full workflow body.
+ */
+function applyWorkflowTransforms(body: string, packageName: string, workflowPath: string): string {
+  const transformed = normalizeWorkflowDispatchInstructionPhrases(applyEscapedWorkflowDispatchTransforms(
+    applyPromptTransforms(transformWorkflowDispatchForPi(body), packageName),
+  ));
+  return workflowPath === "workflows/code-review-fix.md" ? fixReviewFixReportPathEnv(transformed) : transformed;
+}
+
+function applyEscapedWorkflowDispatchTransforms(body: string): string {
+  return body.replace(/\b(?:Skill|Workflow|SlashCommand|Agent)\((?:[^()\\]|\\.)*\)/g, (call) => {
+    const normalized = call.replace(/\\"/g, '"').replace(/\\'/g, "'");
+    const transformed = transformWorkflowDispatchForPi(normalized);
+    return transformed === normalized ? call : transformed;
+  });
+}
+
+function normalizeWorkflowDispatchInstructionPhrases(body: string): string {
+  return body.replace(/\binvoke Invoke\s+/g, "invoke ");
+}
+
+function fixReviewFixReportPathEnv(body: string): string {
+  return body.replace(/\bREVIEW_PATH="\$\{REVIEW_PATH\}" node -e/g, 'REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e');
 }
 
 export function generatePrompts(options: GeneratePromptsOptions): GeneratePromptsResult {
@@ -140,12 +169,9 @@ export function generateWorkflows(options: GenerateWorkflowsOptions): GenerateWo
       const sourcePath = join(dir, relativePath);
       const source = readFileSync(sourcePath, "utf8");
 
-      // Transform workflow paths: rewrite node_modules absolute paths to generated/ relative paths
-      const pathRewritten = rewriteWorkflowPaths(source, OFFICIAL_PACKAGE_NAME)
-        .replace(/Skill\(skill=/g, "Skill(");
-
-      // Apply the same prompt transform pipeline as command prompts
-      const transformed = applyPromptTransforms(pathRewritten, OFFICIAL_PACKAGE_NAME);
+      // Rewrite internal paths first, then apply workflow-specific dispatch transforms.
+      const pathRewritten = rewriteWorkflowPaths(source, OFFICIAL_PACKAGE_NAME);
+      const transformed = applyWorkflowTransforms(pathRewritten, OFFICIAL_PACKAGE_NAME, `${prefix}/${relativePath.replace(/\\/g, "/")}`);
 
       // Write to generated/workflows/{prefix}/{relativePath}
       const targetPath = join(outDir, prefix, relativePath);
@@ -164,10 +190,18 @@ export function generateAll(options: GenerateAllOptions): GenerateAllResult {
   const agents = generateAgents({ officialRoot: options.officialRoot, outDir: options.agentsDir, safeRoot: options.safeRoot });
   const workflowsDir = join(dirname(options.promptsDir), "workflows");
   const workflows = generateWorkflows({ officialRoot: options.officialRoot, outDir: workflowsDir, safeRoot: options.safeRoot });
+  const projectRoot = options.safeRoot ?? dirname(resolve(options.promptsDir));
   writeOfficialVersionStamp({
     officialRoot: resolve(options.officialRoot),
     generatedRoot: dirname(resolve(options.promptsDir)),
   });
+  // Compile and write the deterministic Tool Contract snapshot after prompts,
+  // agents, and workflows are generated (D-01, D-04). This is the single
+  // runtime source of truth for the pre-dispatch validateToolContract gate.
+  // `safeRoot` is the project root (the cwd that owns the `generated/`
+  // directory), so the snapshot lands at `<projectRoot>/generated/tool-contracts.json`.
+  const contractSnapshot = compileToolContracts({ cwd: projectRoot });
+  writeToolContractSnapshot(contractSnapshot, { cwd: projectRoot });
   return { prompts, agents, workflows };
 }
 

@@ -268,6 +268,23 @@ export function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
+/**
+ * Build a concise routing summary for the Settings Bridge context (D-11).
+ * Returns a one-line summary that names the profile and required tiers
+ * without dumping every agent in the catalog.
+ */
+export function buildModelRoutingSummary(catalog: ModelCatalog, profile: GsdProfile | "inherit" | null | undefined): string {
+  if (!profile) return "inherit (uses Pi session model)";
+  if (profile === "inherit") return "inherit (uses Pi session model)";
+  const tiers = getRequiredTiers(profile);
+  const tierAgents = getProfileTierAgents(catalog, profile);
+  const parts = tiers.map((tier) => {
+    const count = tierAgents.get(tier)?.length ?? 0;
+    return `${tierLabels[tier].label.toLowerCase()}:${count}`;
+  });
+  return `${profile} (${parts.join(", ")})`;
+}
+
 export function buildCurrentStatus(
   currentConfig: { profile: string | null; tierModels: TierModelMap | null },
   catalog: ModelCatalog,

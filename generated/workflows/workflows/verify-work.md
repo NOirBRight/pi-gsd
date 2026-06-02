@@ -565,8 +565,7 @@ Display:
 Spawn gsd-planner in --gaps mode:
 
 ```
-Agent(
-  prompt="""
+Use the Pi subagent tool: subagent({agent: "gsd-planner", task: "\"\"
 <planning_context>
 
 **Phase:** {phase_number}
@@ -586,11 +585,7 @@ ${AGENT_SKILLS_PLANNER}
 Output consumed by /gsd-execute-phase
 Plans must be executable prompts.
 </downstream_consumer>
-""",
-  subagent_type="gsd-planner",
-  model="{planner_model}",
-  description="Plan gap fixes for Phase {phase}"
-)
+\"\""}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -617,8 +612,7 @@ Initialize: `iteration_count = 1`
 Spawn gsd-plan-checker:
 
 ```
-Agent(
-  prompt="""
+Use the Pi subagent tool: subagent({agent: "gsd-plan-checker", task: "\"\"
 <verification_context>
 
 **Phase:** {phase_number}
@@ -637,11 +631,7 @@ Return one of:
 - ## VERIFICATION PASSED — all checks pass
 - ## ISSUES FOUND — structured issue list
 </expected_output>
-""",
-  subagent_type="gsd-plan-checker",
-  model="{checker_model}",
-  description="Verify Phase {phase} fix plans"
-)
+\"\""}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -661,8 +651,7 @@ Display: `Sending back to planner for revision... (iteration {N}/3)`
 Spawn gsd-planner with revision context:
 
 ```
-Agent(
-  prompt="""
+Use the Pi subagent tool: subagent({agent: "gsd-planner", task: "\"\"
 <revision_context>
 
 **Phase:** {phase_number}
@@ -683,11 +672,7 @@ ${AGENT_SKILLS_PLANNER}
 Read existing PLAN.md files. Make targeted updates to address checker issues.
 Do NOT replan from scratch unless issues are fundamental.
 </instructions>
-""",
-  subagent_type="gsd-planner",
-  model="{planner_model}",
-  description="Revise Phase {phase} plans"
-)
+\"\""}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.

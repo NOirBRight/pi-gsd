@@ -400,6 +400,9 @@ function unquote(s: string): string | null {
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
     return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
   }
+  if (trimmed.startsWith('\\"') && trimmed.endsWith('\\"')) {
+    return trimmed.slice(2, -2).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
   if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
     return trimmed.slice(1, -1);
   }
@@ -559,7 +562,7 @@ export function transformSkillDispatchForPi(input: string): string {
   let changed = false;
   const result = segments.map(({ segment, isCode }) => {
     if (isCode) return segment;
-    const transformed = rewriteSkillDispatchInSegment(segment);
+    const transformed = rewriteSkillDispatchInSegment(segment, formatSkillDispatchInstruction);
     if (transformed !== segment) changed = true;
     return transformed;
   }).join("");
@@ -575,48 +578,179 @@ export function transformSkillDispatchForPi(input: string): string {
  *   - Single quotes: Skill(skill='gsd-xxx', args='yyy')
  *   - Non-gsd prefix: Skill(skill="update-config")
  */
-function rewriteSkillDispatchInSegment(segment: string): string {
-  // Pattern 1: Skill with escaped double quotes (inside prompt="...")
-  //   Skill(skill=\"xxx\", args=\"yyy\")
-  segment = segment.replace(
-    /Skill\(skill=\\"([a-z0-9-]+)\\"(?:,\s*args=\\"([^\\"]*)\\")?\)/g,
-    (_match, name: string, args: string | undefined) => {
-      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
-      const invokePart = args
-        ? `invoke via slash command ${slashCmd} in Pi`
-        : `invoke via slash command /${name} in Pi`;
-      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
-    },
-  );
+function rewriteSkillDispatchInSegment(
+  segment: string,
+  formatter: (dispatch: ParsedDispatch) => string,
+): string {
+  return rewriteBalancedCalls(segment, "Skill", (argsText) => {
+    const dispatch = parseDispatchArgs(argsText, "skill");
+    return dispatch ? formatter(dispatch) : null;
+  });
+}
 
-  // Pattern 2: Skill with single quotes
-  //   Skill(skill='xxx', args='yyy')
-  segment = segment.replace(
-    /Skill\(skill='([a-z0-9-]+)'(?:,\s*args='([^']*)')?\)/g,
-    (_match, name: string, args: string | undefined) => {
-      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
-      const invokePart = args
-        ? `invoke via slash command ${slashCmd} in Pi`
-        : `invoke via slash command /${name} in Pi`;
-      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
-    },
-  );
+interface ParsedDispatch {
+  name: string;
+  args?: string;
+  isPositional: boolean;
+}
 
-  // Pattern 3: Skill with double quotes (standard form)
-  //   Skill(skill="xxx", args="yyy")  or  Skill(skill="xxx")
-  //   Also handles non-gsd prefix like Skill(skill="update-config")
-  segment = segment.replace(
-    /Skill\(skill="([a-z0-9-]+)"(?:,\s*args="([^"]*)")?\)/g,
-    (_match, name: string, args: string | undefined) => {
-      const slashCmd = args ? `/${name} ${args}` : `/${name}`;
-      const invokePart = args
-        ? `invoke via slash command ${slashCmd} in Pi`
-        : `invoke via slash command /${name} in Pi`;
-      return `Use the /${name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
-    },
-  );
+function formatSkillDispatchInstruction(dispatch: ParsedDispatch): string {
+  if (dispatch.isPositional) {
+    return formatWorkflowSkillDispatchInstruction(dispatch);
+  }
 
-  return segment;
+  const slashCmd = formatSlashInvocation(dispatch);
+  const invokePart = dispatch.args
+    ? `invoke via slash command ${slashCmd} in Pi`
+    : `invoke via slash command /${dispatch.name} in Pi`;
+  return `Use the /${dispatch.name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
+}
+
+function formatWorkflowSkillDispatchInstruction(dispatch: ParsedDispatch): string {
+  return `Invoke ${formatSlashInvocation(dispatch)} in Pi`;
+}
+
+function formatSlashInvocation(dispatch: ParsedDispatch): string {
+  return dispatch.args ? `/${dispatch.name} ${dispatch.args}` : `/${dispatch.name}`;
+}
+
+function parseDispatchArgs(argsText: string, nameKey: string): ParsedDispatch | null {
+  const tokens = tokenizeTopLevel(argsText);
+  if (tokens.length === 0) return null;
+
+  let name: string | undefined;
+  let args: string | undefined;
+  let isPositional = false;
+
+  const firstPositional = unquote(tokens[0]);
+  if (firstPositional !== null) {
+    name = firstPositional;
+    isPositional = true;
+  }
+
+  for (const token of tokens) {
+    const named = parseNamedAssignment(token);
+    if (!named) continue;
+
+    if (named.key === nameKey) {
+      name = named.value;
+    } else if (named.key === "args") {
+      args = named.value;
+    }
+  }
+
+  return name ? { name, args, isPositional } : null;
+}
+
+function parseNamedAssignment(token: string): { key: string; value: string } | null {
+  const match = token.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]+)$/);
+  if (!match) return null;
+
+  const value = unquote(match[2].trim());
+  if (value === null) return null;
+  return { key: match[1], value };
+}
+
+function rewriteBalancedCalls(
+  segment: string,
+  functionName: string,
+  transform: (argsText: string) => string | null,
+): string {
+  let result = segment;
+  let safety = 100;
+  let searchFrom = 0;
+  const callPattern = new RegExp(`\\b${functionName}\\s*\\(`);
+
+  while (safety-- > 0) {
+    const match = callPattern.exec(result.slice(searchFrom));
+    if (!match || match.index === undefined) break;
+
+    const callStart = searchFrom + match.index;
+    const argsStart = callStart + match[0].length - 1;
+    const argsText = extractBalancedParens(result, argsStart);
+    if (!argsText) {
+      searchFrom = argsStart + 1;
+      continue;
+    }
+
+    const rewritten = transform(argsText);
+    if (rewritten === null) {
+      searchFrom = argsStart + 1;
+      continue;
+    }
+
+    const callEnd = argsStart + argsText.length + 2;
+    result = result.slice(0, callStart) + rewritten + result.slice(callEnd);
+    searchFrom = callStart + rewritten.length;
+  }
+
+  if (safety <= 0) {
+    console.warn(`[pi-gsd] rewriteBalancedCalls: safety limit reached for ${functionName}`);
+  }
+
+  return result;
+}
+
+/**
+ * Rewrites executable workflow dispatch syntax in both prose and code fences.
+ * Workflow prompts use fenced pseudo-code as executable instructions, so this
+ * transform intentionally does not preserve code-fenced regions.
+ */
+export function transformWorkflowDispatchForPi(input: string): string {
+  let result = rewriteSkillDispatchInSegment(input, formatWorkflowSkillDispatchInstruction);
+
+  result = rewriteBalancedCalls(result, "Workflow", (argsText) => {
+    const dispatch = parseDispatchArgs(argsText, "workflow");
+    if (!dispatch) return null;
+
+    const workflowPath = formatGeneratedWorkflowPath(dispatch.name);
+    const argsPart = dispatch.args ? ` with arguments ${dispatch.args}` : "";
+    return `Read and execute ${workflowPath}${argsPart}`;
+  });
+
+  result = rewriteBalancedCalls(result, "SlashCommand", (argsText) => {
+    const tokens = tokenizeTopLevel(argsText);
+    if (tokens.length === 0) return null;
+
+    const command = unquote(tokens[0]);
+    if (command === null) return null;
+
+    return `Invoke ${normalizeGsdSlashReferences(command)} in Pi`;
+  });
+
+  result = rewriteAgentDispatchInSegment(result);
+
+  return result;
+}
+
+function formatGeneratedWorkflowPath(path: string): string {
+  return path
+    .replace(/^get-shit-done\/workflows\//, "generated/workflows/workflows/")
+    .replace(/^workflows\//, "generated/workflows/workflows/");
+}
+
+function rewriteAgentDispatchInSegment(segment: string): string {
+  return rewriteBalancedCalls(segment, "Agent", (argsText) => {
+    const parsed = parseAgentDispatchArgs(argsText);
+    if (!parsed) return null;
+    const agent = parsed.agentType === "general-purpose" ? "general" : parsed.agentType;
+    return `Use the Pi subagent tool: subagent({agent: "${escapeDoubleQuotedString(agent)}", task: "${escapeDoubleQuotedString(parsed.prompt)}"}). Wait for the subagent result before continuing this workflow.`;
+  });
+}
+
+function parseAgentDispatchArgs(argsText: string): { agentType: string; prompt: string } | null {
+  const tokens = tokenizeTopLevel(argsText);
+  let agentType: string | undefined;
+  let prompt: string | undefined;
+
+  for (const token of tokens) {
+    const named = parseNamedAssignment(token);
+    if (!named) continue;
+    if (named.key === "subagent_type") agentType = named.value;
+    if (named.key === "prompt") prompt = named.value;
+  }
+
+  return agentType && prompt ? { agentType, prompt } : null;
 }
 
 /**

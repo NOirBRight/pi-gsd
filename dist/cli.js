@@ -5,7 +5,7 @@ import {
   runDoctor,
   syncAgents,
   writeOfficialVersionStamp
-} from "./chunk-MYLJCXPV.js";
+} from "./chunk-KDM534GD.js";
 import {
   createAutoOrchestrator,
   createCommandDispatchRunner,
@@ -15,7 +15,7 @@ import {
   isValidPhaseId,
   resolveOfficialPackage,
   resolveWorkflowSettings
-} from "./chunk-VVO6HX3Q.js";
+} from "./chunk-O6URY27T.js";
 
 // src/cli.ts
 import { spawnSync } from "child_process";
