@@ -164,5 +164,20 @@ export function generateAll(options: GenerateAllOptions): GenerateAllResult {
   const agents = generateAgents({ officialRoot: options.officialRoot, outDir: options.agentsDir, safeRoot: options.safeRoot });
   const workflowsDir = join(dirname(options.promptsDir), "workflows");
   const workflows = generateWorkflows({ officialRoot: options.officialRoot, outDir: workflowsDir, safeRoot: options.safeRoot });
+  writeOfficialVersionStamp({
+    officialRoot: resolve(options.officialRoot),
+    generatedRoot: dirname(resolve(options.promptsDir)),
+  });
   return { prompts, agents, workflows };
+}
+
+export function writeOfficialVersionStamp(options: { officialRoot: string; generatedRoot: string }) {
+  const packageJson = JSON.parse(readFileSync(join(options.officialRoot, "package.json"), "utf8")) as { name?: string; version?: string };
+  mkdirSync(options.generatedRoot, { recursive: true });
+  writeFileSync(join(options.generatedRoot, ".official-version.json"), JSON.stringify({
+    packageName: packageJson.name ?? OFFICIAL_PACKAGE_NAME,
+    version: packageJson.version ?? "unknown",
+    officialRoot: options.officialRoot,
+    generatedAt: new Date().toISOString(),
+  }, null, 2), "utf8");
 }

@@ -3,8 +3,9 @@ import {
   generateAll,
   generatePrompts,
   runDoctor,
-  syncAgents
-} from "./chunk-JCRRSCBD.js";
+  syncAgents,
+  writeOfficialVersionStamp
+} from "./chunk-MYLJCXPV.js";
 import {
   createAutoOrchestrator,
   createCommandDispatchRunner,
@@ -14,7 +15,7 @@ import {
   isValidPhaseId,
   resolveOfficialPackage,
   resolveWorkflowSettings
-} from "./chunk-6TFWBYXD.js";
+} from "./chunk-VVO6HX3Q.js";
 
 // src/cli.ts
 import { spawnSync } from "child_process";
@@ -43,7 +44,9 @@ async function runCli(argv, io = defaultIO) {
       const cwd = resolve(options.cwd ?? process.cwd());
       const officialPackage = resolveOfficialPackage({ startDir: cwd });
       if (options.out) {
-        const result2 = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir: resolve(cwd, options.out), safeRoot: cwd });
+        const outDir = resolve(cwd, options.out);
+        const result2 = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir, safeRoot: cwd });
+        writeOfficialVersionStamp({ officialRoot: officialPackage.packageRoot, generatedRoot: dirname(outDir) });
         io.stdout(`generated ${result2.written.length} prompt(s)
 `);
         return 0;

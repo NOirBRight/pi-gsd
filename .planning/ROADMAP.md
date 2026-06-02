@@ -133,7 +133,20 @@ Plans:
 - Telemetry exit reasons use the same taxonomy
 - Table-driven tests cover every known v1.0 triage failure family
 
-**Plans:** 2
+**Plans:** 4/4 plans complete
+
+Plans:
+**Wave 1**
+
+- [x] 11-01-PLAN.md — Recovery taxonomy core plus GateResult/telemetry recovery decisions
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 11-02-PLAN.md — Worktree validation plus lease ownership/stale-reclaim decisions and bounded lease event production
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 11-03-PLAN.md — Orchestrator journal persistence wiring plus integration tests for lease acquire/release/stale-reclaim evidence
 
 #### Phase 12: Tool Contract + Settings Bridge
 
@@ -183,6 +196,6 @@ Plans:
 | 8. Upstream 1.2.0 Upgrade + Package Rename | v2.0 | 4/4 | Complete | 2026-06-01 |
 | 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |
 | 10. State Reconciliation Module | v2.0 | 4/4 | Complete    | 2026-06-01 |
-| 11. Worktree Safety + Recovery Classification | v2.0 | 0/2 | Not started | — |
+| 11. Worktree Safety + Recovery Classification | v2.0 | 4/4 | Complete    | 2026-06-02 |
 | 12. Tool Contract + Settings Bridge | v2.0 | 0/2 | Not started | — |
 | 13. SDK Retirement + v2.0 Release | v2.0 | 0/2 | Not started | — |

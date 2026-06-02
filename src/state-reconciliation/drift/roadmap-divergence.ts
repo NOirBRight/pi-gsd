@@ -13,6 +13,9 @@ export function detectRoadmapDivergence(input: DriftDetectionInput): DriftDetect
 
     const expectedComplete = phase.summaries.length;
     const expectedTotal = phase.plans.length;
+    if (expectedTotal === 0 && expectedComplete === 0 && row.plansComplete === 0 && row.status === "Not started") {
+      continue;
+    }
     const expectedStatus = expectedTotal > 0 && expectedComplete === expectedTotal ? "Complete" : "Executing";
     const diverges = row.plansComplete !== expectedComplete || row.totalPlans !== expectedTotal || row.status !== expectedStatus;
     if (!diverges) continue;

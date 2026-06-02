@@ -52,10 +52,10 @@
   "dependencies": {
     "@earendil-works/pi-tui": "^0.77.0",
     "@opengsd/gsd-core": "1.2.0",
-    "pi-subagents": "github:NOirBRight/pi-subagents#ec7bfe8ac129f658008d508925e81baf3c32c41c"
+    "pi-subagents": "github:NOirBRight/pi-subagents#0511a836a10690416bb3f37c27354daa6a746866"
   },
   "overrides": {
-    "pi-subagents": "github:NOirBRight/pi-subagents#ec7bfe8ac129f658008d508925e81baf3c32c41c"
+    "pi-subagents": "github:NOirBRight/pi-subagents#0511a836a10690416bb3f37c27354daa6a746866"
   },
   "peerDependencies": {
     "@juicesharp/rpiv-ask-user-question": "^1.15.0"

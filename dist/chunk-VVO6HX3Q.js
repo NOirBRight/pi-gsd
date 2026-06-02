@@ -6,9 +6,9 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 });
 
 // src/extension.ts
-import { accessSync, constants as fsConstants, mkdirSync as mkdirSync3, rmSync } from "fs";
+import { accessSync, constants as fsConstants, mkdirSync as mkdirSync4, rmSync } from "fs";
 import { tmpdir } from "os";
-import { dirname as dirname4, join as join12, resolve as resolve4 } from "path";
+import { dirname as dirname5, join as join13, resolve as resolve6 } from "path";
 import { fileURLToPath } from "url";
 
 // src/official.ts
@@ -49,6 +49,8 @@ function resolveOfficialPackage(options = {}) {
   validateRequiredPath("agents", paths.agentsDir, "directory", packageName);
   validateRequiredPath("hooks", paths.hooksDir, "directory", packageName);
   validateRequiredPath("get-shit-done/bin/gsd-tools.cjs", paths.gsdTools, "file", packageName);
+  validateRequiredPath("get-shit-done/bin/shared/config-defaults.manifest.json", paths.configDefaultsManifest, "file", packageName);
+  validateRequiredPath("get-shit-done/bin/shared/config-schema.manifest.json", paths.configSchemaManifest, "file", packageName);
   return {
     packageRoot,
     packageName,
@@ -64,7 +66,9 @@ function buildOfficialPaths(packageRoot) {
     templatesDir: join(packageRoot, "get-shit-done", "templates"),
     agentsDir: join(packageRoot, "agents"),
     hooksDir: join(packageRoot, "hooks"),
-    gsdTools: join(packageRoot, "get-shit-done", "bin", "gsd-tools.cjs")
+    gsdTools: join(packageRoot, "get-shit-done", "bin", "gsd-tools.cjs"),
+    configDefaultsManifest: join(packageRoot, "get-shit-done", "bin", "shared", "config-defaults.manifest.json"),
+    configSchemaManifest: join(packageRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json")
   };
 }
 function readPackageJson(packageJsonPath) {
@@ -769,8 +773,8 @@ ${currentStatus}`,
   }
   if (profile === "clear") {
     if (existsSync2(configPath)) {
-      const { unlinkSync } = await import("fs");
-      unlinkSync(configPath);
+      const { unlinkSync: unlinkSync2 } = await import("fs");
+      unlinkSync2(configPath);
     }
     ctx.ui.notify(`\u2713 Cleared project config \u2192 using global defaults`, "info");
     return;
@@ -991,10 +995,11 @@ function createCommandDispatchRunner(options) {
   return (request) => {
     const command = options.command ?? process.env.PI_GSD_DISPATCH_COMMAND;
     if (!command) return { ok: false, messages: ["PI_GSD_DISPATCH_COMMAND is required for native dispatch"] };
-    const payload = JSON.stringify({ unit: request.unit, snapshot: request.snapshot, target: request.target });
+    const args = request.unit.metadata?.args ?? "";
+    const payload = JSON.stringify({ unit: request.unit, snapshot: request.snapshot, target: request.target, args });
     const child = spawnSync(command, [], {
       cwd: options.cwd,
-      env: { ...process.env, ...request.env, PI_GSD_DISPATCH_REQUEST: payload },
+      env: { ...process.env, ...request.env, PI_GSD_DISPATCH_REQUEST: payload, PI_GSD_DISPATCH_ARGS: args },
       input: `${payload}
 `,
       shell: true,
@@ -1004,7 +1009,7 @@ function createCommandDispatchRunner(options) {
     if (child.error) return { ok: false, messages: [`dispatch command failed: ${child.error.message}`, ...messages] };
     if (child.status !== 0) return { ok: false, messages: [`dispatch command exited ${child.status ?? "unknown"}`, ...messages] };
     const parsed = parseDispatchCommandOutput(child.stdout);
-    return { ok: true, messages: messages.length ? messages : ["dispatch command completed"], written: parsed.written };
+    return { ok: true, messages: messages.length ? messages : ["dispatch command completed"], written: parsed.written, outcome: parsed.outcome };
   };
 }
 function createDispatchAdapter(options) {
@@ -1014,79 +1019,127 @@ function createDispatchAdapter(options) {
 function parseDispatchCommandOutput(output) {
   try {
     const parsed = JSON.parse(output);
-    if (parsed && typeof parsed === "object" && Array.isArray(parsed.written)) {
-      return { written: parsed.written.filter((path) => typeof path === "string") };
+    if (parsed && typeof parsed === "object") {
+      const record2 = parsed;
+      const written = Array.isArray(record2.written) ? record2.written.filter((path) => typeof path === "string") : void 0;
+      return {
+        written,
+        outcome: parseOutcome(record2.outcome ?? record2)
+      };
     }
   } catch {
   }
   return {};
 }
+function parseOutcome(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+  const record2 = value;
+  const status = typeof record2.status === "string" ? record2.status : void 0;
+  const marker = typeof record2.marker === "string" ? record2.marker : void 0;
+  const verdict = typeof record2.verdict === "string" ? record2.verdict : void 0;
+  const data = parseOutcomeData(record2.data);
+  if (!status && !marker && !verdict && !data) return void 0;
+  return { ...status ? { status } : {}, ...marker ? { marker } : {}, ...verdict ? { verdict } : {}, ...data ? { data } : {} };
+}
+function parseOutcomeData(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+  const entries = Object.entries(value).filter((entry) => {
+    const candidate = entry[1];
+    return typeof candidate === "string" || typeof candidate === "number" || typeof candidate === "boolean";
+  });
+  return entries.length ? Object.fromEntries(entries) : void 0;
+}
 
 // src/orchestrator/settings.ts
-import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync4 } from "fs";
+import { join as join5 } from "path";
+
+// src/orchestrator/official-config.ts
+import { readFileSync as readFileSync3 } from "fs";
 import { join as join4 } from "path";
+function loadOfficialWorkflowConfig(options = {}) {
+  const official = options.officialRoot ? {
+    packageName: OFFICIAL_PACKAGE_NAME,
+    version: readPackageVersion(options.officialRoot),
+    packageRoot: options.officialRoot,
+    paths: {
+      configDefaultsManifest: join4(options.officialRoot, "get-shit-done", "bin", "shared", "config-defaults.manifest.json"),
+      configSchemaManifest: join4(options.officialRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json")
+    }
+  } : resolveOfficialPackage({ startDir: options.startDir });
+  const defaults = readJson(official.paths.configDefaultsManifest);
+  const schema = readJson(official.paths.configSchemaManifest);
+  const workflow = isRecord(defaults.workflow) ? defaults.workflow : {};
+  const validKeys = Array.isArray(schema.valid_keys) ? schema.valid_keys.filter((key) => typeof key === "string") : Array.isArray(schema.validKeys) ? schema.validKeys.filter((key) => typeof key === "string") : [];
+  return {
+    official: {
+      packageName: official.packageName,
+      version: official.version,
+      packageRoot: official.packageRoot
+    },
+    defaults: { workflow },
+    schema: {
+      validKeys,
+      workflowKeys: validKeys.filter((key) => key.startsWith("workflow."))
+    }
+  };
+}
+function readPackageVersion(officialRoot) {
+  try {
+    const parsed = readJson(join4(officialRoot, "package.json"));
+    return typeof parsed.version === "string" ? parsed.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+function readJson(path) {
+  return JSON.parse(readFileSync3(path, "utf8"));
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/orchestrator/settings.ts
 var OrchestratorSettingsError = class extends Error {
   constructor(message) {
     super(message);
     this.name = "OrchestratorSettingsError";
   }
 };
-var DEFAULT_WORKFLOW_SETTINGS = {
-  _auto_chain_active: false,
-  auto_advance: false,
-  research: true,
-  plan_check: true,
-  verifier: true,
-  ui_phase: true,
-  ui_review: true,
-  code_review: true,
-  security_enforcement: true,
-  nyquist_validation: true,
-  ai_integration_phase: true,
-  ui_safety_gate: true,
-  auto_prune_state: true,
-  research_before_questions: true,
-  skip_discuss: false,
-  worktrees: true,
-  node_repair: true,
-  node_repair_budget: 2,
+var PI_WORKFLOW_DEFAULTS = {
   state_reconciliation_apply: false,
   subagent_timeout: 900,
   inline_plan_threshold: 1
 };
 function resolveWorkflowSettings(options = {}) {
-  const workflow = { ...DEFAULT_WORKFLOW_SETTINGS, ...options.defaults };
+  const officialConfig = loadOfficialWorkflowConfig({ startDir: options.cwd ?? process.cwd() });
+  const workflow = {
+    ...normalizeOfficialWorkflowDefaults(officialConfig.defaults.workflow),
+    ...PI_WORKFLOW_DEFAULTS,
+    ...options.defaults
+  };
   const sources = Object.fromEntries(Object.keys(workflow).map((key) => [key, "default"]));
-  const configPath = options.configPath ?? join4(options.cwd ?? process.cwd(), ".planning", "config.json");
-  const fallbackConfigPath = options.configPath ? void 0 : join4(options.cwd ?? process.cwd(), "config.json");
+  const rawWorkflow = { ...officialConfig.defaults.workflow };
+  const configPath = options.configPath ?? join5(options.cwd ?? process.cwd(), ".planning", "config.json");
+  const fallbackConfigPath = options.configPath ? void 0 : join5(options.cwd ?? process.cwd(), "config.json");
   const actualConfigPath = existsSync4(configPath) ? configPath : fallbackConfigPath && existsSync4(fallbackConfigPath) ? fallbackConfigPath : void 0;
   if (actualConfigPath) {
     const config = readConfig(actualConfigPath);
-    const configWorkflow = isRecord(config) && isRecord(config.workflow) ? config.workflow : {};
-    applyBoolean(configWorkflow, "_auto_chain_active", workflow, sources);
-    applyBoolean(configWorkflow, "auto_advance", workflow, sources);
-    applyBoolean(configWorkflow, "research", workflow, sources);
-    applyBoolean(configWorkflow, "plan_check", workflow, sources);
-    applyBoolean(configWorkflow, "verifier", workflow, sources);
-    applyBoolean(configWorkflow, "ui_phase", workflow, sources);
-    applyBoolean(configWorkflow, "ui_review", workflow, sources);
-    applyBoolean(configWorkflow, "code_review", workflow, sources);
-    applyBoolean(configWorkflow, "security_enforcement", workflow, sources);
-    applyBoolean(configWorkflow, "nyquist_validation", workflow, sources);
-    applyBoolean(configWorkflow, "ai_integration_phase", workflow, sources);
-    applyBoolean(configWorkflow, "ui_safety_gate", workflow, sources);
-    applyBoolean(configWorkflow, "auto_prune_state", workflow, sources);
-    applyBoolean(configWorkflow, "research_before_questions", workflow, sources);
-    applyBoolean(configWorkflow, "skip_discuss", workflow, sources);
-    applyBooleanAlias(configWorkflow, "worktrees", "use_worktrees", workflow, sources);
-    applyBooleanAlias(configWorkflow, "plan_check", "plan_checker", workflow, sources);
-    applyBoolean(configWorkflow, "node_repair", workflow, sources);
-    applyBoolean(configWorkflow, "state_reconciliation_apply", workflow, sources);
-    applyPositiveInteger(configWorkflow, "node_repair_budget", workflow, sources);
-    applyPositiveInteger(configWorkflow, "subagent_timeout", workflow, sources);
-    applyPositiveInteger(configWorkflow, "inline_plan_threshold", workflow, sources);
+    const configWorkflow = isRecord2(config) && isRecord2(config.workflow) ? config.workflow : {};
+    Object.assign(rawWorkflow, configWorkflow);
+    applyKnownWorkflowConfig(configWorkflow, workflow, sources);
   }
-  return { workflow, sources };
+  return {
+    workflow,
+    rawWorkflow,
+    workflowMetadata: {
+      officialPackage: officialConfig.official.packageName,
+      officialVersion: officialConfig.official.version,
+      officialRoot: officialConfig.official.packageRoot,
+      schemaKeys: officialConfig.schema.workflowKeys
+    },
+    sources
+  };
 }
 function buildUnitQueue(input) {
   const settings = input.settings ?? resolveWorkflowSettings({ cwd: input.cwd, configPath: input.configPath });
@@ -1096,14 +1149,14 @@ function buildUnitQueue(input) {
     return { decision: "pause_for_user", settings, resumeHint, units: [unit(phase, "pause-for-user", settings, { resumeHint, source: "phase-signal" })] };
   }
   const units = [];
-  if (!settings.workflow.skip_discuss) units.push(unit(phase, "discuss", settings));
+  if (!settings.workflow.skip_discuss) units.push(unit(phase, "discuss", settings, withArgs(input, "discuss")));
   if (settings.workflow.research) units.push(unit(phase, "research", settings));
   if (input.phaseSignals?.isUiPhase && settings.workflow.ui_phase) units.push(unit(phase, "settings-gate", settings, { label: "UI phase settings gate", source: "phase-signal", metadata: { setting: "workflow.ui_phase" } }));
   if (input.phaseSignals?.isUiPhase && settings.workflow.ui_safety_gate) units.push(unit(phase, "ui-safety-gate", settings, { label: "UI Safety Gate", source: "phase-signal", metadata: { setting: "workflow.ui_safety_gate" } }));
   if (input.phaseSignals?.isAiPhase && settings.workflow.ai_integration_phase) units.push(unit(phase, "ai-integration", settings, { label: "AI Integration", source: "phase-signal", metadata: { setting: "workflow.ai_integration_phase" } }));
-  units.push(unit(phase, "plan", settings));
+  units.push(unit(phase, "plan", settings, withArgs(input, "plan")));
   if (settings.workflow.plan_check) units.push(unit(phase, "plan-check", settings));
-  units.push(unit(phase, "execute", settings));
+  units.push(unit(phase, "execute", settings, withArgs(input, "execute")));
   if (settings.workflow.code_review) units.push(unit(phase, "code-review", settings));
   if (input.phaseSignals?.requiresSecurityReview && settings.workflow.security_enforcement) units.push(unit(phase, "security-review", settings, { source: "phase-signal", metadata: { setting: "workflow.security_enforcement" } }));
   if (settings.workflow.verifier) units.push(unit(phase, "verify", settings));
@@ -1132,6 +1185,17 @@ function unit(phase, type, settings, overrides = {}) {
     ...overrides
   };
 }
+function withArgs(input, type, overrides = {}) {
+  const args = argsForUnit(input, type);
+  if (!args) return overrides;
+  return { ...overrides, metadata: { ...overrides.metadata, args } };
+}
+function argsForUnit(input, type) {
+  if (type === "discuss") return input.mode === "auto" ? "--auto" : "--chain";
+  if (type === "plan") return "--auto";
+  if (type === "execute") return "--auto --no-transition";
+  return void 0;
+}
 function labelForType(type) {
   return type.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ");
 }
@@ -1154,7 +1218,7 @@ function settingForType(type) {
 }
 function inferPhaseSignals(options) {
   const cwd = options.cwd ?? process.cwd();
-  const phaseRoot = join4(cwd, ".planning", "phases");
+  const phaseRoot = join5(cwd, ".planning", "phases");
   const phaseText = readPhaseSignalText(phaseRoot, options.phase).toLowerCase();
   return {
     isUiPhase: /(?:requires|phase[_ -]signals?):[^\n]*(?:ui|frontend)|(?:^|\n)phase-kind:\s*(?:ui|frontend)/.test(phaseText),
@@ -1168,9 +1232,9 @@ function readPhaseSignalText(phaseRoot, phase) {
   try {
     const direct = readdirSync(phaseRoot, { withFileTypes: true }).find((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`));
     if (!direct) return "";
-    return readdirSync(join4(phaseRoot, direct.name)).filter((name) => /(^|-)PLAN\.md$/i.test(name) || /^phase-signals\.(md|json|ya?ml)$/i.test(name)).map((name) => {
+    return readdirSync(join5(phaseRoot, direct.name)).filter((name) => /(^|-)PLAN\.md$/i.test(name) || /^phase-signals\.(md|json|ya?ml)$/i.test(name)).map((name) => {
       try {
-        return readFileSync3(join4(phaseRoot, direct.name, name), "utf8");
+        return readFileSync4(join5(phaseRoot, direct.name, name), "utf8");
       } catch {
         return "";
       }
@@ -1181,10 +1245,73 @@ function readPhaseSignalText(phaseRoot, phase) {
 }
 function readConfig(configPath) {
   try {
-    return JSON.parse(readFileSync3(configPath, "utf8"));
+    return JSON.parse(readFileSync4(configPath, "utf8"));
   } catch (error) {
     throw new OrchestratorSettingsError(`Could not read orchestrator settings from ${configPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+function normalizeOfficialWorkflowDefaults(source) {
+  return {
+    _auto_chain_active: booleanValue(source._auto_chain_active, false),
+    auto_advance: booleanValue(source.auto_advance, false),
+    research: booleanValue(source.research, true),
+    plan_check: booleanValue(source.plan_check, true),
+    verifier: booleanValue(source.verifier, true),
+    ui_phase: booleanValue(source.ui_phase, true),
+    ui_review: booleanValue(source.ui_review, true),
+    code_review: booleanValue(source.code_review, true),
+    code_review_depth: stringValue(source.code_review_depth, "standard"),
+    code_review_command: nullableStringValue(source.code_review_command),
+    plan_review_convergence: booleanValue(source.plan_review_convergence, false),
+    max_discuss_passes: positiveIntegerValue(source.max_discuss_passes, 3),
+    plan_bounce: booleanValue(source.plan_bounce, false),
+    plan_bounce_passes: positiveIntegerValue(source.plan_bounce_passes, 2),
+    post_planning_gaps: booleanValue(source.post_planning_gaps, true),
+    security_enforcement: booleanValue(source.security_enforcement, true),
+    nyquist_validation: booleanValue(source.nyquist_validation, true),
+    ai_integration_phase: booleanValue(source.ai_integration_phase, true),
+    ui_safety_gate: booleanValue(source.ui_safety_gate, true),
+    auto_prune_state: booleanValue(source.auto_prune_state, false),
+    research_before_questions: booleanValue(source.research_before_questions, false),
+    skip_discuss: booleanValue(source.skip_discuss, false),
+    worktrees: booleanValue(source.use_worktrees ?? source.worktrees, true),
+    node_repair: booleanValue(source.node_repair, true),
+    node_repair_budget: positiveIntegerValue(source.node_repair_budget, 2),
+    state_reconciliation_apply: false,
+    subagent_timeout: positiveIntegerValue(source.subagent_timeout, 3e5),
+    inline_plan_threshold: 1
+  };
+}
+function applyKnownWorkflowConfig(source, workflow, sources) {
+  applyBoolean(source, "_auto_chain_active", workflow, sources);
+  applyBoolean(source, "auto_advance", workflow, sources);
+  applyBoolean(source, "research", workflow, sources);
+  applyBoolean(source, "plan_check", workflow, sources);
+  applyBoolean(source, "verifier", workflow, sources);
+  applyBoolean(source, "ui_phase", workflow, sources);
+  applyBoolean(source, "ui_review", workflow, sources);
+  applyBoolean(source, "code_review", workflow, sources);
+  applyString(source, "code_review_depth", workflow, sources);
+  applyNullableString(source, "code_review_command", workflow, sources);
+  applyBoolean(source, "plan_review_convergence", workflow, sources);
+  applyPositiveInteger(source, "max_discuss_passes", workflow, sources);
+  applyBoolean(source, "plan_bounce", workflow, sources);
+  applyPositiveInteger(source, "plan_bounce_passes", workflow, sources);
+  applyBoolean(source, "post_planning_gaps", workflow, sources);
+  applyBoolean(source, "security_enforcement", workflow, sources);
+  applyBoolean(source, "nyquist_validation", workflow, sources);
+  applyBoolean(source, "ai_integration_phase", workflow, sources);
+  applyBoolean(source, "ui_safety_gate", workflow, sources);
+  applyBoolean(source, "auto_prune_state", workflow, sources);
+  applyBoolean(source, "research_before_questions", workflow, sources);
+  applyBoolean(source, "skip_discuss", workflow, sources);
+  applyBooleanAlias(source, "worktrees", "use_worktrees", workflow, sources);
+  applyBooleanAlias(source, "plan_check", "plan_checker", workflow, sources);
+  applyBoolean(source, "node_repair", workflow, sources);
+  applyBoolean(source, "state_reconciliation_apply", workflow, sources);
+  applyPositiveInteger(source, "node_repair_budget", workflow, sources);
+  applyPositiveInteger(source, "subagent_timeout", workflow, sources);
+  applyPositiveInteger(source, "inline_plan_threshold", workflow, sources);
 }
 function applyBoolean(source, key, workflow, sources) {
   if (typeof source[key] === "boolean") {
@@ -1200,26 +1327,757 @@ function applyBooleanAlias(source, key, alias, workflow, sources) {
   }
   applyBoolean(source, key, workflow, sources);
 }
+function applyString(source, key, workflow, sources) {
+  if (typeof source[key] === "string") {
+    workflow[key] = source[key];
+    sources[key] = "config";
+  }
+}
+function applyNullableString(source, key, workflow, sources) {
+  if (typeof source[key] === "string" || source[key] === null) {
+    workflow[key] = source[key];
+    sources[key] = "config";
+  }
+}
 function applyPositiveInteger(source, key, workflow, sources) {
   if (typeof source[key] === "number" && Number.isInteger(source[key]) && source[key] > 0) {
     workflow[key] = source[key];
     sources[key] = "config";
   }
 }
-function isRecord(value) {
+function booleanValue(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function stringValue(value, fallback) {
+  return typeof value === "string" ? value : fallback;
+}
+function nullableStringValue(value) {
+  return typeof value === "string" || value === null ? value : null;
+}
+function positiveIntegerValue(value, fallback) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/worktree-safety/git.ts
+import { execFileSync } from "child_process";
+import { existsSync as existsSync5, lstatSync, mkdirSync as mkdirSync2, readFileSync as readFileSync5, unlinkSync, writeFileSync as writeFileSync2 } from "fs";
+import { hostname } from "os";
+function readCurrentBranch(root) {
+  try {
+    return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: root, stdio: "pipe", encoding: "utf8" }).trim();
+  } catch {
+    return void 0;
+  }
+}
+function hasGitMarker(root, deps = defaultWorktreeSafetyDeps) {
+  return deps.existsSync(`${root}/.git`);
+}
+var defaultWorktreeSafetyDeps = {
+  existsSync: existsSync5,
+  lstatSync,
+  readFileSync: (path) => readFileSync5(path, "utf8"),
+  writeFileSync: (path, content) => writeFileSync2(path, content, "utf8"),
+  unlinkSync,
+  mkdirSync: mkdirSync2,
+  cwd: () => process.cwd(),
+  env: (name) => process.env[name],
+  currentBranch: readCurrentBranch,
+  now: () => (/* @__PURE__ */ new Date()).toISOString(),
+  hostname,
+  pid: () => process.pid,
+  isProcessAlive(pid, host) {
+    if (host && host !== hostname()) return void 0;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+};
+
+// src/worktree-safety/lease.ts
+import { dirname as dirname3, isAbsolute, relative, resolve } from "path";
+
+// src/recovery/types.ts
+var RECOVERY_CLASSES = [
+  "transient-external-failure",
+  "repairable-state-drift",
+  "unrepaired-state-drift",
+  "worktree-invalid",
+  "dispatch-contract-invalid",
+  "artifact-gate-failed",
+  "user-input-required",
+  "internal-invariant-violation"
+];
+var RECOVERY_ACTION_VALUES = ["retry", "pause-with-remediation", "self-heal", "stop"];
+var RECOVERY_ACTIONS = {
+  "transient-external-failure": "retry",
+  "repairable-state-drift": "self-heal",
+  "unrepaired-state-drift": "pause-with-remediation",
+  "worktree-invalid": "stop",
+  "dispatch-contract-invalid": "stop",
+  "artifact-gate-failed": "pause-with-remediation",
+  "user-input-required": "pause-with-remediation",
+  "internal-invariant-violation": "stop"
+};
+
+// src/recovery/classify-failure.ts
+var RECONCILIATION_REASON_TO_RECOVERY_CLASS = {
+  "sketch-flag-drift": "repairable-state-drift",
+  "completion-timestamp-drift": "repairable-state-drift",
+  "roadmap-divergence": "repairable-state-drift",
+  "stale-worker": "unrepaired-state-drift",
+  "unregistered-milestone": "unrepaired-state-drift",
+  "summary-count-mismatch": "unrepaired-state-drift",
+  "noncanonical-plan-like-file": "unrepaired-state-drift",
+  "unknown-drift": "unrepaired-state-drift",
+  "partial-write": "internal-invariant-violation"
+};
+function classifyFailure(input) {
+  switch (input.kind) {
+    case "reconciliation": {
+      const klass = RECONCILIATION_REASON_TO_RECOVERY_CLASS[input.reasonCode];
+      const written = input.written?.length ? input.written : input.blockers?.flatMap((blocker) => blocker.written ?? []);
+      return decision(klass, `State reconciliation failed: ${input.reasonCode}.`, remediationFor(klass), {
+        reasonCode: input.reasonCode,
+        blockers: input.blockers,
+        written,
+        reconciliationEvidence: input.evidence
+      });
+    }
+    case "artifact-gate":
+      return decision("artifact-gate-failed", input.reason ?? "Artifact gate failed.", "Create or repair the required artifact before continuing.", input.evidence);
+    case "dispatch":
+      return decision("dispatch-contract-invalid", input.reason ?? "Dispatch contract was invalid.", "Inspect the dispatch contract and generated resources before retrying.", input.evidence);
+    case "gate":
+      return decision(input.retryable ? "transient-external-failure" : "dispatch-contract-invalid", input.reason ?? `Gate ${input.gate} failed.`, input.retryable ? "Retry after the transient dependency recovers." : "Inspect the gate input and dispatch contract.", input.evidence);
+    case "worktree":
+      return decision(input.class ?? "worktree-invalid", input.message ?? `Worktree safety check failed: ${input.reasonCode}.`, input.remediation ?? remediationFor(input.class ?? "worktree-invalid"), { ...input.evidence, reasonCode: input.reasonCode });
+    case "external":
+      if (input.reasonCode === "provider-network") return decision("transient-external-failure", input.message ?? "Provider or network failure.", "Retry after the external dependency recovers.", input.evidence);
+      if (input.reasonCode === "missing-auth" || input.reasonCode === "user-input") return decision("user-input-required", input.message ?? "User input is required.", "Provide the missing user input or authentication, then resume.", input.evidence);
+      return decision("internal-invariant-violation", input.message ?? "Unmodeled external failure shape.", remediationFor("internal-invariant-violation"), input.evidence);
+  }
+}
+function decision(klass, message, remediation, evidence) {
+  return {
+    class: klass,
+    action: RECOVERY_ACTIONS[klass],
+    reasonCode: evidence?.reasonCode,
+    message,
+    remediation,
+    evidence
+  };
+}
+function remediationFor(klass) {
+  switch (klass) {
+    case "transient-external-failure":
+      return "Retry after the transient dependency recovers.";
+    case "repairable-state-drift":
+      return "Run deterministic state reconciliation repair, then retry dispatch.";
+    case "unrepaired-state-drift":
+      return "Inspect planning state drift and remediate before resuming.";
+    case "worktree-invalid":
+      return "Repair or recreate the expected worktree/root before source-writing dispatch.";
+    case "dispatch-contract-invalid":
+      return "Fix the dispatch contract before continuing.";
+    case "artifact-gate-failed":
+      return "Create or repair the required artifact before continuing.";
+    case "user-input-required":
+      return "Provide the required user input before resuming.";
+    case "internal-invariant-violation":
+      return "Stop and inspect the invariant violation before continuing.";
+  }
+}
+
+// src/worktree-safety/lease.ts
+function readLeaseRecord(root, leasePath, deps = defaultWorktreeSafetyDeps) {
+  const result = readLeaseRecordStrict(root, leasePath, deps);
+  return result.ok ? result.record : void 0;
+}
+function readLeaseRecordStrict(root, leasePath, deps = defaultWorktreeSafetyDeps) {
+  const resolved = resolveLeasePath(root, leasePath);
+  const path = resolved.ok ? resolved.path : leasePath ?? `.planning/worktree-leases/lease.json`;
+  if (!resolved.ok) return { ok: false, path, message: resolved.message };
+  if (!deps.existsSync(resolved.path)) return { ok: true, path: resolved.path };
+  try {
+    const parsed = JSON.parse(deps.readFileSync(resolved.path));
+    const validation = validateLeaseRecord(parsed);
+    if (!validation.ok) return { ok: false, path: resolved.path, message: validation.message };
+    return { ok: true, path: resolved.path, record: validation.record };
+  } catch (error) {
+    return { ok: false, path: resolved.path, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+function checkLeaseOwnership(input, root, branch, deps = defaultWorktreeSafetyDeps) {
+  const resolved = resolveLeasePath(root, input.leasePath);
+  if (!resolved.ok) {
+    return { ok: false, decision: classifyFailure({ kind: "worktree", reasonCode: "lease-path-outside-planning", class: "worktree-invalid", message: resolved.message, remediation: "Use a lease path under .planning.", evidence: { unitId: input.unitId, unitType: input.unitType, root, branch, paths: [input.leasePath ?? ""] } }) };
+  }
+  const leaseRead = readLeaseRecordStrict(root, input.leasePath, deps);
+  if (!leaseRead.ok) {
+    return leaseIoFailure(input, root, branch, "lease-invalid", "user-input-required", `Cannot prove lease ownership because the lease file is unreadable or invalid: ${leaseRead.message}`, "Inspect and repair or remove the lease only after proving ownership or process inactivity.", [leaseRead.path], [leaseRead.message]);
+  }
+  const record2 = leaseRead.record;
+  const expected = expectedRecord(input, root, branch, deps);
+  if (!record2) {
+    try {
+      deps.mkdirSync(dirname3(resolved.path), { recursive: true });
+      deps.writeFileSync(resolved.path, JSON.stringify(expected, null, 2));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return leaseIoFailure(input, root, branch, "lease-acquire-failed", "worktree-invalid", `Cannot acquire lease: ${message}`, "Inspect lease path permissions and retry only after source-writing ownership can be recorded.", [resolved.path], [message]);
+    }
+    return { ok: true, record: expected, journalEvents: [leaseAcquiredEvent(expected, resolved.path, input.attempt)] };
+  }
+  if (isOwner(record2, expected)) return { ok: true, record: record2 };
+  const stale = reclaimStaleLeaseIfSafe(record2, expected, resolved.path, deps, input.attempt);
+  if (stale.ok) return stale;
+  const evidence = { unitId: input.unitId, unitType: input.unitType, phase: input.phase, root, branch, expected, actual: record2 };
+  const partial = !record2.pid || !record2.host || !record2.root || !record2.branch;
+  const contradictory = Boolean(record2.root && record2.root !== root) || Boolean(record2.branch && branch && record2.branch !== branch);
+  if (partial || contradictory) {
+    return { ok: false, decision: classifyFailure({ kind: "worktree", reasonCode: partial ? "lease-stale-incomplete" : "lease-stale-contradictory", class: partial ? "user-input-required" : "unrepaired-state-drift", message: "Stale lease evidence is incomplete or contradictory.", remediation: "Inspect and remediate the stale lease before continuing.", evidence }) };
+  }
+  return { ok: false, decision: classifyFailure({ kind: "worktree", reasonCode: "lease-wrong-owner", class: "worktree-invalid", message: "Lease is held by a different owner.", remediation: "Stop and inspect lease ownership before source-writing dispatch.", evidence }) };
+}
+function releaseLeaseOwnership(input, root, branch, deps = defaultWorktreeSafetyDeps) {
+  const effectiveDeps = { ...deps, ...input.deps };
+  const resolved = resolveLeasePath(root, input.leasePath);
+  if (!resolved.ok) {
+    return { ok: false, decision: classifyFailure({ kind: "worktree", reasonCode: "lease-path-outside-planning", class: "worktree-invalid", message: resolved.message, remediation: "Use a lease path under .planning.", evidence: { unitId: input.unitId, unitType: input.unitType, phase: input.phase, root, branch, paths: [input.leasePath ?? ""] } }) };
+  }
+  const leaseRead = readLeaseRecordStrict(root, input.leasePath, effectiveDeps);
+  if (!leaseRead.ok) {
+    return leaseIoFailure(input, root, branch, "lease-invalid", "user-input-required", `Cannot release lease because the lease file is unreadable or invalid: ${leaseRead.message}`, "Inspect and repair or remove the lease only after proving ownership or process inactivity.", [leaseRead.path], [leaseRead.message]);
+  }
+  const record2 = leaseRead.record;
+  const expected = expectedRecord(input, root, branch, effectiveDeps);
+  if (!record2) {
+    return { ok: false, decision: classifyFailure({ kind: "worktree", reasonCode: "lease-missing", class: "worktree-invalid", message: "Cannot release a missing lease.", remediation: "Inspect lease lifecycle evidence before continuing.", evidence: { unitId: input.unitId, unitType: input.unitType, phase: input.phase, root, branch, paths: [resolved.path] } }) };
+  }
+  if (!isOwner(record2, expected)) {
+    return { ok: false, decision: classifyFailure({ kind: "worktree", reasonCode: "lease-wrong-owner", class: "worktree-invalid", message: "Cannot release a lease held by a different owner.", remediation: "Stop and inspect lease ownership before releasing source-writing ownership.", evidence: { unitId: input.unitId, unitType: input.unitType, phase: input.phase, root, branch, expected, actual: record2, paths: [resolved.path] } }) };
+  }
+  try {
+    effectiveDeps.unlinkSync(resolved.path);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return leaseIoFailure(input, root, branch, "lease-release-failed", "worktree-invalid", `Cannot release lease: ${message}`, "Inspect and remove the lease only after proving ownership or process inactivity.", [resolved.path], [message], { expected, actual: record2 });
+  }
+  return { ok: true, record: record2, journalEvents: [leaseReleasedEvent(record2, resolved.path, input.attempt)] };
+}
+function reclaimStaleLeaseIfSafe(record2, expected, path, deps = defaultWorktreeSafetyDeps, attempt) {
+  const alive = record2.pid ? deps.isProcessAlive?.(record2.pid, record2.host) : void 0;
+  if (alive !== false || !record2.root || !record2.branch || record2.root !== expected.root || record2.branch !== expected.branch) {
+    return { ok: false, decision: classifyFailure({ kind: "worktree", reasonCode: "lease-not-reclaimable", class: "unrepaired-state-drift", message: "Lease is not safely reclaimable.", remediation: "Inspect the lease owner before continuing.", evidence: { unitId: expected.unitId, phase: expected.phase, root: expected.root, branch: expected.branch } }) };
+  }
+  try {
+    deps.mkdirSync(dirname3(path), { recursive: true });
+    deps.writeFileSync(path, JSON.stringify(expected, null, 2));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return leaseIoFailure({ unitId: expected.unitId, unitType: "execute", phase: expected.phase }, expected.root ?? "", expected.branch, "lease-reclaim-failed", "worktree-invalid", `Cannot reclaim stale lease: ${message}`, "Inspect lease path permissions and retry only after source-writing ownership can be recorded.", [path], [message], { expected, actual: record2 });
+  }
+  return { ok: true, record: expected, selfHealed: true, journalEvents: [leaseStaleReclaimedEvent(expected, path, attempt)] };
+}
+function leaseAcquiredEvent(record2, path, attempt) {
+  return leaseEvent("lease_acquired", record2, path, attempt, "self-heal", "repairable-state-drift", "lease-acquired");
+}
+function leaseReleasedEvent(record2, path, attempt) {
+  return leaseEvent("lease_released", record2, path, attempt, "self-heal", "repairable-state-drift", "lease-released");
+}
+function leaseStaleReclaimedEvent(record2, path, attempt) {
+  return leaseEvent("lease_stale_reclaimed", record2, path, attempt, "self-heal", "repairable-state-drift", "lease-stale-reclaimed");
+}
+function leaseEvent(type, record2, path, attempt, action, recoveryClass, reasonCode) {
+  return { type, event: type, unitId: record2.unitId, phase: record2.phase, root: record2.root, branch: record2.branch, paths: path ? [path] : void 0, attempt, action, recoveryClass, reasonCode, message: type, host: record2.host, pid: record2.pid };
+}
+function validateLeaseRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { ok: false, message: "lease record must be a JSON object" };
+  const record2 = value;
+  if (typeof record2.unitId !== "string" || record2.unitId.length === 0) return { ok: false, message: "lease record must include a unitId" };
+  if (record2.sessionId !== void 0 && typeof record2.sessionId !== "string") return { ok: false, message: "lease record sessionId must be a string" };
+  if (record2.phase !== void 0 && typeof record2.phase !== "string") return { ok: false, message: "lease record phase must be a string" };
+  if (record2.branch !== void 0 && typeof record2.branch !== "string") return { ok: false, message: "lease record branch must be a string" };
+  if (record2.root !== void 0 && typeof record2.root !== "string") return { ok: false, message: "lease record root must be a string" };
+  if (record2.host !== void 0 && typeof record2.host !== "string") return { ok: false, message: "lease record host must be a string" };
+  if (record2.pid !== void 0 && typeof record2.pid !== "number") return { ok: false, message: "lease record pid must be a number" };
+  if (record2.updatedAt !== void 0 && typeof record2.updatedAt !== "string") return { ok: false, message: "lease record updatedAt must be a string" };
+  return { ok: true, record: record2 };
+}
+function leaseIoFailure(input, root, branch, reasonCode, recoveryClass, message, remediation, paths, messages, ownership) {
+  return {
+    ok: false,
+    decision: classifyFailure({
+      kind: "worktree",
+      reasonCode,
+      class: recoveryClass,
+      message,
+      remediation,
+      evidence: {
+        unitId: input.unitId,
+        unitType: input.unitType,
+        phase: input.phase,
+        root,
+        branch,
+        paths,
+        messages,
+        ...ownership?.expected ? { expected: ownership.expected } : {},
+        ...ownership?.actual ? { actual: ownership.actual } : {}
+      }
+    })
+  };
+}
+function expectedRecord(input, root, branch, deps) {
+  return { unitId: input.unitId, sessionId: input.sessionId, phase: input.phase, branch, root, host: deps.hostname(), pid: deps.pid(), updatedAt: deps.now() };
+}
+function isOwner(record2, expected) {
+  return record2.unitId === expected.unitId && record2.sessionId === expected.sessionId && record2.phase === expected.phase && record2.branch === expected.branch && record2.root === expected.root && record2.host === expected.host && record2.pid === expected.pid;
+}
+function resolveLeasePath(root, leasePath) {
+  const planningDir = resolve(root, ".planning");
+  const candidate = resolve(root, leasePath ?? `.planning/worktree-leases/lease.json`);
+  if (!isInsideOrSame(planningDir, candidate)) return { ok: false, message: `refusing lease path outside .planning: ${candidate}` };
+  return { ok: true, path: candidate };
+}
+function isInsideOrSame(parent, child) {
+  const rel = relative(parent, child);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+// src/worktree-safety/prepare-unit-root.ts
+import { resolve as resolve2 } from "path";
+var SOURCE_WRITING_UNITS = {
+  discuss: false,
+  research: false,
+  plan: false,
+  "plan-check": false,
+  execute: true,
+  "code-review": false,
+  verify: false,
+  "ui-review": false,
+  "security-review": false,
+  "nyquist-validation": false,
+  "ai-integration": false,
+  "ui-safety-gate": false,
+  closeout: false,
+  "settings-gate": false,
+  "pause-for-user": false
+};
+function isSourceWritingUnit(unitType) {
+  return SOURCE_WRITING_UNITS[unitType] === true;
+}
+function resolveExpectedUnitRoot(input, deps) {
+  return resolve2(input.unitRoot ?? input.projectRoot ?? deps.cwd());
+}
+function prepareUnitRoot(unitTypeOrInput, unitId2, options = {}) {
+  const input = typeof unitTypeOrInput === "string" ? { ...options, unitType: unitTypeOrInput, unitId: unitId2 ?? `${options.phase ?? "unit"}:${unitTypeOrInput}` } : unitTypeOrInput;
+  const deps = { ...defaultWorktreeSafetyDeps, ...input.deps };
+  const projectRoot = resolve2(input.projectRoot ?? deps.env("GSD_PROJECT_ROOT") ?? deps.cwd());
+  const root = resolveExpectedUnitRoot({ ...input, projectRoot }, deps);
+  const branch = deps.currentBranch(root);
+  if (!isSourceWritingUnit(input.unitType)) {
+    return { ok: true, root, evidence: { unitId: input.unitId, unitType: input.unitType, phase: input.phase, root, branch, messages: [`${input.unitType} does not require isolated source worktree validation`] } };
+  }
+  if (!deps.existsSync(`${root}/.git`)) {
+    return fail("missing-git-marker", "Worktree root is missing a .git marker.", "Recover or recreate the expected Git root before dispatch.", input, root, branch);
+  }
+  const envRoot = deps.env("GSD_PROJECT_ROOT");
+  if (envRoot && resolve2(envRoot) !== projectRoot) {
+    return fail("project-root-mismatch", "GSD_PROJECT_ROOT does not match the expected project root.", "Run from the expected project root or update GSD_PROJECT_ROOT before dispatch.", input, root, branch, { expectedProjectRoot: projectRoot, actualCwd: deps.cwd(), resolvedUnitRoot: root });
+  }
+  if (input.expectedBranch && branch !== input.expectedBranch) {
+    return fail("branch-mismatch", "Current branch does not match the expected branch.", "Switch to the expected branch manually before dispatch; the orchestrator will not checkout branches.", input, root, branch, { expectedBranch: input.expectedBranch });
+  }
+  if (input.workflow?.worktrees === false) {
+    return { ok: true, root, evidence: { unitId: input.unitId, unitType: input.unitType, phase: input.phase, root, branch, messages: ["project-root validation passed; isolated lease skipped by workflow.worktrees=false"] } };
+  }
+  const lease = checkLeaseOwnership(input, root, branch, deps);
+  if (!lease.ok) return lease;
+  return { ok: true, root, evidence: { unitId: input.unitId, unitType: input.unitType, phase: input.phase, root, branch, journalEvents: lease.journalEvents, messages: lease.selfHealed ? ["stale lease reclaimed"] : ["worktree validation passed"] } };
+}
+function fail(reasonCode, message, remediation, input, root, branch, extra = {}) {
+  return {
+    ok: false,
+    decision: classifyFailure({
+      kind: "worktree",
+      reasonCode,
+      class: "worktree-invalid",
+      message,
+      remediation,
+      evidence: {
+        unitId: input.unitId,
+        unitType: input.unitType,
+        phase: input.phase,
+        root,
+        branch,
+        resolvedUnitRoot: root,
+        actualCwd: input.deps?.cwd?.(),
+        ...extra
+      }
+    })
+  };
+}
+
 // src/orchestrator/gates.ts
-import { existsSync as existsSync11, readdirSync as readdirSync3, readFileSync as readFileSync9, statSync as statSync3 } from "fs";
-import { basename as basename2, isAbsolute as isAbsolute2, join as join10, resolve as resolve2 } from "path";
+import { existsSync as existsSync12, readdirSync as readdirSync3, readFileSync as readFileSync12, statSync as statSync3 } from "fs";
+import { basename as basename2, isAbsolute as isAbsolute3, join as join11, resolve as resolve4 } from "path";
+
+// src/orchestrator/outcomes.ts
+import { readFileSync as readFileSync6 } from "fs";
+
+// src/frontmatter.ts
+var supportedPromptKeys = [
+  // Fields preserved in generated prompts:
+  // - description: command description for Pi slash command registration
+  // - argument-hint: usage hint for command arguments
+  // - argument-instructions: detailed argument parsing instructions for the model
+  // - requires: command dependencies (helps model understand available subcommands)
+  //
+  // Fields intentionally dropped (Claude Code concepts, not used by Pi):
+  // - name: redundant with the Pi prompt filename (gsd-xxx.md)
+  // - allowed-tools: Claude Code tool allowlist — Pi has its own tool system
+  // - type: Claude Code prompt type classifier — Pi doesn't use this
+  "description",
+  "argument-hint",
+  "argument-instructions",
+  "requires"
+];
+function splitFrontmatter(input) {
+  const opening = /^---\r?\n/.exec(input);
+  if (!opening) {
+    return { data: {}, body: input };
+  }
+  const closing = /\r?\n---\r?\n/.exec(input.slice(opening[0].length));
+  if (!closing) {
+    return { data: {}, body: input };
+  }
+  const endIndex = opening[0].length + closing.index;
+  const rawFrontmatter = input.slice(opening[0].length, endIndex);
+  const body = input.slice(endIndex + closing[0].length);
+  return { data: parseFrontmatter(rawFrontmatter), body };
+}
+function writeFrontmatter(data, body) {
+  const lines = supportedPromptKeys.flatMap((key) => {
+    const value = data[key];
+    if (value === void 0 || value === null) return [];
+    return formatValue(key, value);
+  });
+  return `---
+${lines.join("\n")}
+---
+${body}`;
+}
+function formatValue(key, value) {
+  if (Array.isArray(value)) {
+    return [`${key}:`, ...value.map((v) => `  - ${formatScalar(v)}`)];
+  }
+  if (typeof value === "string") {
+    if (value.includes("\n")) {
+      return [`${key}: |`, ...value.split("\n").map((l) => `  ${l}`)];
+    }
+    return [`${key}: ${formatScalar(value)}`];
+  }
+  return [String(value)];
+}
+function parseFrontmatter(rawFrontmatter) {
+  const data = {};
+  const lines = rawFrontmatter.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const scalarMatch = /^(?<key>[A-Za-z0-9_-]+):(?:\s*(?<value>.*))?$/.exec(line);
+    if (!scalarMatch?.groups) {
+      i += 1;
+      continue;
+    }
+    const key = scalarMatch.groups.key;
+    const value = scalarMatch.groups.value ?? "";
+    const trimmedValue = value.trim();
+    if (trimmedValue === "|" || trimmedValue === ">") {
+      const blockLines = [];
+      let j = i + 1;
+      while (j < lines.length && (lines[j].startsWith("  ") || lines[j].startsWith("	") || lines[j] === "")) {
+        if (lines[j] !== "") {
+          blockLines.push(lines[j].replace(/^  /, "").replace(/^\t/, ""));
+        } else {
+          blockLines.push("");
+        }
+        j += 1;
+      }
+      while (blockLines.length > 0 && blockLines[blockLines.length - 1] === "") {
+        blockLines.pop();
+      }
+      data[key] = blockLines.join("\n");
+      i = j;
+      continue;
+    }
+    if (value !== "" && trimmedValue !== "") {
+      data[key] = unquoteScalar(value);
+      i += 1;
+      continue;
+    }
+    if (value === "" || trimmedValue === "") {
+      const list = [];
+      let nextListMatch = i + 1 < lines.length ? /^\s+-\s*(?<value>.*)$/.exec(lines[i + 1]) : null;
+      if (nextListMatch?.groups) {
+        while (nextListMatch?.groups) {
+          const groups = nextListMatch.groups;
+          list.push(unquoteScalar(groups.value));
+          i += 1;
+          nextListMatch = i + 1 < lines.length ? /^\s+-\s*(?<value>.*)$/.exec(lines[i + 1]) : null;
+        }
+        data[key] = list;
+        i += 1;
+        continue;
+      }
+      data[key] = "";
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+  return data;
+}
+function unquoteScalar(value) {
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if (first === '"' && last === '"' || first === "'" && last === "'") {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
+}
+function formatScalar(value) {
+  if (!needsQuoting(value)) {
+    return value;
+  }
+  if (!value.includes("'")) {
+    return `'${value}'`;
+  }
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+function needsQuoting(value) {
+  return value === "" || value !== value.trim() || /[:[\]{}#,&*!|>'"%@`]/.test(value);
+}
+
+// src/orchestrator/outcomes.ts
+var POST_DISPATCH_POLICIES = {
+  discuss: { artifactSuffix: "CONTEXT.md" },
+  research: { artifactSuffix: "RESEARCH.md" },
+  plan: { artifactSuffix: "PLAN.md" },
+  "plan-check": {
+    passMarkers: ["verification_passed"],
+    pauseMarkers: {
+      issues_found: "Plan checker found issues; revise the plan before execution."
+    },
+    requireRecognizedOutcome: true
+  },
+  execute: { artifactSuffix: "SUMMARY.md" },
+  "code-review": {
+    artifactSuffix: "REVIEW.md",
+    passStatuses: ["clean", "skipped", "issues_found"],
+    requireRecognizedOutcome: true
+  },
+  verify: {
+    artifactSuffix: "VERIFICATION.md",
+    passStatuses: ["passed", "pass"],
+    pauseStatuses: {
+      gaps_found: "Verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+      human_needed: "Phase verification requires human verification before closeout."
+    },
+    requireRecognizedOutcome: true
+  },
+  "security-review": {
+    artifactSuffix: "SECURITY.md",
+    custom: "security",
+    requireRecognizedOutcome: true
+  },
+  "nyquist-validation": {
+    artifactSuffix: "VALIDATION.md",
+    custom: "nyquist",
+    requireRecognizedOutcome: true
+  },
+  "ai-integration": { artifactSuffix: "AI-SPEC.md" },
+  "settings-gate": { artifactSuffix: "UI-SPEC.md" },
+  "ui-safety-gate": {
+    artifactSuffix: "UI-SPEC.md",
+    passStatuses: ["approved"],
+    pauseStatuses: {
+      blocked: "UI-SPEC checker blocked this phase; fix UI-SPEC.md before planning.",
+      draft: "UI-SPEC is still draft; checker approval is required before planning."
+    },
+    passMarkers: ["ui_spec_verified", "approved"],
+    pauseMarkers: {
+      ui_spec_blocked: "UI-SPEC checker blocked this phase; fix UI-SPEC.md before planning.",
+      issues_found: "UI-SPEC checker found blocking issues; fix UI-SPEC.md before planning.",
+      blocked: "UI-SPEC checker blocked this phase; fix UI-SPEC.md before planning."
+    },
+    requireRecognizedOutcome: true
+  },
+  "ui-review": { artifactSuffix: "UI-REVIEW.md", passMarkers: ["ui_review_complete"] }
+};
+function evaluatePostDispatchPolicy(policy, input) {
+  const signals = collectSignals(input);
+  if (policy.custom === "security") {
+    return evaluateSecurityPolicy(input.phase, signals);
+  }
+  if (policy.custom === "nyquist") {
+    return evaluateNyquistPolicy(signals);
+  }
+  for (const [status, hint] of Object.entries(policy.pauseStatuses ?? {})) {
+    if (signals.statuses.has(normalizeSignal(status))) {
+      return fail2(hint, input.phase, signals.evidence);
+    }
+  }
+  for (const [marker, hint] of Object.entries(policy.pauseMarkers ?? {})) {
+    if (signals.markers.has(normalizeSignal(marker))) {
+      return fail2(hint, input.phase, signals.evidence);
+    }
+  }
+  for (const status of policy.passStatuses ?? []) {
+    if (signals.statuses.has(normalizeSignal(status))) {
+      return { ok: true, evidence: signals.evidence };
+    }
+  }
+  for (const marker of policy.passMarkers ?? []) {
+    if (signals.markers.has(normalizeSignal(marker))) {
+      return { ok: true, evidence: signals.evidence };
+    }
+  }
+  if (policy.requireRecognizedOutcome) {
+    return {
+      ok: false,
+      resumeHint: `${input.unitType} did not report a recognized completion outcome.`,
+      evidence: signals.evidence.length ? signals.evidence : ["outcome:missing"]
+    };
+  }
+  return { ok: true, evidence: signals.evidence };
+}
+function collectSignals(input) {
+  const statuses = /* @__PURE__ */ new Set();
+  const markers = /* @__PURE__ */ new Set();
+  const fields = /* @__PURE__ */ new Map();
+  const evidence = [];
+  const addStatus = (value) => {
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return;
+    const normalized = normalizeSignal(String(value));
+    if (!normalized) return;
+    statuses.add(normalized);
+    evidence.push(`status:${normalized}`);
+  };
+  const addMarker = (value) => {
+    if (typeof value !== "string") return;
+    const normalized = normalizeSignal(value);
+    if (!normalized) return;
+    markers.add(normalized);
+    evidence.push(`marker:${normalized}`);
+  };
+  const addField = (key, value) => {
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return;
+    const normalizedKey = normalizeSignal(key);
+    const normalizedValue = normalizeScalar(String(value));
+    fields.set(normalizedKey, normalizedValue);
+    evidence.push(`field:${normalizedKey}:${normalizedValue}`);
+    if (normalizedKey === "status") addStatus(String(value));
+  };
+  if (input.artifactPath) {
+    evidence.push(`artifact:${input.artifactPath}`);
+    const parsed = splitFrontmatter(readFileSync6(input.artifactPath, "utf8"));
+    for (const [key, value] of Object.entries(parsed.data)) {
+      if (Array.isArray(value)) continue;
+      addField(key, value);
+    }
+    for (const marker of knownMarkers(parsed.body)) addMarker(marker);
+  }
+  if (input.outcome) {
+    addStatus(input.outcome.status);
+    addStatus(input.outcome.verdict);
+    addMarker(input.outcome.marker);
+    addMarker(input.outcome.verdict);
+    for (const [key, value] of Object.entries(input.outcome.data ?? {})) addField(key, value);
+  }
+  for (const message of input.messages ?? []) {
+    for (const marker of knownMarkers(message)) addMarker(marker);
+  }
+  return { statuses, markers, fields, evidence: unique(evidence) };
+}
+function evaluateSecurityPolicy(phase, signals) {
+  const threatsOpen = numberField(signals.fields.get("threats_open"));
+  if (threatsOpen !== void 0) {
+    return threatsOpen === 0 ? { ok: true, evidence: signals.evidence } : fail2("Security review has open threats; resolve or accept risks before continuing.", phase, signals.evidence);
+  }
+  if (signals.markers.has("open_threats") || signals.markers.has("escalate")) {
+    return fail2("Security review reported open threats; resolve or accept risks before continuing.", phase, signals.evidence);
+  }
+  if (signals.markers.has("secured") || signals.statuses.has("verified") || signals.statuses.has("passed")) {
+    return { ok: true, evidence: signals.evidence };
+  }
+  return { ok: false, resumeHint: "Security review did not report threats_open: 0 or SECURED.", evidence: signals.evidence.length ? signals.evidence : ["security-outcome:missing"] };
+}
+function evaluateNyquistPolicy(signals) {
+  const compliant = signals.fields.get("nyquist_compliant");
+  if (signals.markers.has("escalate")) {
+    return { ok: false, resumeHint: "Nyquist validation escalated unresolved coverage gaps.", evidence: signals.evidence };
+  }
+  if (compliant === "true") return { ok: true, evidence: signals.evidence };
+  if (compliant === "false") {
+    return { ok: false, resumeHint: "Nyquist validation is not compliant yet.", evidence: signals.evidence };
+  }
+  if (signals.markers.has("gaps_filled") || signals.statuses.has("passed") || signals.statuses.has("verified")) {
+    return { ok: true, evidence: signals.evidence };
+  }
+  return { ok: false, resumeHint: "Nyquist validation did not report compliant coverage.", evidence: signals.evidence.length ? signals.evidence : ["nyquist-outcome:missing"] };
+}
+function fail2(template, phase, evidence) {
+  return { ok: false, resumeHint: template.replaceAll("{phase}", phase), evidence };
+}
+function knownMarkers(text) {
+  const markers = [
+    "VERIFICATION PASSED",
+    "ISSUES FOUND",
+    "UI-SPEC VERIFIED",
+    "UI-SPEC BLOCKED",
+    "GAPS FILLED",
+    "OPEN_THREATS",
+    "SECURED",
+    "ESCALATE",
+    "UI REVIEW COMPLETE",
+    "APPROVED",
+    "BLOCKED"
+  ];
+  return markers.filter((marker) => new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${escapeRegExp(marker)}\\b`, "i").test(text));
+}
+function normalizeSignal(value) {
+  return normalizeScalar(value.replace(/^#+\s*/, ""));
+}
+function normalizeScalar(value) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+function numberField(value) {
+  if (value === void 0) return void 0;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : void 0;
+}
+function unique(values) {
+  return [...new Set(values)];
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 // src/orchestrator/reconciliation.ts
-import { relative as relative2 } from "path";
+import { relative as relative3 } from "path";
 
 // src/state-reconciliation/index.ts
-import { existsSync as existsSync10 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync11 } from "fs";
+import { join as join10 } from "path";
 
 // src/state-reconciliation/drift/noncanonical-plan-like-file.ts
 function detectNoncanonicalPlanLikeFiles(input) {
@@ -1231,7 +2089,7 @@ function detectNoncanonicalPlanLikeFiles(input) {
 }
 
 // src/state-reconciliation/drift/completion-timestamp.ts
-import { readFileSync as readFileSync4 } from "fs";
+import { readFileSync as readFileSync7 } from "fs";
 function detectCompletionTimestampDrift(input) {
   if (!input.roadmap) return empty();
   const repairs = [];
@@ -1284,7 +2142,7 @@ function detectCompletionTimestampDrift(input) {
 function provenCompletionDate(summaryPaths) {
   const dates = /* @__PURE__ */ new Set();
   for (const path of summaryPaths) {
-    const match = /^completed:\s*["']?(?<date>\d{4}-\d{2}-\d{2})["']?\s*$/m.exec(readFileSync4(path, "utf8"));
+    const match = /^completed:\s*["']?(?<date>\d{4}-\d{2}-\d{2})["']?\s*$/m.exec(readFileSync7(path, "utf8"));
     if (match?.groups) dates.add(match.groups.date);
   }
   return dates.size === 1 ? [...dates][0] : void 0;
@@ -1303,6 +2161,9 @@ function detectRoadmapDivergence(input) {
     if (!phase) continue;
     const expectedComplete = phase.summaries.length;
     const expectedTotal = phase.plans.length;
+    if (expectedTotal === 0 && expectedComplete === 0 && row.plansComplete === 0 && row.status === "Not started") {
+      continue;
+    }
     const expectedStatus = expectedTotal > 0 && expectedComplete === expectedTotal ? "Complete" : "Executing";
     const diverges = row.plansComplete !== expectedComplete || row.totalPlans !== expectedTotal || row.status !== expectedStatus;
     if (!diverges) continue;
@@ -1522,15 +2383,15 @@ function classifyDrift(input) {
 }
 
 // src/state-reconciliation/journal.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5 } from "fs";
-import { join as join5 } from "path";
+import { existsSync as existsSync6, readFileSync as readFileSync8 } from "fs";
+import { join as join6 } from "path";
 function readJournalState(basePath) {
-  const path = join5(basePath, ".planning", "orchestration-state.json");
-  if (!existsSync5(path)) {
+  const path = join6(basePath, ".planning", "orchestration-state.json");
+  if (!existsSync6(path)) {
     return { ok: true, path, blockers: [] };
   }
   try {
-    const parsed = JSON.parse(readFileSync5(path, "utf8"));
+    const parsed = JSON.parse(readFileSync8(path, "utf8"));
     if (!isJournal(parsed)) {
       return blocked(path, "orchestration-state.json has an invalid journal shape.");
     }
@@ -1575,22 +2436,22 @@ function blocked(path, message) {
 }
 
 // src/state-reconciliation/repair.ts
-import { existsSync as existsSync8, readFileSync as readFileSync8, writeFileSync as writeFileSync2 } from "fs";
-import { isAbsolute, relative, resolve } from "path";
+import { existsSync as existsSync9, readFileSync as readFileSync11, writeFileSync as writeFileSync3 } from "fs";
+import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve3 } from "path";
 
 // src/state-reconciliation/roadmap.ts
-import { existsSync as existsSync6, readFileSync as readFileSync6 } from "fs";
-import { join as join6 } from "path";
+import { existsSync as existsSync7, readFileSync as readFileSync9 } from "fs";
+import { join as join7 } from "path";
 function readRoadmapState(basePath) {
-  const path = join6(basePath, ".planning", "ROADMAP.md");
-  if (!existsSync6(path)) {
+  const path = join7(basePath, ".planning", "ROADMAP.md");
+  if (!existsSync7(path)) {
     return {
       path,
       phases: [],
       blockers: [metadataBlocker("roadmap", path, "Missing ROADMAP.md metadata file.")]
     };
   }
-  const lines = readFileSync6(path, "utf8").split(/\r?\n/);
+  const lines = readFileSync9(path, "utf8").split(/\r?\n/);
   const phases = [];
   for (const [index, line] of lines.entries()) {
     const cells = parseTableRow(line);
@@ -1668,11 +2529,11 @@ function metadataBlocker(artifact, path, message) {
 }
 
 // src/state-reconciliation/state.ts
-import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
-import { join as join7 } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync10 } from "fs";
+import { join as join8 } from "path";
 function readStateDigest(basePath) {
-  const path = join7(basePath, ".planning", "STATE.md");
-  if (!existsSync7(path)) {
+  const path = join8(basePath, ".planning", "STATE.md");
+  if (!existsSync8(path)) {
     return {
       path,
       frontmatter: {},
@@ -1680,10 +2541,10 @@ function readStateDigest(basePath) {
       blockers: [metadataBlocker2(path, "Missing STATE.md metadata file.")]
     };
   }
-  const content = readFileSync7(path, "utf8");
+  const content = readFileSync10(path, "utf8");
   return {
     path,
-    frontmatter: parseFrontmatter(content),
+    frontmatter: parseFrontmatter2(content),
     currentPosition: parseCurrentPosition(content),
     blockers: []
   };
@@ -1695,7 +2556,7 @@ function applyStateMetadataRepair(content, repair) {
   assertStateMetadataOnly(repair.after);
   return content.includes(repair.before) ? content.replace(repair.before, repair.after) : content;
 }
-function parseFrontmatter(content) {
+function parseFrontmatter2(content) {
   const match = /^---\r?\n(?<body>[\s\S]*?)\r?\n---/.exec(content);
   if (!match?.groups) return {};
   const root = {};
@@ -1826,10 +2687,10 @@ function checkPreconditions(basePath, repair, fs) {
   return void 0;
 }
 function isInsidePlanning(basePath, path) {
-  const planningRoot = resolve(basePath, ".planning");
-  const target = resolve(path);
-  const rel = relative(planningRoot, target);
-  return rel === "" || !!rel && !rel.startsWith("..") && !isAbsolute(rel);
+  const planningRoot = resolve3(basePath, ".planning");
+  const target = resolve3(path);
+  const rel = relative2(planningRoot, target);
+  return rel === "" || !!rel && !rel.startsWith("..") && !isAbsolute2(rel);
 }
 function repairBlocker(message, repair) {
   return {
@@ -1857,14 +2718,14 @@ function repairKind(path) {
   return void 0;
 }
 var defaultFileSystem = {
-  exists: existsSync8,
-  readFile: (path) => readFileSync8(path, "utf8"),
-  writeFile: (path, content) => writeFileSync2(path, content, "utf8")
+  exists: existsSync9,
+  readFile: (path) => readFileSync11(path, "utf8"),
+  writeFile: (path, content) => writeFileSync3(path, content, "utf8")
 };
 
 // src/state-reconciliation/scan.ts
-import { existsSync as existsSync9, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync10, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
+import { join as join9 } from "path";
 
 // src/state-reconciliation/artifacts.ts
 var PLAN_ARTIFACT = /^(?<phase>\d{2})-(?<plan>\d{2})-PLAN\.md$/;
@@ -1908,8 +2769,8 @@ function canonical(filename, kind, phase, plan) {
 
 // src/state-reconciliation/scan.ts
 function scanPlanningArtifacts(basePath) {
-  const phasesPath = join8(basePath, ".planning", "phases");
-  if (!existsSync9(phasesPath)) {
+  const phasesPath = join9(basePath, ".planning", "phases");
+  if (!existsSync10(phasesPath)) {
     const blocker = {
       reasonCode: "unknown-drift",
       artifact: "state",
@@ -1924,10 +2785,10 @@ function scanPlanningArtifacts(basePath) {
   const blockers = [];
   for (const entry of readdirSync2(phasesPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (!entry.isDirectory()) continue;
-    const phaseDir = join8(phasesPath, entry.name);
+    const phaseDir = join9(phasesPath, entry.name);
     for (const file of readdirSync2(phaseDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       if (!file.isFile()) continue;
-      const path = join8(phaseDir, file.name);
+      const path = join9(phaseDir, file.name);
       if (!statSync2(path).isFile()) continue;
       const classification = classifyArtifactName(file.name);
       if (classification.canonical) {
@@ -2042,10 +2903,12 @@ function suggestedActionFor(reasonCode) {
 // src/state-reconciliation/index.ts
 function reconcileBeforeDispatch(basePath, options = {}) {
   const scan = scanPlanningArtifacts(basePath);
+  const requestedPhase = options.phase?.padStart(2, "0");
+  const phases = requestedPhase ? scan.phases.filter((phase) => phase.phase === requestedPhase) : scan.phases;
   const snapshot = {
     phasesPath: scan.phasesPath,
-    phases: scan.phases,
-    totals: scan.totals
+    phases,
+    totals: options.phase ? totalsFor(phases) : scan.totals
   };
   const roadmap = readOptionalRoadmapState(basePath);
   const state = readOptionalStateDigest(basePath);
@@ -2069,11 +2932,21 @@ function reconcileBeforeDispatch(basePath, options = {}) {
     evidence: [...scan.evidence, ...detection.evidence]
   };
 }
+function totalsFor(phases) {
+  return {
+    plans: phases.reduce((total, phase) => total + phase.plans.length, 0),
+    summaries: phases.reduce((total, phase) => total + phase.summaries.length, 0),
+    verifications: phases.reduce((total, phase) => total + phase.verifications.length, 0),
+    reviews: phases.reduce((total, phase) => total + phase.reviews.length, 0),
+    contexts: phases.reduce((total, phase) => total + phase.contexts.length, 0),
+    noncanonical: phases.reduce((total, phase) => total + phase.noncanonical.length, 0)
+  };
+}
 function readOptionalRoadmapState(basePath) {
-  return existsSync10(join9(basePath, ".planning", "ROADMAP.md")) ? readRoadmapState(basePath) : void 0;
+  return existsSync11(join10(basePath, ".planning", "ROADMAP.md")) ? readRoadmapState(basePath) : void 0;
 }
 function readOptionalStateDigest(basePath) {
-  return existsSync10(join9(basePath, ".planning", "STATE.md")) ? readStateDigest(basePath) : void 0;
+  return existsSync11(join10(basePath, ".planning", "STATE.md")) ? readStateDigest(basePath) : void 0;
 }
 
 // src/orchestrator/reconciliation.ts
@@ -2103,6 +2976,7 @@ function reconcileBeforeDispatch2(snapshot, unit2) {
   const basePath = snapshot.cwd ?? process.cwd();
   const report = reconcileBeforeDispatch(basePath, {
     activeUnitId: unit2.id,
+    phase: unit2.phase,
     apply: snapshot.settings.workflow.state_reconciliation_apply === true
   });
   if (!report.ok) return toGateFailure(toReconciliationFailedError(report), basePath);
@@ -2120,13 +2994,22 @@ function toReconciliationFailedError(report) {
   return new ReconciliationFailedError(report);
 }
 function toGateFailure(error, basePath = process.cwd()) {
+  const recoveryDecision = classifyFailure({
+    kind: "reconciliation",
+    reasonCode: error.reasonCode,
+    blockers: error.blockers,
+    written: error.report.written,
+    evidence: error.evidence
+  });
   return {
     ok: false,
     gate: "reconcileBeforeDispatch",
-    reason: error.reasonCode,
-    retryable: false,
-    resumeHint: `State reconciliation blocked dispatch: ${error.reasonCode}. Inspect structured blockers before continuing.`,
-    evidence: boundedGateEvidence(error, basePath)
+    reason: recoveryDecision.class,
+    retryable: recoveryDecision.action === "retry",
+    resumeHint: recoveryDecision.remediation,
+    evidence: boundedGateEvidence(error, basePath),
+    recoveryDecision,
+    exitReason: recoveryDecision.class
   };
 }
 function boundedGateEvidence(error, basePath) {
@@ -2149,7 +3032,7 @@ function evidenceToStrings(evidence, basePath) {
   return values;
 }
 function safeRelativePath(basePath, path) {
-  const rel = relative2(basePath, path);
+  const rel = relative3(basePath, path);
   return rel && !rel.startsWith("..") ? rel : path;
 }
 function truncateEvidence(value) {
@@ -2162,31 +3045,49 @@ function runPreDispatchGates(snapshot, unit2, overrides = {}) {
     ["reconcileBeforeDispatch", overrides.reconcileBeforeDispatch ?? reconcileBeforeDispatch2],
     ["decideDispatch", overrides.decideDispatch ?? decideDispatch],
     ["validateToolContract", overrides.validateToolContract ?? validateToolContract],
-    ["prepareUnitRoot", overrides.prepareUnitRoot ?? prepareUnitRoot],
+    ["prepareUnitRoot", overrides.prepareUnitRoot ?? prepareUnitRoot2],
     ["persistRuntimeState", overrides.persistRuntimeState ?? persistRuntimeState]
   ];
+  const journalEvents = [];
+  const releaseEvidence = [];
   for (const [, gate] of orderedGates) {
     const result = gate(snapshot, unit2);
-    if (!result.ok) return result;
+    if (result.ok) releaseEvidence.push(...result.evidence.filter((item) => item.startsWith("branch:")));
+    if (result.journalEvents?.length) journalEvents.push(...result.journalEvents);
+    if (!result.ok) return { ...result, journalEvents: result.journalEvents?.length ? result.journalEvents : journalEvents };
   }
-  return { ok: true, gate: "persistRuntimeState", evidence: orderedGates.map(([name]) => name) };
+  return { ok: true, gate: "persistRuntimeState", evidence: [...orderedGates.map(([name]) => name), ...releaseEvidence], journalEvents: journalEvents.length ? journalEvents : void 0 };
 }
 function runPostDispatchGate(snapshot, unit2, options = {}) {
-  const exists = options.exists ?? existsSync11;
+  const exists = options.exists ?? existsSync12;
   const cwd = options.cwd ?? process.cwd();
-  const phaseDir = join10(cwd, ".planning", "phases");
-  if (unit2.type === "plan") {
-    return existsMatching(cwd, phaseDir, unit2.phase, "PLAN.md", exists, options.written) ? pass("artifact", "plan artifact exists") : fail("Plan Unit did not produce a *-PLAN.md artifact.", [`missing:${unit2.phase}-*-PLAN.md`]);
-  }
-  if (unit2.type === "execute") {
-    return existsMatching(cwd, phaseDir, unit2.phase, "SUMMARY.md", exists, options.written) ? pass("artifact", "summary artifact exists") : fail("Execute Unit did not produce a *-SUMMARY.md artifact.", [`missing:${unit2.phase}-*-SUMMARY.md`]);
-  }
+  const phaseDir = join11(cwd, ".planning", "phases");
   if (unit2.type === "verify") {
     if (options.verifierSkip || !snapshot.settings.workflow.verifier) return pass("artifact", "verifier skipped by settings");
-    return existsMatching(cwd, phaseDir, unit2.phase, "VERIFICATION.md", exists, options.written) ? pass("artifact", "verification artifact exists") : fail("Verify Unit did not produce a *-VERIFICATION.md artifact.", [`missing:${unit2.phase}-*-VERIFICATION.md`]);
   }
   if (unit2.type === "closeout") {
-    return closeoutEvidence(cwd, unit2.phase, options.written) ? pass("artifact", "closeout roadmap/state evidence exists") : fail("Closeout Unit requires ROADMAP and STATE evidence for the phase.", [`missing-closeout-evidence:${unit2.phase}`]);
+    if (!closeoutEvidence(cwd, unit2.phase, options.written)) {
+      return fail3("Closeout Unit requires ROADMAP and STATE evidence for the phase.", [`missing-closeout-evidence:${unit2.phase}`]);
+    }
+    if (snapshot.settings.workflow.verifier && !phaseVerificationPassed(cwd, phaseDir, unit2.phase, exists)) {
+      return fail3("Closeout requires latest VERIFICATION.md with status: passed.", [`verification-not-passed:${unit2.phase}`]);
+    }
+    return pass("artifact", "closeout roadmap/state evidence exists");
+  }
+  const policy = POST_DISPATCH_POLICIES[unit2.type];
+  if (policy) {
+    const artifactPath = policy.artifactSuffix ? findMatchingArtifact(cwd, phaseDir, unit2.phase, policy.artifactSuffix, exists, options.written) : void 0;
+    if (policy.artifactSuffix && !artifactPath) {
+      return fail3(`${unit2.label} Unit did not produce a *-${policy.artifactSuffix} artifact.`, [`missing:${unit2.phase}-*-${policy.artifactSuffix}`]);
+    }
+    const outcome = evaluatePostDispatchPolicy(policy, {
+      artifactPath,
+      messages: options.messages,
+      outcome: options.outcome,
+      phase: unit2.phase,
+      unitType: unit2.type
+    });
+    return outcome.ok ? { ok: true, gate: "artifact", evidence: outcome.evidence.length ? outcome.evidence : [`${unit2.type} outcome accepted`] } : fail3(outcome.resumeHint, outcome.evidence);
   }
   return pass("artifact", `${unit2.type} has no Phase 9 artifact gate`);
 }
@@ -2203,55 +3104,112 @@ function decideDispatch(_snapshot, unit2) {
 function validateToolContract(_snapshot, unit2) {
   return pass("validateToolContract", `phase-12-contract-seam:${unit2.type}`);
 }
-function prepareUnitRoot(snapshot, unit2) {
-  if (unit2.type === "execute" && snapshot.settings.workflow.worktrees === false) {
-    return pass("prepareUnitRoot", "worktree disabled by settings");
+function prepareUnitRoot2(snapshot, unit2) {
+  const result = prepareUnitRoot({
+    unitType: unit2.type,
+    unitId: unit2.id,
+    phase: unit2.phase,
+    projectRoot: snapshot.cwd,
+    unitRoot: snapshot.cwd,
+    expectedBranch: typeof unit2.metadata?.expectedBranch === "string" ? unit2.metadata.expectedBranch : void 0,
+    workflow: { worktrees: snapshot.settings.workflow.worktrees },
+    attempt: snapshot.attempt
+  });
+  if (result.ok) {
+    return {
+      ok: true,
+      gate: "prepareUnitRoot",
+      evidence: ["worktree-safety", `root:${result.root}`, result.evidence.branch ? `branch:${result.evidence.branch}` : void 0, ...result.evidence.messages ?? []].filter((item) => Boolean(item)),
+      journalEvents: result.evidence.journalEvents
+    };
   }
-  return pass("prepareUnitRoot", "phase-11-worktree-safety-seam");
+  return {
+    ok: false,
+    gate: "prepareUnitRoot",
+    reason: result.decision.class,
+    retryable: result.decision.action === "retry",
+    resumeHint: result.decision.remediation,
+    evidence: evidenceFromDecision(result.decision),
+    recoveryDecision: result.decision,
+    exitReason: result.decision.class,
+    journalEvents: Array.isArray(result.decision.evidence?.journalEvents) ? result.decision.evidence.journalEvents : void 0
+  };
 }
 function persistRuntimeState(_snapshot, unit2) {
   return pass("persistRuntimeState", `persist-ready:${unit2.id}`);
 }
+function evidenceFromDecision(decision2) {
+  const evidence = decision2.evidence ?? {};
+  return [
+    `class:${decision2.class}`,
+    `action:${decision2.action}`,
+    evidence.reasonCode ? `reasonCode:${String(evidence.reasonCode)}` : void 0,
+    evidence.unitId ? `unitId:${evidence.unitId}` : void 0,
+    evidence.root ? `root:${evidence.root}` : void 0,
+    evidence.branch ? `branch:${evidence.branch}` : void 0
+  ].filter((item) => Boolean(item));
+}
 function pass(gate, evidence) {
   return { ok: true, gate, evidence: [evidence] };
 }
-function fail(resumeHint, evidence) {
-  return { ok: false, gate: "artifact", reason: "gate-failed", retryable: false, resumeHint, evidence };
+function fail3(resumeHint, evidence) {
+  const recoveryDecision = classifyFailure({
+    kind: "artifact-gate",
+    reason: resumeHint,
+    evidence: { messages: evidence }
+  });
+  return {
+    ok: false,
+    gate: "artifact",
+    reason: recoveryDecision.class,
+    retryable: false,
+    resumeHint,
+    evidence,
+    recoveryDecision,
+    exitReason: recoveryDecision.class
+  };
 }
-function existsMatching(cwd, phaseRoot, phase, suffix, exists, written) {
-  if (!written?.length) return false;
-  const writtenSet = new Set(written.map((path) => normalizeWrittenPath(cwd, path)));
-  const artifactPattern = new RegExp(`^${escapeRegExp(phase)}(?:-\\d+)?-${escapeRegExp(suffix)}$`);
+function findMatchingArtifact(cwd, phaseRoot, phase, suffix, exists, written, requireWritten = true) {
+  if (requireWritten && !written?.length) return void 0;
+  const writtenSet = written?.length ? new Set(written.map((path) => normalizeWrittenPath(cwd, path))) : void 0;
+  const artifactPattern = new RegExp(`^${escapeRegExp2(phase)}(?:-\\d+)?-${escapeRegExp2(suffix)}$`);
   try {
     const candidates = [
-      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join10(phaseRoot, entry.name)),
-      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync3(join10(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join10(phaseRoot, entry.name, child.name)))
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join11(phaseRoot, entry.name)),
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync3(join11(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join11(phaseRoot, entry.name, child.name)))
     ];
-    return candidates.some((path) => artifactPattern.test(basename2(path)) && writtenSet.has(resolve2(path)) && exists(path));
+    return candidates.find((path) => artifactPattern.test(basename2(path)) && (!writtenSet || writtenSet.has(resolve4(path))) && exists(path));
   } catch {
-    return false;
+    return void 0;
   }
 }
-function escapeRegExp(value) {
+function escapeRegExp2(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function normalizeWrittenPath(cwd, value) {
-  return resolve2(isAbsolute2(value) ? value : resolve2(cwd, value));
+  return resolve4(isAbsolute3(value) ? value : resolve4(cwd, value));
 }
 function closeoutEvidence(cwd, phase, written) {
   if (!written?.length) return false;
   const writtenSet = new Set(written.map((path) => normalizeWrittenPath(cwd, path)));
-  const roadmapPath = resolve2(cwd, ".planning", "ROADMAP.md");
-  const statePath = resolve2(cwd, ".planning", "STATE.md");
+  const roadmapPath = resolve4(cwd, ".planning", "ROADMAP.md");
+  const statePath = resolve4(cwd, ".planning", "STATE.md");
   if (!writtenSet.has(roadmapPath) || !writtenSet.has(statePath)) return false;
   try {
-    const roadmap = readFileSync9(roadmapPath, "utf8");
-    const state = readFileSync9(statePath, "utf8");
-    statSync3(join10(cwd, ".planning", "phases"));
+    const roadmap = readFileSync12(roadmapPath, "utf8");
+    const state = readFileSync12(statePath, "utf8");
+    statSync3(join11(cwd, ".planning", "phases"));
     return roadmapPhaseComplete(roadmap, phase) && statePhaseComplete(state, phase);
   } catch {
     return false;
   }
+}
+function phaseVerificationPassed(cwd, phaseRoot, phase, exists) {
+  const verificationPath = findMatchingArtifact(cwd, phaseRoot, phase, "VERIFICATION.md", exists, void 0, false);
+  if (!verificationPath) return false;
+  const content = readFileSync12(verificationPath, "utf8");
+  const status = /^status:\s*(\S+)/m.exec(content)?.[1]?.trim().toLowerCase();
+  return status === "passed" || status === "pass";
 }
 function roadmapPhaseComplete(roadmap, phase) {
   const phaseNumber = Number(phase);
@@ -2277,6 +3235,7 @@ function extractCurrentPositionSection(state) {
 }
 
 // src/orchestrator/state-machine.ts
+var PLAN_CHECK_REVISION_CAP = 3;
 function startOrchestration(input) {
   const [currentUnit, ...remainingUnits] = input.units;
   const snapshot = {
@@ -2312,11 +3271,40 @@ function advanceOrchestration(snapshot, options = {}) {
   const dispatch = options.dispatch ?? defaultDispatch;
   const dispatchResult = dispatch(unit2, snapshot);
   if (!dispatchResult.ok) {
+    const releaseGate2 = releaseLeaseAfterUnit(snapshot, unit2, preGate, options.worktreeSafetyDeps);
+    if (!releaseGate2.ok) {
+      const releaseFailure = handleGateFailure(snapshot, unit2, releaseGate2, options.now);
+      return { ...releaseFailure, dispatched: unit2, events: [unitStarted, ...leaseEvents(preGate, snapshot, unit2, options.now), ...releaseFailure.events ?? []].filter((event) => Boolean(event)) };
+    }
     const paused = pause(snapshot, unit2, "dispatch-failed", dispatchResult.messages[0] ?? "Dispatch failed; inspect adapter output.", options.now, dispatchResult.messages);
-    return { ok: false, messages: dispatchResult.messages, snapshot: paused, status: getSnapshotStatus(paused), dispatched: unit2, events: [unitStarted, paused.lastEvent].filter((event) => Boolean(event)) };
+    return { ok: false, messages: dispatchResult.messages, snapshot: paused, status: getSnapshotStatus(paused), dispatched: unit2, events: [unitStarted, ...leaseEvents(preGate, snapshot, unit2, options.now), ...leaseEvents(releaseGate2, snapshot, unit2, options.now), paused.lastEvent].filter((event) => Boolean(event)) };
   }
-  const postGate = options.postDispatchGate ? options.postDispatchGate(snapshot, unit2) : runPostDispatchGate(snapshot, unit2, { cwd: snapshot.cwd, written: dispatchResult.written });
-  if (!postGate.ok) return handleGateFailure(snapshot, unit2, postGate, options.now);
+  const postGate = options.postDispatchGate ? options.postDispatchGate(snapshot, unit2) : runPostDispatchGate(snapshot, unit2, { cwd: snapshot.cwd, written: dispatchResult.written, messages: dispatchResult.messages, outcome: dispatchResult.outcome });
+  if (!postGate.ok) {
+    const revision = handlePlanCheckIssues(snapshot, unit2, postGate, unitStarted, preGate, options.now);
+    if (revision) return revision;
+    const releaseGate2 = releaseLeaseAfterUnit(snapshot, unit2, preGate, options.worktreeSafetyDeps);
+    const failure = handleGateFailure(snapshot, unit2, postGate, options.now);
+    if (!releaseGate2.ok) {
+      const releaseFailure = handleGateFailure(snapshot, unit2, releaseGate2, options.now);
+      return { ...releaseFailure, dispatched: unit2, events: [unitStarted, ...leaseEvents(preGate, snapshot, unit2, options.now), ...failure.events ?? [], ...releaseFailure.events ?? []].filter((event) => Boolean(event)) };
+    }
+    return { ...failure, events: [unitStarted, ...leaseEvents(preGate, snapshot, unit2, options.now), ...failure.events ?? [], ...leaseEvents(releaseGate2, snapshot, unit2, options.now)] };
+  }
+  const releaseGate = releaseLeaseAfterUnit(snapshot, unit2, preGate, options.worktreeSafetyDeps);
+  if (!releaseGate.ok) {
+    const releaseFailure = handleGateFailure(snapshot, unit2, releaseGate, options.now);
+    const gatePassed2 = [...evidenceOf(preGate), ...evidenceOf(postGate)].map((evidence) => ({
+      type: "gate_passed",
+      ts: timestamp(options.now),
+      phase: snapshot.phase,
+      unitId: unit2.id,
+      status: "completed",
+      attempt: snapshot.attempt,
+      evidence: [evidence]
+    }));
+    return { ...releaseFailure, dispatched: unit2, events: [unitStarted, ...gatePassed2, ...leaseEvents(preGate, snapshot, unit2, options.now), ...leaseEvents(postGate, snapshot, unit2, options.now), ...releaseFailure.events ?? []].filter((event) => Boolean(event)) };
+  }
   const [nextUnit, ...remainingUnits] = snapshot.remainingUnits;
   const status = nextUnit ? "running" : "completed";
   const advanced = withEvent({
@@ -2325,6 +3313,7 @@ function advanceOrchestration(snapshot, options = {}) {
     currentUnit: nextUnit ? { ...nextUnit, status: "running" } : void 0,
     remainingUnits,
     attempt: 0,
+    loopState: unit2.type === "plan-check" ? void 0 : snapshot.loopState,
     resumeHint: void 0
   }, {
     type: "unit_ended",
@@ -2345,7 +3334,7 @@ function advanceOrchestration(snapshot, options = {}) {
     evidence: [evidence]
   }));
   const completed = status === "completed" ? eventOf({ ...advanced, currentUnit: unit2 }, unit2, "orchestration_completed", "completed", options.now) : void 0;
-  return { ok: true, messages: dispatchResult.messages, snapshot: completed ? withEvent(advanced, completed) : advanced, status: getSnapshotStatus(completed ? withEvent(advanced, completed) : advanced), dispatched: unit2, events: [unitStarted, ...gatePassed, advanced.lastEvent, completed].filter((event) => Boolean(event)) };
+  return { ok: true, messages: dispatchResult.messages, snapshot: completed ? withEvent(advanced, completed) : advanced, status: getSnapshotStatus(completed ? withEvent(advanced, completed) : advanced), dispatched: unit2, events: [unitStarted, ...gatePassed, ...leaseEvents(preGate, snapshot, unit2, options.now), ...leaseEvents(postGate, snapshot, unit2, options.now), ...leaseEvents(releaseGate, snapshot, unit2, options.now), advanced.lastEvent, completed].filter((event) => Boolean(event)) };
 }
 function resumeOrchestration(snapshot, now) {
   const resumed = withEvent({ ...snapshot, status: "running", resumeHint: void 0 }, {
@@ -2380,6 +3369,84 @@ function getSnapshotStatus(snapshot) {
     resumeHint: snapshot.resumeHint
   };
 }
+function handlePlanCheckIssues(snapshot, unit2, gate, unitStarted, preGate, now) {
+  if (unit2.type !== "plan-check" || !hasPlanCheckIssues(gate)) return void 0;
+  const currentIteration = snapshot.loopState?.planCheckIterations ?? 1;
+  if (currentIteration >= PLAN_CHECK_REVISION_CAP) {
+    const resumeHint = "Plan checker reached maximum iterations. Provide guidance and retry, force proceed, or abandon.";
+    const paused = pause(snapshot, unit2, "plan-check-iteration-cap", resumeHint, now, gate.evidence, gate.recoveryDecision);
+    const gateFailed = {
+      type: "gate_failed",
+      ts: timestamp(now),
+      phase: snapshot.phase,
+      unitId: unit2.id,
+      status: "failed",
+      attempt: snapshot.attempt,
+      reason: "plan-check-iteration-cap",
+      resumeHint,
+      evidence: gate.evidence,
+      recoveryDecision: gate.recoveryDecision,
+      exitReason: gate.recoveryDecision?.class,
+      action: gate.recoveryDecision?.action
+    };
+    return {
+      ok: false,
+      messages: [resumeHint],
+      snapshot: paused,
+      status: getSnapshotStatus(paused),
+      dispatched: unit2,
+      events: [unitStarted, gateFailed, paused.lastEvent, ...leaseEvents(preGate, snapshot, unit2, now)].filter((event) => Boolean(event))
+    };
+  }
+  const revisionNumber = currentIteration;
+  const revisionUnit = {
+    id: `${snapshot.phase}:plan:revision-${revisionNumber}`,
+    type: "plan",
+    status: "running",
+    phase: snapshot.phase,
+    label: "Plan Revision",
+    required: true,
+    source: unit2.source,
+    metadata: { args: "--auto --revision", revision: revisionNumber }
+  };
+  const recheckUnit = { ...unit2, status: "pending" };
+  const scheduled = withEvent({
+    ...snapshot,
+    status: "running",
+    currentUnit: revisionUnit,
+    remainingUnits: [recheckUnit, ...snapshot.remainingUnits],
+    attempt: 0,
+    loopState: {
+      ...snapshot.loopState,
+      planCheckIterations: currentIteration + 1
+    },
+    resumeHint: void 0
+  }, {
+    type: "retry_scheduled",
+    ts: timestamp(now),
+    phase: snapshot.phase,
+    unitId: revisionUnit.id,
+    status: "running",
+    attempt: 0,
+    reason: "plan-check-issues-found",
+    resumeHint: `Plan checker found issues; scheduled revision ${revisionNumber}/${PLAN_CHECK_REVISION_CAP}.`,
+    evidence: gate.evidence
+  });
+  return {
+    ok: true,
+    messages: [`plan revision scheduled: ${revisionNumber}`],
+    snapshot: scheduled,
+    status: getSnapshotStatus(scheduled),
+    dispatched: unit2,
+    events: [unitStarted, scheduled.lastEvent, ...leaseEvents(preGate, snapshot, unit2, now)].filter((event) => Boolean(event))
+  };
+}
+function hasPlanCheckIssues(gate) {
+  return (gate.evidence ?? []).some((item) => {
+    const normalized = item.toLowerCase();
+    return normalized === "marker:issues_found" || normalized === "status:issues_found" || normalized === "field:status:issues_found";
+  });
+}
 function handleGateFailure(snapshot, unit2, gate, now) {
   if (gate.retryable && snapshot.settings.workflow.node_repair && snapshot.attempt < snapshot.settings.workflow.node_repair_budget) {
     const retrying = withEvent({ ...snapshot, attempt: snapshot.attempt + 1 }, {
@@ -2391,7 +3458,10 @@ function handleGateFailure(snapshot, unit2, gate, now) {
       attempt: snapshot.attempt + 1,
       reason: gate.reason,
       resumeHint: gate.resumeHint,
-      evidence: gate.evidence
+      evidence: gate.evidence,
+      recoveryDecision: gate.recoveryDecision,
+      exitReason: gate.recoveryDecision?.class,
+      action: gate.recoveryDecision?.action
     });
     const gateFailed2 = {
       type: "gate_failed",
@@ -2402,12 +3472,33 @@ function handleGateFailure(snapshot, unit2, gate, now) {
       attempt: snapshot.attempt,
       reason: gate.reason,
       resumeHint: gate.resumeHint,
-      evidence: gate.evidence
+      evidence: gate.evidence,
+      recoveryDecision: gate.recoveryDecision,
+      exitReason: gate.recoveryDecision?.class,
+      action: gate.recoveryDecision?.action
     };
-    return { ok: true, messages: [`retry scheduled: ${gate.reason}`], snapshot: retrying, status: getSnapshotStatus(retrying), events: [gateFailed2, retrying.lastEvent].filter((event) => Boolean(event)) };
+    return { ok: true, messages: [`retry scheduled: ${gate.reason}`], snapshot: retrying, status: getSnapshotStatus(retrying), events: [gateFailed2, retrying.lastEvent, ...leaseEvents(gate, snapshot, unit2, now)].filter((event) => Boolean(event)) };
   }
   const reason = gate.retryable ? "retry-budget-exhausted" : gate.reason;
-  const paused = pause(snapshot, unit2, reason, gate.resumeHint, now, gate.evidence);
+  if (gate.recoveryDecision?.action === "stop") {
+    const stopped = stopFromGate(snapshot, unit2, String(reason), gate.resumeHint, now, gate.evidence, gate.recoveryDecision);
+    const gateFailed2 = {
+      type: "gate_failed",
+      ts: timestamp(now),
+      phase: snapshot.phase,
+      unitId: unit2.id,
+      status: "failed",
+      attempt: snapshot.attempt,
+      reason,
+      resumeHint: gate.resumeHint,
+      evidence: gate.evidence,
+      recoveryDecision: gate.recoveryDecision,
+      exitReason: gate.recoveryDecision.class,
+      action: gate.recoveryDecision.action
+    };
+    return { ok: false, messages: [gate.resumeHint], snapshot: stopped, status: getSnapshotStatus(stopped), events: [gateFailed2, stopped.lastEvent, ...leaseEvents(gate, snapshot, unit2, now)].filter((event) => Boolean(event)) };
+  }
+  const paused = pause(snapshot, unit2, String(reason), gate.resumeHint, now, gate.evidence, gate.recoveryDecision);
   const gateFailed = {
     type: "gate_failed",
     ts: timestamp(now),
@@ -2417,11 +3508,14 @@ function handleGateFailure(snapshot, unit2, gate, now) {
     attempt: snapshot.attempt,
     reason,
     resumeHint: gate.resumeHint,
-    evidence: gate.evidence
+    evidence: gate.evidence,
+    recoveryDecision: gate.recoveryDecision,
+    exitReason: gate.recoveryDecision?.class,
+    action: gate.recoveryDecision?.action
   };
-  return { ok: false, messages: [gate.resumeHint], snapshot: paused, status: getSnapshotStatus(paused), events: [gateFailed, paused.lastEvent].filter((event) => Boolean(event)) };
+  return { ok: false, messages: [gate.resumeHint], snapshot: paused, status: getSnapshotStatus(paused), events: [gateFailed, paused.lastEvent, ...leaseEvents(gate, snapshot, unit2, now)].filter((event) => Boolean(event)) };
 }
-function pause(snapshot, unit2, reason, resumeHint, now, evidence) {
+function pause(snapshot, unit2, reason, resumeHint, now, evidence, recoveryDecision) {
   return withEvent({ ...snapshot, status: "paused", resumeHint }, {
     type: "pause",
     ts: timestamp(now),
@@ -2431,8 +3525,91 @@ function pause(snapshot, unit2, reason, resumeHint, now, evidence) {
     attempt: snapshot.attempt,
     reason,
     resumeHint,
-    evidence
+    evidence,
+    recoveryDecision,
+    exitReason: recoveryDecision?.class,
+    action: recoveryDecision?.action
   });
+}
+function stopFromGate(snapshot, unit2, reason, resumeHint, now, evidence, recoveryDecision) {
+  return withEvent({ ...snapshot, status: "stopped", resumeHint }, {
+    type: "stop",
+    ts: timestamp(now),
+    phase: snapshot.phase,
+    unitId: unit2.id,
+    status: "stopped",
+    attempt: snapshot.attempt,
+    reason,
+    resumeHint,
+    evidence,
+    recoveryDecision,
+    exitReason: recoveryDecision?.class,
+    action: recoveryDecision?.action
+  });
+}
+function releaseLeaseAfterUnit(snapshot, unit2, ownershipGate, worktreeSafetyDeps) {
+  if (!isSourceWritingUnit(unit2.type) || snapshot.settings.workflow.worktrees === false || !snapshot.cwd) {
+    return { ok: true, gate: "prepareUnitRoot", evidence: [] };
+  }
+  const acquired = ownershipGate.journalEvents?.find((event) => event.type === "lease_acquired" || event.type === "lease_stale_reclaimed");
+  const branch = acquired?.branch ?? branchFromGateEvidence(ownershipGate) ?? (typeof unit2.metadata?.expectedBranch === "string" ? unit2.metadata.expectedBranch : void 0);
+  const result = releaseLeaseOwnership({
+    unitType: unit2.type,
+    unitId: unit2.id,
+    phase: unit2.phase,
+    projectRoot: snapshot.cwd,
+    unitRoot: snapshot.cwd,
+    expectedBranch: branch,
+    workflow: { worktrees: snapshot.settings.workflow.worktrees },
+    attempt: snapshot.attempt,
+    deps: worktreeSafetyDeps
+  }, snapshot.cwd, branch);
+  if (result.ok) {
+    return { ok: true, gate: "prepareUnitRoot", evidence: ["lease released"], journalEvents: result.journalEvents };
+  }
+  return {
+    ok: false,
+    gate: "prepareUnitRoot",
+    reason: result.decision.class,
+    retryable: false,
+    resumeHint: result.decision.remediation,
+    evidence: evidenceFromRecoveryDecision(result.decision),
+    recoveryDecision: result.decision,
+    exitReason: result.decision.class
+  };
+}
+function branchFromGateEvidence(gate) {
+  return gate.evidence?.find((item) => item.startsWith("branch:"))?.slice("branch:".length);
+}
+function evidenceFromRecoveryDecision(decision2) {
+  const evidence = decision2.evidence ?? {};
+  return [
+    `class:${decision2.class}`,
+    `action:${decision2.action}`,
+    evidence.reasonCode ? `reasonCode:${String(evidence.reasonCode)}` : void 0,
+    evidence.unitId ? `unitId:${evidence.unitId}` : void 0,
+    evidence.root ? `root:${evidence.root}` : void 0,
+    evidence.branch ? `branch:${evidence.branch}` : void 0,
+    ...Array.isArray(evidence.messages) ? evidence.messages : []
+  ].filter((item) => Boolean(item));
+}
+function leaseEvents(gate, snapshot, unit2, now) {
+  return (gate.journalEvents ?? []).map((event) => ({
+    type: event.type,
+    ts: event.ts ?? timestamp(now),
+    phase: event.phase ?? snapshot.phase,
+    unitId: event.unitId ?? unit2.id,
+    status: "running",
+    attempt: event.attempt ?? snapshot.attempt,
+    reason: event.reasonCode,
+    action: event.action,
+    recoveryClass: event.recoveryClass,
+    root: event.root,
+    branch: event.branch,
+    paths: event.paths,
+    written: event.written,
+    message: event.message
+  }));
 }
 function eventOf(snapshot, unit2, type, status, now) {
   return { type, ts: timestamp(now), phase: snapshot.phase, unitId: unit2.id, status, attempt: snapshot.attempt };
@@ -2479,7 +3656,7 @@ function createAutoOrchestrator(deps = {}) {
     },
     advance() {
       if (!snapshot) return { ok: false, messages: ["orchestration has not started"], status: emptyStatus() };
-      const result = advanceOrchestration(snapshot, { dispatch: deps.dispatch, gates: deps.gates, now: deps.clock });
+      const result = advanceOrchestration(snapshot, { dispatch: deps.dispatch, gates: deps.gates, now: deps.clock, worktreeSafetyDeps: deps.worktreeSafetyDeps });
       if (result.snapshot) snapshot = result.snapshot;
       return record(result, snapshot, deps);
     },
@@ -2573,10 +3750,10 @@ function withLastEvent(snapshot, event) {
 }
 
 // src/orchestrator/journal.ts
-import { existsSync as existsSync12, mkdirSync as mkdirSync2, readFileSync as readFileSync10, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname3, isAbsolute as isAbsolute3, resolve as resolve3, relative as relative3 } from "path";
+import { existsSync as existsSync13, mkdirSync as mkdirSync3, readFileSync as readFileSync13, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname4, isAbsolute as isAbsolute4, resolve as resolve5, relative as relative4 } from "path";
 var DEFAULT_JOURNAL_PATH = ".planning/orchestration-state.json";
-var allowedEventKeys = /* @__PURE__ */ new Set(["type", "ts", "phase", "unitId", "status", "attempt", "reason", "resumeHint", "evidence"]);
+var allowedEventKeys = /* @__PURE__ */ new Set(["type", "event", "ts", "phase", "unitId", "status", "attempt", "reason", "resumeHint", "evidence", "recoveryDecision", "exitReason", "action", "recoveryClass", "reasonCode", "root", "branch", "paths", "written", "message", "host", "pid"]);
 var unsafeEventKeys = /* @__PURE__ */ new Set(["prompt", "userText", "env", "token", "secret", "password", "apiKey", "api_key", "authorization", "bearer", "args", "arguments", "rawArgs"]);
 var safeMetadataKeys = /* @__PURE__ */ new Set(["setting", "source", "label", "safe"]);
 var secretPattern = /(?:password|secret|token|api[_-]?key|authorization|bearer)/i;
@@ -2603,11 +3780,11 @@ function createJournalAdapter(options) {
 function readJournal(options) {
   const resolved = resolveJournalPath(options);
   if (!resolved.ok) return { ok: false, messages: resolved.messages };
-  if (!existsSync12(resolved.path)) {
+  if (!existsSync13(resolved.path)) {
     return { ok: true, messages: ["orchestration journal not found"] };
   }
   try {
-    const parsed = JSON.parse(readFileSync10(resolved.path, "utf8"));
+    const parsed = JSON.parse(readFileSync13(resolved.path, "utf8"));
     const journal = normalizeJournal(parsed);
     if (!journal) {
       return { ok: false, messages: ["orchestration journal is invalid"] };
@@ -2650,6 +3827,16 @@ function redactJournalEvent(event) {
       redacted.evidence = evidence.filter((item) => typeof item === "string").slice(0, maxEvidenceItems2).map(safeString);
       continue;
     }
+    if (key === "recoveryDecision") {
+      const recoveryDecision = sanitizeRecoveryDecision(value);
+      if (recoveryDecision) redacted.recoveryDecision = recoveryDecision;
+      continue;
+    }
+    if (key === "paths" || key === "written") {
+      const values = Array.isArray(value) ? value : [];
+      redacted[key] = values.filter((item) => typeof item === "string").slice(0, maxEvidenceItems2).map(safeString);
+      continue;
+    }
     if (typeof value === "string") {
       redacted[key] = safeString(value);
       continue;
@@ -2659,6 +3846,42 @@ function redactJournalEvent(event) {
     }
   }
   return redacted;
+}
+function sanitizeRecoveryDecision(value) {
+  if (!value || typeof value !== "object") return void 0;
+  const input = value;
+  const output = {};
+  for (const key of ["class", "action", "reasonCode", "message", "remediation"]) {
+    const item = input[key];
+    if (typeof item === "string") output[key] = safeString(item);
+  }
+  const evidence = input.evidence;
+  if (evidence && typeof evidence === "object") {
+    const source = evidence;
+    const safeEvidence = {};
+    for (const key of ["reasonCode", "unitId", "unitType", "phase", "branch", "expectedBranch", "root", "expectedProjectRoot", "actualCwd", "resolvedUnitRoot"]) {
+      const item = source[key];
+      if (typeof item === "string") safeEvidence[key] = safeString(item);
+    }
+    for (const key of ["paths", "messages"]) {
+      const item = source[key];
+      if (Array.isArray(item)) safeEvidence[key] = item.filter((entry) => typeof entry === "string").slice(0, maxEvidenceItems2).map(safeString);
+    }
+    const written = source.written;
+    if (Array.isArray(written)) safeEvidence.written = written.slice(0, maxEvidenceItems2).map(sanitizeWrittenEvidence).filter((entry) => Boolean(entry));
+    output.evidence = safeEvidence;
+  }
+  return output;
+}
+function sanitizeWrittenEvidence(value) {
+  if (!value || typeof value !== "object") return void 0;
+  const input = value;
+  const output = {};
+  for (const key of ["path", "action", "reasonCode", "kind"]) {
+    const item = input[key];
+    if (typeof item === "string") output[key] = safeString(item);
+  }
+  return Object.keys(output).length ? output : void 0;
 }
 function redactUnit(unit2) {
   if (!unit2.metadata) return unit2;
@@ -2671,8 +3894,8 @@ function redactUnit(unit2) {
 }
 function writeJournal(path, journal) {
   try {
-    mkdirSync2(dirname3(path), { recursive: true });
-    writeFileSync3(path, `${JSON.stringify(journal, null, 2)}
+    mkdirSync3(dirname4(path), { recursive: true });
+    writeFileSync4(path, `${JSON.stringify(journal, null, 2)}
 `, "utf8");
     return { ok: true, messages: ["orchestration journal written"], written: [path], snapshot: journal.snapshot, status: journal.snapshot ? void 0 : void 0 };
   } catch (error) {
@@ -2680,17 +3903,17 @@ function writeJournal(path, journal) {
   }
 }
 function resolveJournalPath(options) {
-  const cwd = resolve3(options.cwd);
-  const planningDir = resolve3(cwd, ".planning");
-  const candidate = resolve3(cwd, options.journalPath ?? DEFAULT_JOURNAL_PATH);
-  if (!isInsideOrSame(planningDir, candidate)) {
+  const cwd = resolve5(options.cwd);
+  const planningDir = resolve5(cwd, ".planning");
+  const candidate = resolve5(cwd, options.journalPath ?? DEFAULT_JOURNAL_PATH);
+  if (!isInsideOrSame2(planningDir, candidate)) {
     return { ok: false, messages: [`refusing orchestration journal path outside .planning: ${candidate}`] };
   }
   return { ok: true, path: candidate };
 }
-function isInsideOrSame(parent, child) {
-  const rel = relative3(parent, child);
-  return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
+function isInsideOrSame2(parent, child) {
+  const rel = relative4(parent, child);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute4(rel);
 }
 function normalizeJournal(value) {
   if (!value || typeof value !== "object") return void 0;
@@ -2782,7 +4005,7 @@ function isValidPhaseId(phase) {
 
 // src/orchestrator/trigger.ts
 function detectNativeAutoTrigger(input) {
-  const match = input.trim().match(/^\/(gsd-(?:plan-phase|execute-phase|verify-work|ship))\s+(\S+)([\s\S]*)$/);
+  const match = input.trim().match(/^\/(gsd-(?:discuss-phase|plan-phase|execute-phase|verify-work|ship))\s+(\S+)([\s\S]*)$/);
   if (!match) return void 0;
   const [, command, phase, rest] = match;
   if (/\s--chain(?:\s|$)/.test(rest)) return { command, phase, mode: "chain" };
@@ -2790,6 +4013,7 @@ function detectNativeAutoTrigger(input) {
   return void 0;
 }
 var commandStart = {
+  "gsd-discuss-phase": "discuss",
   "gsd-plan-phase": "plan",
   "gsd-execute-phase": "execute",
   "gsd-verify-work": "verify",
@@ -2814,7 +4038,7 @@ function createNativeAutoHandoff(options) {
 }
 
 // src/extension.ts
-var piGsdPackageRoot = resolve4(dirname4(fileURLToPath(import.meta.url)), "..");
+var piGsdPackageRoot = resolve6(dirname5(fileURLToPath(import.meta.url)), "..");
 var TEMP_DIR_SUBDIRS = ["async-subagent-results", "async-subagent-runs"];
 function buildPiSubagentsTempRoot() {
   const username = (() => {
@@ -2831,14 +4055,14 @@ function buildPiSubagentsTempRoot() {
     return "unknown";
   })();
   const sanitized = username.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
-  return join12(tmpdir(), `pi-subagents-user-${sanitized}`);
+  return join13(tmpdir(), `pi-subagents-user-${sanitized}`);
 }
 function guardPiSubagentsTempDirs(options) {
   try {
-    const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync3 };
+    const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync4 };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
     for (const subdir of TEMP_DIR_SUBDIRS) {
-      const dirPath = join12(tempRoot, subdir);
+      const dirPath = join13(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
       } catch {
@@ -2891,7 +4115,7 @@ function piGsdExtension(pi) {
     return { messages };
   });
   pi.on("message_end", (event, ctx) => {
-    if (!isRecord2(event.message) || event.message.role !== "assistant") {
+    if (!isRecord3(event.message) || event.message.role !== "assistant") {
       return void 0;
     }
     const pkgRoot = getPackageRoot(ctx.cwd);
@@ -2899,8 +4123,11 @@ function piGsdExtension(pi) {
     return { message: rewriteMessageForRuntime(event.message, pkgRoot) };
   });
   pi.on("input", (event, ctx) => {
-    const text = isRecord2(event) && typeof event.text === "string" ? event.text : void 0;
+    const text = isRecord3(event) && typeof event.text === "string" ? event.text : void 0;
     if (!text) return { action: "continue" };
+    const trigger = detectNativeAutoTrigger(text);
+    if (!trigger) return { action: "continue" };
+    if (!process.env.PI_GSD_DISPATCH_COMMAND) return { action: "continue" };
     const resourceRoot = piGsdPackageRoot;
     const handoff = createNativeAutoHandoff({
       cwd: ctx.cwd,
@@ -2946,7 +4173,7 @@ function piGsdExtension(pi) {
   });
 }
 function rewriteMessageForRuntime(message, officialRoot) {
-  if (!isRecord2(message)) {
+  if (!isRecord3(message)) {
     return message;
   }
   const content = message.content;
@@ -2962,12 +4189,12 @@ function rewriteMessageForRuntime(message, officialRoot) {
   return message;
 }
 function rewriteTextBlock(block, officialRoot) {
-  if (!isRecord2(block) || block.type !== "text" || typeof block.text !== "string") {
+  if (!isRecord3(block) || block.type !== "text" || typeof block.text !== "string") {
     return block;
   }
   return { ...block, text: rewriteRuntimeMessageText(block.text, officialRoot) };
 }
-function isRecord2(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null;
 }
 function notify(ctx, message, type) {
@@ -2981,6 +4208,8 @@ function errorMessage(error) {
 }
 
 export {
+  splitFrontmatter,
+  writeFrontmatter,
   commandFileToPiPromptName,
   normalizeGsdSlashReferences,
   transformGsdRunLauncher,
@@ -2996,7 +4225,26 @@ export {
   rewriteRuntimeMessageText,
   createCommandDispatchRunner,
   createDispatchAdapter,
+  loadOfficialWorkflowConfig,
   resolveWorkflowSettings,
+  readCurrentBranch,
+  hasGitMarker,
+  defaultWorktreeSafetyDeps,
+  RECOVERY_CLASSES,
+  RECOVERY_ACTION_VALUES,
+  RECOVERY_ACTIONS,
+  RECONCILIATION_REASON_TO_RECOVERY_CLASS,
+  classifyFailure,
+  readLeaseRecord,
+  checkLeaseOwnership,
+  releaseLeaseOwnership,
+  reclaimStaleLeaseIfSafe,
+  leaseAcquiredEvent,
+  leaseReleasedEvent,
+  leaseStaleReclaimedEvent,
+  isSourceWritingUnit,
+  resolveExpectedUnitRoot,
+  prepareUnitRoot,
   createAutoOrchestrator,
   start,
   advance,

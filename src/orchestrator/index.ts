@@ -1,5 +1,6 @@
 import { buildUnitQueue, inferPhaseSignals, resolveWorkflowSettings } from "./settings.js";
 import { advanceOrchestration, getSnapshotStatus, resumeOrchestration, startOrchestration, stopOrchestration, type AdvanceOptions } from "./state-machine.js";
+import type { WorktreeSafetyDeps } from "../worktree-safety/index.js";
 import type { AutoOrchestrator, DispatchAdapter, OrchestrationEvent, OrchestrationSnapshot, OrchestratorResult, OrchestratorSessionContext, OrchestratorStatus, QueueBuildInput, QueueBuildResult, ResolvedWorkflowSettings, StateDigestAdapter, JournalAdapter } from "./types.js";
 
 export type AutoOrchestratorDependencies = {
@@ -10,6 +11,7 @@ export type AutoOrchestratorDependencies = {
   journal?: JournalAdapter;
   stateDigest?: StateDigestAdapter;
   gates?: AdvanceOptions["gates"];
+  worktreeSafetyDeps?: Partial<WorktreeSafetyDeps>;
   clock?: () => string;
 };
 
@@ -45,7 +47,7 @@ export function createAutoOrchestrator(deps: AutoOrchestratorDependencies = {}):
 
     advance() {
       if (!snapshot) return { ok: false, messages: ["orchestration has not started"], status: emptyStatus() };
-      const result = advanceOrchestration(snapshot, { dispatch: deps.dispatch, gates: deps.gates, now: deps.clock });
+      const result = advanceOrchestration(snapshot, { dispatch: deps.dispatch, gates: deps.gates, now: deps.clock, worktreeSafetyDeps: deps.worktreeSafetyDeps });
       if (result.snapshot) snapshot = result.snapshot;
       return record(result, snapshot, deps);
     },

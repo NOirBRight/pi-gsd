@@ -139,6 +139,86 @@ describe("orchestrator journal", () => {
     expect(serialized).toContain("safe");
   });
 
+  it("appends lease events through the actual orchestrator journal flow", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-journal-flow-"));
+    mkdirSync(join(cwd, ".git"), { recursive: true });
+    const phaseDir = join(cwd, ".planning", "phases", "11-fixture");
+    mkdirSync(phaseDir, { recursive: true });
+    const summary = join(phaseDir, "11-SUMMARY.md");
+    const orchestrator = createAutoOrchestrator({
+      settingsResolver: () => settings,
+      queueBuilder: () => ({ decision: "dispatch", settings, units: [{ ...unit("11:execute"), phase: "11" }] }),
+      journal: createJournalAdapter({ cwd }),
+      gates: { reconcileBeforeDispatch: () => ({ ok: true, gate: "reconcileBeforeDispatch", evidence: ["test-reconciliation-pass"] }) },
+      dispatch: () => {
+        writeFileSync(summary, "summary\n", "utf8");
+        return { ok: true, messages: ["dispatched"], written: [summary] };
+      },
+    });
+
+    expect(orchestrator.start({ phase: "11", mode: "chain", cwd }).ok).toBe(true);
+    const result = orchestrator.advance();
+    expect(result.ok).toBe(true);
+    const serialized = readFileSync(join(cwd, ".planning", "orchestration-state.json"), "utf8");
+    expect(serialized).toContain("lease_acquired");
+    expect(serialized).toContain("lease_released");
+    expect(serialized).toContain("unitId");
+    expect(serialized).toContain("root");
+    const journal = readJournal({ cwd });
+    expect(journal.journal?.events.map((event) => event.type)).toEqual(expect.arrayContaining(["lease_acquired", "lease_released"]));
+    expect(journal.journal?.events.find((event) => event.type === "lease_released")).toEqual(expect.objectContaining({ unitId: "11:execute", phase: "11", root: cwd }));
+  });
+
+  it("persists bounded recovery and lease evidence while dropping unsafe payloads", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-journal-lease-"));
+    for (const type of ["lease_acquired", "lease_released", "lease_stale_reclaimed"] as const) {
+      const result = appendJournalEvent({
+        cwd,
+        snapshot: snapshot(),
+        event: {
+          type,
+          event: type,
+          ts: "2026-06-01T00:00:00.000Z",
+          phase: "11",
+          unitId: "11:execute",
+          status: "running",
+          attempt: 1,
+          root: join(cwd, "wt"),
+          branch: "worktree-agent-test",
+          action: type === "lease_stale_reclaimed" ? "pause-with-remediation" : "self-heal",
+          recoveryClass: type === "lease_stale_reclaimed" ? "unrepaired-state-drift" : "repairable-state-drift",
+          paths: [join(cwd, ".planning", "worktree-leases", "lease.json")],
+          written: [".planning/worktree-leases/lease.json"],
+          message: "concise message",
+          recoveryDecision: { class: "unrepaired-state-drift", action: "pause-with-remediation", reasonCode: "lease-stale-incomplete", message: "short", remediation: "inspect", evidence: { unitId: "11:execute", root: join(cwd, "wt"), paths: Array.from({ length: 25 }, (_, index) => `path-${index}`), messages: ["safe", "token-value"], written: [{ path: ".planning/ROADMAP.md", action: "update", reasonCode: "partial-write", kind: "roadmap", before: "raw before content" }] } },
+          prompt: "raw prompt",
+          env: { SECRET: "SECRET" },
+          token: "token-value",
+          secret: "secret-value",
+          args: ["unbounded args"],
+        } as never,
+      });
+      expect(result.ok).toBe(true);
+    }
+
+    const serialized = readFileSync(join(cwd, ".planning", "orchestration-state.json"), "utf8");
+    expect(serialized).toContain("lease_acquired");
+    expect(serialized).toContain("lease_released");
+    expect(serialized).toContain("lease_stale_reclaimed");
+    expect(serialized).toContain("unrepaired-state-drift");
+    expect(serialized).toContain("pause-with-remediation");
+    expect(serialized).not.toContain("raw prompt");
+    expect(serialized).not.toContain("SECRET");
+    expect(serialized).not.toContain("token-value");
+    expect(serialized).not.toContain("secret-value");
+    expect(serialized).not.toContain("unbounded args");
+    const journal = readJournal({ cwd });
+    const stale = journal.journal?.events.find((event) => event.type === "lease_stale_reclaimed");
+    expect(stale?.recoveryDecision?.evidence?.paths).toHaveLength(20);
+    expect(stale?.recoveryDecision?.evidence?.written).toEqual([{ path: ".planning/ROADMAP.md", action: "update", reasonCode: "partial-write", kind: "roadmap" }]);
+    expect(serialized).not.toContain("raw before content");
+  });
+
   it("reads the latest unfinished snapshot for resume", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-journal-"));
     writeJournalSnapshot({ cwd, snapshot: snapshot(unit("09:verify")) });

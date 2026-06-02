@@ -1,4 +1,4 @@
-import { accessSync } from 'node:fs';
+import { accessSync, Stats } from 'node:fs';
 
 declare const OFFICIAL_PACKAGE_NAME = "@opengsd/gsd-core";
 interface OfficialPaths {
@@ -9,6 +9,8 @@ interface OfficialPaths {
     agentsDir: string;
     hooksDir: string;
     gsdTools: string;
+    configDefaultsManifest: string;
+    configSchemaManifest: string;
 }
 interface OfficialPackage {
     packageRoot: string;
@@ -167,6 +169,10 @@ declare function generatePrompts(options: GeneratePromptsOptions): GeneratePromp
  */
 declare function generateWorkflows(options: GenerateWorkflowsOptions): GenerateWorkflowsResult;
 declare function generateAll(options: GenerateAllOptions): GenerateAllResult;
+declare function writeOfficialVersionStamp(options: {
+    officialRoot: string;
+    generatedRoot: string;
+}): void;
 
 declare const PI_SUBAGENTS_PACKAGE_NAME = "pi-subagents";
 type PiSubagentsPackage = {
@@ -231,11 +237,230 @@ declare function runDoctor(options: DoctorOptions): DoctorResult;
 declare function rewriteOfficialClaudePaths(input: string, officialRoot: string): string;
 declare function rewriteRuntimeMessageText(input: string, officialRoot: string): string;
 
+declare const RECONCILIATION_REASON_CODES: readonly ["sketch-flag-drift", "completion-timestamp-drift", "roadmap-divergence", "stale-worker", "unregistered-milestone", "summary-count-mismatch", "noncanonical-plan-like-file", "unknown-drift", "partial-write"];
+type ReconciliationReasonCode = (typeof RECONCILIATION_REASON_CODES)[number];
+type ReconciliationSuggestedNextAction = "manual-review" | "rerun-reconcile" | "requires-recovery-classification";
+type CanonicalArtifactKind = "plan" | "summary" | "verification" | "review" | "context";
+type ReconciliationEvidence = {
+    reasonCode: ReconciliationReasonCode;
+    path?: string;
+    paths?: string[];
+    phase?: string;
+    plan?: string;
+    artifact?: CanonicalArtifactKind | "roadmap" | "state" | "journal" | "noncanonical";
+    message: string;
+    metadata?: Record<string, string | number | boolean>;
+};
+type ReconciliationRepair = {
+    kind?: "roadmap" | "state" | "journal";
+    reasonCode: ReconciliationReasonCode;
+    action: string;
+    description: string;
+    path?: string;
+    before?: string;
+    after?: string;
+    phase?: string;
+    plan?: string;
+    evidence: ReconciliationEvidence[];
+};
+type ReconciliationWrite = {
+    kind?: "roadmap" | "state" | "journal";
+    reasonCode: ReconciliationReasonCode;
+    path: string;
+    action: "create" | "update" | "delete";
+};
+type ReconciliationBlocker = {
+    reasonCode: ReconciliationReasonCode;
+    message: string;
+    evidence: ReconciliationEvidence[];
+    phase?: string;
+    artifact?: CanonicalArtifactKind | "state" | "roadmap" | "journal" | "noncanonical";
+    repairPlan?: ReconciliationRepair[];
+    written?: ReconciliationWrite[];
+    suggestedNextAction?: ReconciliationSuggestedNextAction;
+};
+
+declare const RECOVERY_CLASSES: readonly ["transient-external-failure", "repairable-state-drift", "unrepaired-state-drift", "worktree-invalid", "dispatch-contract-invalid", "artifact-gate-failed", "user-input-required", "internal-invariant-violation"];
+type RecoveryClass = (typeof RECOVERY_CLASSES)[number];
+declare const RECOVERY_ACTION_VALUES: readonly ["retry", "pause-with-remediation", "self-heal", "stop"];
+type RecoveryAction = (typeof RECOVERY_ACTION_VALUES)[number];
+declare const RECOVERY_ACTIONS: {
+    readonly "transient-external-failure": "retry";
+    readonly "repairable-state-drift": "self-heal";
+    readonly "unrepaired-state-drift": "pause-with-remediation";
+    readonly "worktree-invalid": "stop";
+    readonly "dispatch-contract-invalid": "stop";
+    readonly "artifact-gate-failed": "pause-with-remediation";
+    readonly "user-input-required": "pause-with-remediation";
+    readonly "internal-invariant-violation": "stop";
+};
+type RecoveryDecisionEvidence = {
+    reasonCode?: ReconciliationReasonCode | string;
+    unitId?: string;
+    unitType?: string;
+    phase?: string;
+    branch?: string;
+    expectedBranch?: string;
+    root?: string;
+    expectedProjectRoot?: string;
+    actualCwd?: string;
+    resolvedUnitRoot?: string;
+    paths?: string[];
+    attempt?: number;
+    written?: ReconciliationWrite[];
+    messages?: string[];
+    blockers?: ReconciliationBlocker[];
+    reconciliationEvidence?: ReconciliationEvidence[];
+    journalEvents?: object[];
+    [key: string]: string | number | boolean | object | string[] | object[] | undefined;
+};
+type RecoveryDecision = {
+    class: RecoveryClass;
+    action: RecoveryAction;
+    reasonCode?: ReconciliationReasonCode | string;
+    message: string;
+    remediation: string;
+    evidence?: RecoveryDecisionEvidence;
+};
+type ReconciliationRecoveryInput = {
+    kind: "reconciliation";
+    reasonCode: ReconciliationReasonCode;
+    blockers?: ReconciliationBlocker[];
+    written?: ReconciliationWrite[];
+    evidence?: ReconciliationEvidence[];
+};
+type GateRecoveryInput = {
+    kind: "gate";
+    gate: string;
+    reason?: string;
+    retryable?: boolean;
+    evidence?: RecoveryDecisionEvidence;
+};
+type DispatchRecoveryInput = {
+    kind: "dispatch";
+    reason?: string;
+    evidence?: RecoveryDecisionEvidence;
+};
+type ArtifactGateRecoveryInput = {
+    kind: "artifact-gate";
+    reason?: string;
+    evidence?: RecoveryDecisionEvidence;
+};
+type WorktreeRecoveryInput = {
+    kind: "worktree";
+    reasonCode: string;
+    message?: string;
+    remediation?: string;
+    evidence?: RecoveryDecisionEvidence;
+    class?: RecoveryClass;
+};
+type ExternalRecoveryInput = {
+    kind: "external";
+    reasonCode: "provider-network" | "missing-auth" | "user-input" | "internal" | string;
+    message?: string;
+    evidence?: RecoveryDecisionEvidence;
+};
+type RecoveryFailureKind = RecoveryFailureInput["kind"];
+type RecoveryFailureInput = ReconciliationRecoveryInput | GateRecoveryInput | DispatchRecoveryInput | ArtifactGateRecoveryInput | WorktreeRecoveryInput | ExternalRecoveryInput;
+
+type LeaseJournalEvent = {
+    type: "lease_acquired" | "lease_released" | "lease_stale_reclaimed";
+    event?: "lease_acquired" | "lease_released" | "lease_stale_reclaimed";
+    ts?: string;
+    phase?: string;
+    unitId: string;
+    root?: string;
+    paths?: string[];
+    branch?: string;
+    attempt?: number;
+    action?: string;
+    recoveryClass?: string;
+    reasonCode?: string;
+    written?: string[];
+    message?: string;
+    host?: string;
+    pid?: number;
+};
+type WorktreeEvidence = RecoveryDecisionEvidence & {
+    root?: string;
+    branch?: string;
+    expectedBranch?: string;
+    journalEvents?: LeaseJournalEvent[];
+};
+type PrepareUnitRootResult = {
+    ok: true;
+    root: string;
+    evidence: WorktreeEvidence;
+} | {
+    ok: false;
+    decision: RecoveryDecision;
+};
+type WorktreeLeaseRecord = {
+    unitId: string;
+    sessionId?: string;
+    phase?: string;
+    branch?: string;
+    root?: string;
+    host?: string;
+    pid?: number;
+    updatedAt?: string;
+};
+type LeaseOwnershipEvidence = {
+    expected?: Partial<WorktreeLeaseRecord>;
+    actual?: Partial<WorktreeLeaseRecord>;
+    provenInactive?: boolean;
+    incomplete?: boolean;
+    contradictory?: boolean;
+};
+type WorktreeLeaseCheck = {
+    ok: true;
+    record?: WorktreeLeaseRecord;
+    journalEvents?: LeaseJournalEvent[];
+    selfHealed?: boolean;
+} | {
+    ok: false;
+    decision: RecoveryDecision;
+};
+type GitProbeDeps = {
+    existsSync(path: string): boolean;
+    lstatSync(path: string): Pick<Stats, "isFile" | "isDirectory">;
+    readFileSync(path: string): string;
+    writeFileSync(path: string, content: string): void;
+    unlinkSync(path: string): void;
+    mkdirSync(path: string, options?: {
+        recursive?: boolean;
+    }): void;
+    cwd(): string;
+    env(name: string): string | undefined;
+    currentBranch(root: string): string | undefined;
+    now(): string;
+    hostname(): string;
+    pid(): number;
+    isProcessAlive?(pid: number, host?: string): boolean | undefined;
+};
+type WorktreeSafetyDeps = GitProbeDeps;
+type PrepareUnitRootInput = {
+    unitType: UnitType;
+    unitId: string;
+    phase?: string;
+    projectRoot?: string;
+    unitRoot?: string;
+    expectedBranch?: string;
+    workflow?: {
+        worktrees?: boolean;
+    };
+    sessionId?: string;
+    attempt?: number;
+    leasePath?: string;
+    deps?: Partial<WorktreeSafetyDeps>;
+};
+type PrepareUnitRootOptions = Omit<PrepareUnitRootInput, "unitType" | "unitId">;
+
 type UnitType = "discuss" | "research" | "plan" | "plan-check" | "execute" | "code-review" | "verify" | "ui-review" | "security-review" | "nyquist-validation" | "ai-integration" | "ui-safety-gate" | "closeout" | "settings-gate" | "pause-for-user";
 type UnitStatus = "pending" | "running" | "completed" | "failed" | "paused" | "stopped";
 type WorkflowSettingSource = "default" | "config" | "override";
 type OrchestrationMode = "auto" | "chain";
-type StopReason = "gate-failed" | "ambiguous-dispatch" | "retry-budget-exhausted" | "dispatch-failed" | "stopped";
+type StopReason = "gate-failed" | "ambiguous-dispatch" | "retry-budget-exhausted" | "dispatch-failed" | "stopped" | RecoveryClass;
 type OrchestrationUnit = {
     id: string;
     type: UnitType;
@@ -244,7 +469,12 @@ type OrchestrationUnit = {
     label: string;
     required: boolean;
     source: WorkflowSettingSource | "phase-signal";
-    metadata?: Record<string, string | number | boolean>;
+    metadata?: {
+        args?: string;
+        setting?: string;
+        expectedBranch?: string;
+        [key: string]: string | number | boolean | undefined;
+    };
     resumeHint?: string;
 };
 type ResolvedWorkflowSettings = {
@@ -257,6 +487,13 @@ type ResolvedWorkflowSettings = {
         ui_phase: boolean;
         ui_review: boolean;
         code_review: boolean;
+        code_review_depth?: "quick" | "standard" | "deep" | string;
+        code_review_command?: string | null;
+        plan_review_convergence?: boolean;
+        max_discuss_passes?: number;
+        plan_bounce?: boolean;
+        plan_bounce_passes?: number;
+        post_planning_gaps?: boolean;
         security_enforcement?: boolean;
         nyquist_validation?: boolean;
         ai_integration_phase?: boolean;
@@ -270,6 +507,13 @@ type ResolvedWorkflowSettings = {
         state_reconciliation_apply?: boolean;
         subagent_timeout?: number;
         inline_plan_threshold?: number;
+    };
+    rawWorkflow?: Record<string, unknown>;
+    workflowMetadata?: {
+        officialPackage?: string;
+        officialVersion?: string;
+        officialRoot?: string;
+        schemaKeys?: string[];
     };
     sources?: Partial<Record<keyof ResolvedWorkflowSettings["workflow"], WorkflowSettingSource>>;
 };
@@ -300,6 +544,7 @@ type GateResult = {
     gate: GateName;
     evidence: string[];
     retryable?: false;
+    journalEvents?: LeaseJournalEvent[];
 } | {
     ok: false;
     gate: GateName;
@@ -307,6 +552,9 @@ type GateResult = {
     retryable: boolean;
     resumeHint: string;
     evidence?: string[];
+    recoveryDecision?: RecoveryDecision;
+    exitReason?: RecoveryClass;
+    journalEvents?: LeaseJournalEvent[];
 };
 type GateAdapter = (snapshot: OrchestrationSnapshot, unit: OrchestrationUnit) => GateResult;
 type DispatchAdapter = (unit: OrchestrationUnit, snapshot: OrchestrationSnapshot) => OrchestratorResult;
@@ -325,7 +573,7 @@ type StateDigestAdapter = {
     write: (snapshot: OrchestrationSnapshot) => OrchestratorResult;
 };
 type OrchestrationEvent = {
-    type: "orchestration_started" | "settings_resolved" | "unit_started" | "unit_ended" | "gate_passed" | "gate_failed" | "retry_scheduled" | "pause" | "resume" | "stop" | "orchestration_completed" | "start" | "unit-start" | "unit-end" | "gate-pass" | "gate-fail" | "retry";
+    type: "orchestration_started" | "settings_resolved" | "unit_started" | "unit_ended" | "gate_passed" | "gate_failed" | "retry_scheduled" | "pause" | "resume" | "stop" | "orchestration_completed" | "start" | "unit-start" | "unit-end" | "gate-pass" | "gate-fail" | "retry" | "lease_acquired" | "lease_released" | "lease_stale_reclaimed";
     ts: string;
     phase: string;
     unitId?: string;
@@ -334,6 +582,16 @@ type OrchestrationEvent = {
     reason?: string;
     resumeHint?: string;
     evidence?: string[];
+    recoveryDecision?: RecoveryDecision;
+    exitReason?: RecoveryClass;
+    action?: string;
+    journalEvents?: LeaseJournalEvent[];
+    recoveryClass?: RecoveryClass;
+    root?: string;
+    branch?: string;
+    paths?: string[];
+    written?: string[];
+    message?: string;
 };
 type OrchestrationSnapshot = {
     version: 1;
@@ -343,6 +601,10 @@ type OrchestrationSnapshot = {
     currentUnit?: OrchestrationUnit;
     remainingUnits: OrchestrationUnit[];
     attempt: number;
+    loopState?: {
+        planCheckIterations?: number;
+        previousIssueCount?: number;
+    };
     lastEvent?: OrchestrationEvent;
     resumeHint?: string;
     settings: ResolvedWorkflowSettings;
@@ -363,6 +625,13 @@ type OrchestratorResult = {
     snapshot?: OrchestrationSnapshot;
     written?: string[];
     events?: OrchestrationEvent[];
+    outcome?: OrchestrationOutcome;
+};
+type OrchestrationOutcome = {
+    status?: string;
+    marker?: string;
+    verdict?: string;
+    data?: Record<string, string | number | boolean>;
 };
 type AdvanceResult = OrchestratorResult & {
     dispatched?: OrchestrationUnit;
@@ -375,6 +644,23 @@ type AutoOrchestrator = {
     getStatus: () => OrchestratorStatus;
 };
 
+declare function readCurrentBranch(root: string): string | undefined;
+declare function hasGitMarker(root: string, deps?: Pick<WorktreeSafetyDeps, "existsSync">): boolean;
+declare const defaultWorktreeSafetyDeps: WorktreeSafetyDeps;
+
+declare function readLeaseRecord(root: string, leasePath: string | undefined, deps?: WorktreeSafetyDeps): WorktreeLeaseRecord | undefined;
+declare function checkLeaseOwnership(input: PrepareUnitRootInput, root: string, branch?: string, deps?: WorktreeSafetyDeps): WorktreeLeaseCheck;
+declare function releaseLeaseOwnership(input: PrepareUnitRootInput, root: string, branch?: string, deps?: WorktreeSafetyDeps): WorktreeLeaseCheck;
+declare function reclaimStaleLeaseIfSafe(record: WorktreeLeaseRecord, expected: WorktreeLeaseRecord, path: string, deps?: WorktreeSafetyDeps, attempt?: number): WorktreeLeaseCheck;
+declare function leaseAcquiredEvent(record: WorktreeLeaseRecord, path?: string, attempt?: number): LeaseJournalEvent;
+declare function leaseReleasedEvent(record: WorktreeLeaseRecord, path?: string, attempt?: number): LeaseJournalEvent;
+declare function leaseStaleReclaimedEvent(record: WorktreeLeaseRecord, path?: string, attempt?: number): LeaseJournalEvent;
+
+declare function isSourceWritingUnit(unitType: UnitType): boolean;
+declare function resolveExpectedUnitRoot(input: PrepareUnitRootInput, deps: WorktreeSafetyDeps): string;
+declare function prepareUnitRoot(unitType: UnitType, unitId: string, options?: PrepareUnitRootOptions): PrepareUnitRootResult;
+declare function prepareUnitRoot(input: PrepareUnitRootInput): PrepareUnitRootResult;
+
 type GateOverrides = Partial<Record<Exclude<GateName, "artifact">, GateAdapter>>;
 
 type AdvanceOptions = {
@@ -382,6 +668,7 @@ type AdvanceOptions = {
     dispatch?: DispatchAdapter;
     postDispatchGate?: GateAdapter;
     now?: () => string;
+    worktreeSafetyDeps?: Partial<WorktreeSafetyDeps>;
 };
 
 type AutoOrchestratorDependencies = {
@@ -392,6 +679,7 @@ type AutoOrchestratorDependencies = {
     journal?: JournalAdapter;
     stateDigest?: StateDigestAdapter;
     gates?: AdvanceOptions["gates"];
+    worktreeSafetyDeps?: Partial<WorktreeSafetyDeps>;
     clock?: () => string;
 };
 declare function createAutoOrchestrator(deps?: AutoOrchestratorDependencies): AutoOrchestrator;
@@ -401,4 +689,17 @@ declare function resume(): OrchestratorResult;
 declare function stop(reason: string): OrchestratorResult;
 declare function getStatus(): OrchestratorStatus;
 
-export { type AclCheckOptions, type AclCheckResult, type AgentSyncScope, type AutoOrchestrator, type AutoOrchestratorDependencies, type DispatchAdapter, type DoctorOptions, type DoctorResult, type FrontmatterData, type FrontmatterValue, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, type GenerateWorkflowsOptions, type GenerateWorkflowsResult, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, type OrchestrationUnit, type OrchestratorResult, type OrchestratorSessionContext, type OrchestratorStatus, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, addPiSubagentGuidance, advance, checkPiSubagentsTempAcl, commandFileToPiPromptName, createAutoOrchestrator, generateAgents, generateAll, generatePrompts, generateWorkflows, getStatus, materializeOfficialAgentPaths, normalizeGsdSlashReferences, resolveAgentTargetDir, resolveOfficialPackage, resolvePiSubagentsPackage, resume, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitCodeFences, splitFrontmatter, start, stop, syncAgents, transformAskUserQuestionForPi, transformGsdRunLauncher, transformOfficialAgentMarkdown, transformSkillDispatchForPi, transformSubagentDispatchForPi, writeFrontmatter };
+declare const RECONCILIATION_REASON_TO_RECOVERY_CLASS: {
+    readonly "sketch-flag-drift": "repairable-state-drift";
+    readonly "completion-timestamp-drift": "repairable-state-drift";
+    readonly "roadmap-divergence": "repairable-state-drift";
+    readonly "stale-worker": "unrepaired-state-drift";
+    readonly "unregistered-milestone": "unrepaired-state-drift";
+    readonly "summary-count-mismatch": "unrepaired-state-drift";
+    readonly "noncanonical-plan-like-file": "unrepaired-state-drift";
+    readonly "unknown-drift": "unrepaired-state-drift";
+    readonly "partial-write": "internal-invariant-violation";
+};
+declare function classifyFailure(input: RecoveryFailureInput): RecoveryDecision;
+
+export { type AclCheckOptions, type AclCheckResult, type AgentSyncScope, type ArtifactGateRecoveryInput, type AutoOrchestrator, type AutoOrchestratorDependencies, type DispatchAdapter, type DispatchRecoveryInput, type DoctorOptions, type DoctorResult, type ExternalRecoveryInput, type FrontmatterData, type FrontmatterValue, type GateRecoveryInput, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, type GenerateWorkflowsOptions, type GenerateWorkflowsResult, type GitProbeDeps, type LeaseJournalEvent, type LeaseOwnershipEvidence, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, type OrchestrationUnit, type OrchestratorResult, type OrchestratorSessionContext, type OrchestratorStatus, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type PrepareUnitRootInput, type PrepareUnitRootOptions, type PrepareUnitRootResult, RECONCILIATION_REASON_TO_RECOVERY_CLASS, RECOVERY_ACTIONS, RECOVERY_ACTION_VALUES, RECOVERY_CLASSES, type ReconciliationRecoveryInput, type RecoveryAction, type RecoveryClass, type RecoveryDecision, type RecoveryDecisionEvidence, type RecoveryFailureInput, type RecoveryFailureKind, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, type WorktreeEvidence, type WorktreeLeaseCheck, type WorktreeLeaseRecord, type WorktreeRecoveryInput, type WorktreeSafetyDeps, addPiSubagentGuidance, advance, checkLeaseOwnership, checkPiSubagentsTempAcl, classifyFailure, commandFileToPiPromptName, createAutoOrchestrator, defaultWorktreeSafetyDeps, generateAgents, generateAll, generatePrompts, generateWorkflows, getStatus, hasGitMarker, isSourceWritingUnit, leaseAcquiredEvent, leaseReleasedEvent, leaseStaleReclaimedEvent, materializeOfficialAgentPaths, normalizeGsdSlashReferences, prepareUnitRoot, readCurrentBranch, readLeaseRecord, reclaimStaleLeaseIfSafe, releaseLeaseOwnership, resolveAgentTargetDir, resolveExpectedUnitRoot, resolveOfficialPackage, resolvePiSubagentsPackage, resume, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitCodeFences, splitFrontmatter, start, stop, syncAgents, transformAskUserQuestionForPi, transformGsdRunLauncher, transformOfficialAgentMarkdown, transformSkillDispatchForPi, transformSubagentDispatchForPi, writeFrontmatter, writeOfficialVersionStamp };

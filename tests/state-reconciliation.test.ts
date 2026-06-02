@@ -774,6 +774,36 @@ describe("state reconciliation repair planning", () => {
     expect(report.repairs).toEqual([]);
     expect(report.written).toEqual([]);
   });
+
+  it("can scope reconciliation to the active phase before planning", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-active-phase-scope-"));
+    const planningDir = join(root, ".planning");
+    const legacyDir = join(planningDir, "phases", "06-workflow-runtime-fidelity");
+    const activeDir = join(planningDir, "phases", "11-worktree-safety-recovery-classification");
+    mkdirSync(legacyDir, { recursive: true });
+    mkdirSync(activeDir, { recursive: true });
+    writeFileSync(join(legacyDir, "06-01-PLAN.md"), "legacy plan\n", "utf8");
+    writeFileSync(join(legacyDir, "06-02-PLAN.md"), "legacy plan\n", "utf8");
+    writeFileSync(join(legacyDir, "06-03-PLAN.md"), "legacy plan\n", "utf8");
+    writeFileSync(join(activeDir, "11-CONTEXT.md"), "context\n", "utf8");
+    writeFileSync(
+      join(planningDir, "ROADMAP.md"),
+      [
+        "| Phase | Milestone | Plans Complete | Status | Completed |",
+        "|---|---|---|---|---|",
+        "| 6. Workflow Runtime Fidelity | v1.0 | 3/3 | Complete | 2026-05-30 |",
+        "| 11. Worktree Safety + Recovery Classification | v2.0 | 0/2 | Not started | — |",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(join(planningDir, "STATE.md"), "## Current Position\n\nPhase: 11 — Worktree Safety + Recovery Classification (ready to plan)\n", "utf8");
+
+    const report = reconcileBeforeDispatch(root, { phase: "11", activeUnitId: "11:plan" });
+
+    expect(report.ok).toBe(true);
+    expect(report.blockers).toEqual([]);
+    expect(report.snapshot.phases.map((phase) => phase.phase)).toEqual(["11"]);
+  });
 });
 
 describe("state reconciliation apply repairs", () => {

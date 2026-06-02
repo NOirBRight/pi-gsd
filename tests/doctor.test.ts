@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { createOfficialFixture } from "./fixtures.js";
 import { generateAgents } from "../src/agent-generator.js";
 import { syncAgents } from "../src/agent-sync.js";
-import { generatePrompts, generateWorkflows } from "../src/generator.js";
+import { generateAll, generatePrompts, generateWorkflows } from "../src/generator.js";
 import { runDoctor, checkPiSubagentsTempAcl } from "../src/doctor.js";
 
 describe("runDoctor", () => {
   it("reports success for a generated prompt set matching official commands", () => {
     const fixture = createOfficialFixture();
     const outDir = join(fixture.root, "generated", "prompts");
-    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir: outDir, agentsDir: join(fixture.root, "generated", "agents"), safeRoot: fixture.root });
 
     const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: outDir, aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }) });
 
@@ -34,7 +34,7 @@ describe("runDoctor", () => {
   it("accepts generated prompts that differ only by CRLF line endings", () => {
     const fixture = createOfficialFixture();
     const outDir = join(fixture.root, "generated", "prompts");
-    generatePrompts({ officialRoot: fixture.packageRoot, outDir });
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir: outDir, agentsDir: join(fixture.root, "generated", "agents"), safeRoot: fixture.root });
     const promptPath = join(outDir, "gsd-plan-phase.md");
     const prompt = readFileSync(promptPath, "utf8");
     writeFileSync(promptPath, prompt.replace(/\n/g, "\r\n"), "utf8");
@@ -74,6 +74,69 @@ describe("runDoctor", () => {
 
     expect(result.ok).toBe(false);
     expect(result.messages.join("\n")).toContain("stale generated workflow: workflows/plan.md");
+  });
+
+  it("reports stale generated official version metadata", () => {
+    const fixture = createOfficialFixture();
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir: promptsDir });
+    generateWorkflows({ officialRoot: fixture.packageRoot, outDir: workflowsDir });
+    writeFileSync(join(fixture.root, "generated", ".official-version.json"), JSON.stringify({
+      packageName: "@opengsd/gsd-core",
+      version: "0.0.0",
+    }), "utf8");
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: promptsDir,
+      generatedWorkflowsDir: workflowsDir,
+      aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("generated official version stale");
+  });
+
+  it("reports missing generated official version metadata", () => {
+    const fixture = createOfficialFixture();
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir: promptsDir });
+    generateWorkflows({ officialRoot: fixture.packageRoot, outDir: workflowsDir });
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: promptsDir,
+      generatedWorkflowsDir: workflowsDir,
+      aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("generated official version: missing");
+  });
+
+  it("reports official workflow config schema parity gaps", () => {
+    const fixture = createOfficialFixture();
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    generatePrompts({ officialRoot: fixture.packageRoot, outDir: promptsDir });
+    writeFileSync(
+      join(fixture.packageRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json"),
+      JSON.stringify({
+        validKeys: ["workflow.research", "workflow.plan_check"],
+      }),
+      "utf8",
+    );
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: promptsDir,
+      aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("official config schema parity: missing workflow keys");
+    expect(result.messages.join("\n")).toContain("workflow.code_review");
   });
 
   it("reports unexpected generated prompts", () => {
@@ -139,8 +202,7 @@ describe("runDoctor", () => {
     writeFileSync(join(fixture.packageRoot, "agents", "gsd-planner.md"), "---\nname: gsd-planner\ndescription: Plans\n---\nBody\n", "utf8");
     const promptsDir = join(fixture.root, "generated", "prompts");
     const agentsDir = join(fixture.root, "generated", "agents");
-    generatePrompts({ officialRoot: fixture.packageRoot, outDir: promptsDir });
-    generateAgents({ officialRoot: fixture.packageRoot, outDir: agentsDir });
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir, agentsDir, safeRoot: fixture.root });
     syncAgents({ generatedAgentsDir: agentsDir, cwd: fixture.root, officialRoot: fixture.packageRoot, scope: "project" });
 
     const result = runDoctor({ startDir: fixture.root, generatedPromptsDir: promptsDir, generatedAgentsDir: agentsDir, aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }) });

@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { classifyFailure } from "../recovery/classify-failure.js";
 import {
   ReconciliationFailedError,
   reconcileBeforeDispatch as reconcilePlanningStateBeforeDispatch,
@@ -35,6 +36,7 @@ export function reconcileBeforeDispatch(snapshot: OrchestrationSnapshot, unit: O
   const basePath = snapshot.cwd ?? process.cwd();
   const report = reconcilePlanningStateBeforeDispatch(basePath, {
     activeUnitId: unit.id,
+    phase: unit.phase,
     apply: snapshot.settings.workflow.state_reconciliation_apply === true,
   });
   if (!report.ok) return toGateFailure(toReconciliationFailedError(report), basePath);
@@ -55,13 +57,22 @@ export function toReconciliationFailedError(report: ReconciliationReport): Recon
 }
 
 export function toGateFailure(error: ReconciliationFailedError, basePath = process.cwd()): GateResult {
+  const recoveryDecision = classifyFailure({
+    kind: "reconciliation",
+    reasonCode: error.reasonCode,
+    blockers: error.blockers,
+    written: error.report.written,
+    evidence: error.evidence,
+  });
   return {
     ok: false,
     gate: "reconcileBeforeDispatch",
-    reason: error.reasonCode,
-    retryable: false,
-    resumeHint: `State reconciliation blocked dispatch: ${error.reasonCode}. Inspect structured blockers before continuing.`,
+    reason: recoveryDecision.class,
+    retryable: recoveryDecision.action === "retry",
+    resumeHint: recoveryDecision.remediation,
     evidence: boundedGateEvidence(error, basePath),
+    recoveryDecision,
+    exitReason: recoveryDecision.class,
   };
 }
 

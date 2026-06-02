@@ -9,3 +9,5 @@ export * from "./doctor.js";
 export * from "./pi-subagents.js";
 export * from "./runtime-rewrites.js";
 export * from "./orchestrator/index.js";
+export * from "./recovery/index.js";
+export * from "./worktree-safety/index.js";

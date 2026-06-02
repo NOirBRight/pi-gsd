@@ -3,33 +3,33 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Runtime Refactor
 status: Ready to plan
-last_updated: "2026-06-01T15:05:04.452Z"
-last_activity: 2026-06-01 -- Phase 10 state reconciliation completed; verification passed; Phase 11 ready to plan
+last_updated: "2026-06-02T04:12:53.603Z"
+last_activity: 2026-06-02
 progress:
   total_phases: 7
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
-  percent: 57
+  completed_phases: 5
+  total_plans: 16
+  completed_plans: 16
+  percent: 71
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-31 after Phase 08 migration)
+See: .planning/PROJECT.md (updated 2026-06-02 after Phase 11 verification)
 
 **Core value:** Pi adapter for Get Shit Done (GSD) — transparent upstream compatibility on content axis; native Pi orchestration on runtime axis (v2.0 direction)
-**Current focus:** Phase 11 — Worktree Safety + Recovery Classification
+**Current focus:** Phase 12 — Tool Contract + Settings Bridge
 
 ## Current Position
 
 Milestone: v2.0 Runtime Refactor (executing)
-Phase: 11 — Worktree Safety + Recovery Classification (ready to plan)
+Phase: 12
 Plan: Not started
-Last activity: 2026-06-01 -- Phase 10 state reconciliation completed; verification passed; Phase 11 ready to plan
+Last activity: 2026-06-02
 
-Progress: [███████████░░░░░░░░░] 57% (4/7 phases completed, 12/12 completed plans so far) — Phase 11 is next
+Progress: [██████████████░░░░░░] 71% (5/7 phases completed, 16/16 completed plans so far) — Phase 12 is next
 
 ## Accumulated Context
 
@@ -82,11 +82,13 @@ Progress: [███████████░░░░░░░░░] 57% (4/
 
 ## Next Steps
 
-1. **Plan Phase 10: State Reconciliation**
-   - Build on Phase 09 `reconcileBeforeDispatch` seam
-   - Detect `.planning/` drift before every native dispatch
-   - Persist actionable repair/resume hints in orchestration journal
-2. Keep Phase 8/9 artifacts as closeout evidence:
-   - `.planning/phases/08-upstream-1-2-0-upgrade-package-rename/08-REVIEW.md`
-   - `.planning/phases/08-upstream-1-2-0-upgrade-package-rename/08-REVIEW-FIX.md`
+1. **Plan Phase 12: Tool Contract + Settings Bridge**
+   - Compile per-Unit tool / prompt / policy / schema contracts before dispatch.
+   - Gate native auto orchestration through the compiled contract.
+   - Bridge GSD `settings.json` into Pi prompt context and notify on changes.
+2. Keep Phase 11 closeout artifacts as evidence:
+   - `.planning/phases/11-worktree-safety-recovery-classification/11-VERIFICATION.md`
+   - `.planning/phases/11-worktree-safety-recovery-classification/11-REVIEW.md`
+   - `.planning/phases/11-worktree-safety-recovery-classification/11-UAT.md`
+   - `.planning/phases/11-worktree-safety-recovery-classification/11-SECURITY.md`
 3. Before release, run ship/preflight and ensure generated artifacts remain synced after any final version bump.

@@ -1,6 +1,6 @@
 {
   "model_profile": "inherit",
   "workflow": {
-    "_auto_chain_active": true
+    "_auto_chain_active": false
   }
 }

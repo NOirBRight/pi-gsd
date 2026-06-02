@@ -20,6 +20,7 @@ describe("runCli", () => {
 
     expect(code).toBe(0);
     expect(readFileSync(join(outDir, "gsd-plan-phase.md"), "utf8")).toContain("description: Plan");
+    expect(readFileSync(join(fixture.root, ".official-version.json"), "utf8")).toContain("@opengsd/gsd-core");
     expect(stdout.join("")).toContain("generated 1 prompt");
   });
 
@@ -420,6 +421,7 @@ function writeAgent(packageRoot: string) {
 }
 
 function writeOrchestratorFixture(root: string) {
+  mkdirSync(join(root, ".git"), { recursive: true });
   mkdirSync(join(root, ".planning", "phases", "09-fixture"), { recursive: true });
   writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: true, ui_phase: false, ui_review: false } }), "utf8");
   writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 0/0 | Executing | — |\n", "utf8");
@@ -449,7 +451,7 @@ fs.mkdirSync(phaseDir, { recursive: true });
 const written = [];
 if (input.unit.type === 'plan') { const file = path.join(phaseDir, '09-01-PLAN.md'); fs.writeFileSync(file, 'plan\\n'); written.push(file); }
 if (input.unit.type === 'execute') { const file = path.join(phaseDir, '09-01-SUMMARY.md'); fs.writeFileSync(file, '# Summary\\n\\ncompleted: 2026-06-01\\n'); written.push(file); }
-if (input.unit.type === 'verify') { const file = path.join(phaseDir, '09-VERIFICATION.md'); fs.writeFileSync(file, 'verification\\n'); written.push(file); }
+if (input.unit.type === 'verify') { const file = path.join(phaseDir, '09-VERIFICATION.md'); fs.writeFileSync(file, '---\\nstatus: passed\\n---\\n\\n# Verification\\n'); written.push(file); }
 if (input.unit.type === 'closeout') {
   fs.writeFileSync(path.join(process.cwd(), '.planning', 'ROADMAP.md'), '| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\\n');
   fs.writeFileSync(path.join(process.cwd(), '.planning', 'STATE.md'), '## Current Position\\n\\nPhase: 9 — Auto Orchestration Native Module (**completed**)\\n');

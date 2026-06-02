@@ -12,6 +12,8 @@ export interface OfficialPaths {
   agentsDir: string;
   hooksDir: string;
   gsdTools: string;
+  configDefaultsManifest: string;
+  configSchemaManifest: string;
 }
 
 export interface OfficialPackage {
@@ -60,6 +62,8 @@ export function resolveOfficialPackage(options: { startDir?: string; packageName
   validateRequiredPath("agents", paths.agentsDir, "directory", packageName);
   validateRequiredPath("hooks", paths.hooksDir, "directory", packageName);
   validateRequiredPath("get-shit-done/bin/gsd-tools.cjs", paths.gsdTools, "file", packageName);
+  validateRequiredPath("get-shit-done/bin/shared/config-defaults.manifest.json", paths.configDefaultsManifest, "file", packageName);
+  validateRequiredPath("get-shit-done/bin/shared/config-schema.manifest.json", paths.configSchemaManifest, "file", packageName);
 
   return {
     packageRoot,
@@ -78,6 +82,8 @@ function buildOfficialPaths(packageRoot: string): OfficialPaths {
     agentsDir: join(packageRoot, "agents"),
     hooksDir: join(packageRoot, "hooks"),
     gsdTools: join(packageRoot, "get-shit-done", "bin", "gsd-tools.cjs"),
+    configDefaultsManifest: join(packageRoot, "get-shit-done", "bin", "shared", "config-defaults.manifest.json"),
+    configSchemaManifest: join(packageRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json"),
   };
 }
 

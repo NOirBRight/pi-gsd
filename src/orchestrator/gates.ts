@@ -1,7 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
+import { classifyFailure } from "../recovery/classify-failure.js";
+import { prepareUnitRoot as prepareSafeUnitRoot } from "../worktree-safety/index.js";
+import { evaluatePostDispatchPolicy, POST_DISPATCH_POLICIES } from "./outcomes.js";
 import { reconcileBeforeDispatch } from "./reconciliation.js";
-import type { GateAdapter, GateName, GateResult, OrchestrationSnapshot, OrchestrationUnit } from "./types.js";
+import type { GateAdapter, GateName, GateResult, OrchestrationOutcome, OrchestrationSnapshot, OrchestrationUnit } from "./types.js";
 
 export type GateOverrides = Partial<Record<Exclude<GateName, "artifact">, GateAdapter>>;
 
@@ -14,42 +17,53 @@ export function runPreDispatchGates(snapshot: OrchestrationSnapshot, unit: Orche
     ["persistRuntimeState", overrides.persistRuntimeState ?? persistRuntimeState],
   ];
 
+  const journalEvents: NonNullable<Extract<GateResult, { ok: true }>["journalEvents"]> = [];
+  const releaseEvidence: string[] = [];
   for (const [, gate] of orderedGates) {
     const result = gate(snapshot, unit);
-    if (!result.ok) return result;
+    if (result.ok) releaseEvidence.push(...result.evidence.filter((item) => item.startsWith("branch:")));
+    if (result.journalEvents?.length) journalEvents.push(...result.journalEvents);
+    if (!result.ok) return { ...result, journalEvents: result.journalEvents?.length ? result.journalEvents : journalEvents };
   }
 
-  return { ok: true, gate: "persistRuntimeState", evidence: orderedGates.map(([name]) => name) };
+  return { ok: true, gate: "persistRuntimeState", evidence: [...orderedGates.map(([name]) => name), ...releaseEvidence], journalEvents: journalEvents.length ? journalEvents : undefined };
 }
 
-export function runPostDispatchGate(snapshot: OrchestrationSnapshot, unit: OrchestrationUnit, options: { cwd?: string; verifierSkip?: boolean; exists?: (path: string) => boolean; written?: string[] } = {}): GateResult {
+export function runPostDispatchGate(snapshot: OrchestrationSnapshot, unit: OrchestrationUnit, options: { cwd?: string; verifierSkip?: boolean; exists?: (path: string) => boolean; written?: string[]; messages?: string[]; outcome?: OrchestrationOutcome } = {}): GateResult {
   const exists = options.exists ?? existsSync;
   const cwd = options.cwd ?? process.cwd();
   const phaseDir = join(cwd, ".planning", "phases");
 
-  if (unit.type === "plan") {
-    return existsMatching(cwd, phaseDir, unit.phase, "PLAN.md", exists, options.written)
-      ? pass("artifact", "plan artifact exists")
-      : fail("Plan Unit did not produce a *-PLAN.md artifact.", [`missing:${unit.phase}-*-PLAN.md`]);
-  }
-
-  if (unit.type === "execute") {
-    return existsMatching(cwd, phaseDir, unit.phase, "SUMMARY.md", exists, options.written)
-      ? pass("artifact", "summary artifact exists")
-      : fail("Execute Unit did not produce a *-SUMMARY.md artifact.", [`missing:${unit.phase}-*-SUMMARY.md`]);
-  }
-
   if (unit.type === "verify") {
     if (options.verifierSkip || !snapshot.settings.workflow.verifier) return pass("artifact", "verifier skipped by settings");
-    return existsMatching(cwd, phaseDir, unit.phase, "VERIFICATION.md", exists, options.written)
-      ? pass("artifact", "verification artifact exists")
-      : fail("Verify Unit did not produce a *-VERIFICATION.md artifact.", [`missing:${unit.phase}-*-VERIFICATION.md`]);
   }
 
   if (unit.type === "closeout") {
-    return closeoutEvidence(cwd, unit.phase, options.written)
-      ? pass("artifact", "closeout roadmap/state evidence exists")
-      : fail("Closeout Unit requires ROADMAP and STATE evidence for the phase.", [`missing-closeout-evidence:${unit.phase}`]);
+    if (!closeoutEvidence(cwd, unit.phase, options.written)) {
+      return fail("Closeout Unit requires ROADMAP and STATE evidence for the phase.", [`missing-closeout-evidence:${unit.phase}`]);
+    }
+    if (snapshot.settings.workflow.verifier && !phaseVerificationPassed(cwd, phaseDir, unit.phase, exists)) {
+      return fail("Closeout requires latest VERIFICATION.md with status: passed.", [`verification-not-passed:${unit.phase}`]);
+    }
+    return pass("artifact", "closeout roadmap/state evidence exists");
+  }
+
+  const policy = POST_DISPATCH_POLICIES[unit.type];
+  if (policy) {
+    const artifactPath = policy.artifactSuffix ? findMatchingArtifact(cwd, phaseDir, unit.phase, policy.artifactSuffix, exists, options.written) : undefined;
+    if (policy.artifactSuffix && !artifactPath) {
+      return fail(`${unit.label} Unit did not produce a *-${policy.artifactSuffix} artifact.`, [`missing:${unit.phase}-*-${policy.artifactSuffix}`]);
+    }
+    const outcome = evaluatePostDispatchPolicy(policy, {
+      artifactPath,
+      messages: options.messages,
+      outcome: options.outcome,
+      phase: unit.phase,
+      unitType: unit.type,
+    });
+    return outcome.ok
+      ? { ok: true, gate: "artifact", evidence: outcome.evidence.length ? outcome.evidence : [`${unit.type} outcome accepted`] }
+      : fail(outcome.resumeHint, outcome.evidence);
   }
 
   return pass("artifact", `${unit.type} has no Phase 9 artifact gate`);
@@ -71,14 +85,51 @@ function validateToolContract(_snapshot: OrchestrationSnapshot, unit: Orchestrat
 }
 
 function prepareUnitRoot(snapshot: OrchestrationSnapshot, unit: OrchestrationUnit): GateResult {
-  if (unit.type === "execute" && snapshot.settings.workflow.worktrees === false) {
-    return pass("prepareUnitRoot", "worktree disabled by settings");
+  const result = prepareSafeUnitRoot({
+    unitType: unit.type,
+    unitId: unit.id,
+    phase: unit.phase,
+    projectRoot: snapshot.cwd,
+    unitRoot: snapshot.cwd,
+    expectedBranch: typeof unit.metadata?.expectedBranch === "string" ? unit.metadata.expectedBranch : undefined,
+    workflow: { worktrees: snapshot.settings.workflow.worktrees },
+    attempt: snapshot.attempt,
+  });
+  if (result.ok) {
+    return {
+      ok: true,
+      gate: "prepareUnitRoot",
+      evidence: ["worktree-safety", `root:${result.root}`, result.evidence.branch ? `branch:${result.evidence.branch}` : undefined, ...(result.evidence.messages ?? [])].filter((item): item is string => Boolean(item)),
+      journalEvents: result.evidence.journalEvents,
+    };
   }
-  return pass("prepareUnitRoot", "phase-11-worktree-safety-seam");
+  return {
+    ok: false,
+    gate: "prepareUnitRoot",
+    reason: result.decision.class,
+    retryable: result.decision.action === "retry",
+    resumeHint: result.decision.remediation,
+    evidence: evidenceFromDecision(result.decision),
+    recoveryDecision: result.decision,
+    exitReason: result.decision.class,
+    journalEvents: Array.isArray(result.decision.evidence?.journalEvents) ? result.decision.evidence.journalEvents as Extract<GateResult, { ok: false }>["journalEvents"] : undefined,
+  };
 }
 
 function persistRuntimeState(_snapshot: OrchestrationSnapshot, unit: OrchestrationUnit): GateResult {
   return pass("persistRuntimeState", `persist-ready:${unit.id}`);
+}
+
+function evidenceFromDecision(decision: NonNullable<Extract<GateResult, { ok: false }>["recoveryDecision"]>): string[] {
+  const evidence = decision.evidence ?? {};
+  return [
+    `class:${decision.class}`,
+    `action:${decision.action}`,
+    evidence.reasonCode ? `reasonCode:${String(evidence.reasonCode)}` : undefined,
+    evidence.unitId ? `unitId:${evidence.unitId}` : undefined,
+    evidence.root ? `root:${evidence.root}` : undefined,
+    evidence.branch ? `branch:${evidence.branch}` : undefined,
+  ].filter((item): item is string => Boolean(item));
 }
 
 function pass(gate: GateName, evidence: string): GateResult {
@@ -86,12 +137,26 @@ function pass(gate: GateName, evidence: string): GateResult {
 }
 
 function fail(resumeHint: string, evidence: string[]): GateResult {
-  return { ok: false, gate: "artifact", reason: "gate-failed", retryable: false, resumeHint, evidence };
+  const recoveryDecision = classifyFailure({
+    kind: "artifact-gate",
+    reason: resumeHint,
+    evidence: { messages: evidence },
+  });
+  return {
+    ok: false,
+    gate: "artifact",
+    reason: recoveryDecision.class,
+    retryable: false,
+    resumeHint,
+    evidence,
+    recoveryDecision,
+    exitReason: recoveryDecision.class,
+  };
 }
 
-function existsMatching(cwd: string, phaseRoot: string, phase: string, suffix: string, exists: (path: string) => boolean, written?: string[]) {
-  if (!written?.length) return false;
-  const writtenSet = new Set(written.map((path) => normalizeWrittenPath(cwd, path)));
+function findMatchingArtifact(cwd: string, phaseRoot: string, phase: string, suffix: string, exists: (path: string) => boolean, written?: string[], requireWritten = true): string | undefined {
+  if (requireWritten && !written?.length) return undefined;
+  const writtenSet = written?.length ? new Set(written.map((path) => normalizeWrittenPath(cwd, path))) : undefined;
   const artifactPattern = new RegExp(`^${escapeRegExp(phase)}(?:-\\d+)?-${escapeRegExp(suffix)}$`);
 
   try {
@@ -105,9 +170,9 @@ function existsMatching(cwd: string, phaseRoot: string, phase: string, suffix: s
           .filter((child) => child.isFile())
           .map((child) => join(phaseRoot, entry.name, child.name))),
     ];
-    return candidates.some((path) => artifactPattern.test(basename(path)) && writtenSet.has(resolve(path)) && exists(path));
+    return candidates.find((path) => artifactPattern.test(basename(path)) && (!writtenSet || writtenSet.has(resolve(path))) && exists(path));
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -133,6 +198,14 @@ function closeoutEvidence(cwd: string, phase: string, written?: string[]): boole
   } catch {
     return false;
   }
+}
+
+function phaseVerificationPassed(cwd: string, phaseRoot: string, phase: string, exists: (path: string) => boolean): boolean {
+  const verificationPath = findMatchingArtifact(cwd, phaseRoot, phase, "VERIFICATION.md", exists, undefined, false);
+  if (!verificationPath) return false;
+  const content = readFileSync(verificationPath, "utf8");
+  const status = /^status:\s*(\S+)/m.exec(content)?.[1]?.trim().toLowerCase();
+  return status === "passed" || status === "pass";
 }
 
 function roadmapPhaseComplete(roadmap: string, phase: string): boolean {

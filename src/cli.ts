@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { runDoctor } from "./doctor.js";
-import { generateAll, generatePrompts, generateWorkflows } from "./generator.js";
+import { generateAll, generatePrompts, generateWorkflows, writeOfficialVersionStamp } from "./generator.js";
 import { resolveOfficialPackage } from "./official.js";
 import { createCommandDispatchRunner, createDispatchAdapter } from "./orchestrator/dispatch.js";
 import { createAutoOrchestrator, type OrchestratorResult } from "./orchestrator/index.js";
@@ -45,7 +45,9 @@ export async function runCli(argv: string[], io: CliIO = defaultIO): Promise<num
       const cwd = resolve(options.cwd ?? process.cwd());
       const officialPackage = resolveOfficialPackage({ startDir: cwd });
       if (options.out) {
-        const result = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir: resolve(cwd, options.out), safeRoot: cwd });
+        const outDir = resolve(cwd, options.out);
+        const result = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir, safeRoot: cwd });
+        writeOfficialVersionStamp({ officialRoot: officialPackage.packageRoot, generatedRoot: dirname(outDir) });
         io.stdout(`generated ${result.written.length} prompt(s)\n`);
         return 0;
       }

@@ -1,3 +1,6 @@
+import type { RecoveryClass, RecoveryDecision } from "../recovery/types.js";
+import type { LeaseJournalEvent } from "../worktree-safety/types.js";
+
 export type UnitType =
   | "discuss"
   | "research"
@@ -21,7 +24,7 @@ export type WorkflowSettingSource = "default" | "config" | "override";
 
 export type OrchestrationMode = "auto" | "chain";
 
-export type StopReason = "gate-failed" | "ambiguous-dispatch" | "retry-budget-exhausted" | "dispatch-failed" | "stopped";
+export type StopReason = "gate-failed" | "ambiguous-dispatch" | "retry-budget-exhausted" | "dispatch-failed" | "stopped" | RecoveryClass;
 
 export type OrchestrationUnit = {
   id: string;
@@ -31,7 +34,12 @@ export type OrchestrationUnit = {
   label: string;
   required: boolean;
   source: WorkflowSettingSource | "phase-signal";
-  metadata?: Record<string, string | number | boolean>;
+  metadata?: {
+    args?: string;
+    setting?: string;
+    expectedBranch?: string;
+    [key: string]: string | number | boolean | undefined;
+  };
   resumeHint?: string;
 };
 
@@ -45,6 +53,13 @@ export type ResolvedWorkflowSettings = {
     ui_phase: boolean;
     ui_review: boolean;
     code_review: boolean;
+    code_review_depth?: "quick" | "standard" | "deep" | string;
+    code_review_command?: string | null;
+    plan_review_convergence?: boolean;
+    max_discuss_passes?: number;
+    plan_bounce?: boolean;
+    plan_bounce_passes?: number;
+    post_planning_gaps?: boolean;
     security_enforcement?: boolean;
     nyquist_validation?: boolean;
     ai_integration_phase?: boolean;
@@ -58,6 +73,13 @@ export type ResolvedWorkflowSettings = {
     state_reconciliation_apply?: boolean;
     subagent_timeout?: number;
     inline_plan_threshold?: number;
+  };
+  rawWorkflow?: Record<string, unknown>;
+  workflowMetadata?: {
+    officialPackage?: string;
+    officialVersion?: string;
+    officialRoot?: string;
+    schemaKeys?: string[];
   };
   sources?: Partial<Record<keyof ResolvedWorkflowSettings["workflow"], WorkflowSettingSource>>;
 };
@@ -94,8 +116,8 @@ export type GateName =
   | "artifact";
 
 export type GateResult =
-  | { ok: true; gate: GateName; evidence: string[]; retryable?: false }
-  | { ok: false; gate: GateName; reason: StopReason | string; retryable: boolean; resumeHint: string; evidence?: string[] };
+  | { ok: true; gate: GateName; evidence: string[]; retryable?: false; journalEvents?: LeaseJournalEvent[] }
+  | { ok: false; gate: GateName; reason: StopReason | string; retryable: boolean; resumeHint: string; evidence?: string[]; recoveryDecision?: RecoveryDecision; exitReason?: RecoveryClass; journalEvents?: LeaseJournalEvent[] };
 
 export type GateAdapter = (snapshot: OrchestrationSnapshot, unit: OrchestrationUnit) => GateResult;
 
@@ -128,7 +150,10 @@ export type OrchestrationEvent = {
     | "unit-end"
     | "gate-pass"
     | "gate-fail"
-    | "retry";
+    | "retry"
+    | "lease_acquired"
+    | "lease_released"
+    | "lease_stale_reclaimed";
   ts: string;
   phase: string;
   unitId?: string;
@@ -137,6 +162,16 @@ export type OrchestrationEvent = {
   reason?: string;
   resumeHint?: string;
   evidence?: string[];
+  recoveryDecision?: RecoveryDecision;
+  exitReason?: RecoveryClass;
+  action?: string;
+  journalEvents?: LeaseJournalEvent[];
+  recoveryClass?: RecoveryClass;
+  root?: string;
+  branch?: string;
+  paths?: string[];
+  written?: string[];
+  message?: string;
 };
 
 export type OrchestrationSnapshot = {
@@ -147,6 +182,10 @@ export type OrchestrationSnapshot = {
   currentUnit?: OrchestrationUnit;
   remainingUnits: OrchestrationUnit[];
   attempt: number;
+  loopState?: {
+    planCheckIterations?: number;
+    previousIssueCount?: number;
+  };
   lastEvent?: OrchestrationEvent;
   resumeHint?: string;
   settings: ResolvedWorkflowSettings;
@@ -170,6 +209,14 @@ export type OrchestratorResult = {
   snapshot?: OrchestrationSnapshot;
   written?: string[];
   events?: OrchestrationEvent[];
+  outcome?: OrchestrationOutcome;
+};
+
+export type OrchestrationOutcome = {
+  status?: string;
+  marker?: string;
+  verdict?: string;
+  data?: Record<string, string | number | boolean>;
 };
 
 export type AdvanceResult = OrchestratorResult & {

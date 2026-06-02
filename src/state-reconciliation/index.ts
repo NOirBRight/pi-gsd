@@ -6,7 +6,7 @@ import { applyRepairs, planRepairs } from "./repair.js";
 import { readRoadmapState } from "./roadmap.js";
 import { scanPlanningArtifacts } from "./scan.js";
 import { readStateDigest } from "./state.js";
-import type { ReconciliationOptions, ReconciliationReport } from "./types.js";
+import type { CanonicalPhaseArtifacts, PlanningArtifactTotals, ReconciliationOptions, ReconciliationReport } from "./types.js";
 
 export { classifyDrift, KNOWN_DRIFT_KINDS } from "./catalog.js";
 export { classifyArtifactName } from "./artifacts.js";
@@ -20,10 +20,12 @@ export * from "./types.js";
 
 export function reconcileBeforeDispatch(basePath: string, options: ReconciliationOptions = {}): ReconciliationReport {
   const scan = scanPlanningArtifacts(basePath);
+  const requestedPhase = options.phase?.padStart(2, "0");
+  const phases = requestedPhase ? scan.phases.filter((phase) => phase.phase === requestedPhase) : scan.phases;
   const snapshot = {
     phasesPath: scan.phasesPath,
-    phases: scan.phases,
-    totals: scan.totals,
+    phases,
+    totals: options.phase ? totalsFor(phases) : scan.totals,
   };
   const roadmap = readOptionalRoadmapState(basePath);
   const state = readOptionalStateDigest(basePath);
@@ -48,6 +50,17 @@ export function reconcileBeforeDispatch(basePath: string, options: Reconciliatio
     blockers: [...blockers, ...application.blockers],
     written: application.written,
     evidence: [...scan.evidence, ...detection.evidence],
+  };
+}
+
+function totalsFor(phases: CanonicalPhaseArtifacts[]): PlanningArtifactTotals {
+  return {
+    plans: phases.reduce((total, phase) => total + phase.plans.length, 0),
+    summaries: phases.reduce((total, phase) => total + phase.summaries.length, 0),
+    verifications: phases.reduce((total, phase) => total + phase.verifications.length, 0),
+    reviews: phases.reduce((total, phase) => total + phase.reviews.length, 0),
+    contexts: phases.reduce((total, phase) => total + phase.contexts.length, 0),
+    noncanonical: phases.reduce((total, phase) => total + phase.noncanonical.length, 0),
   };
 }
 

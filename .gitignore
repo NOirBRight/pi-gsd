@@ -6,6 +6,7 @@ node_modules/
 .gsd/
 .pi/
 .tmp-cli-smoke/
+.planning/worktree-leases/
 
 # Internal planning/debug artifacts
 docs/superpowers/
