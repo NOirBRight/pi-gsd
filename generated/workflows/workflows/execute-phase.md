@@ -1131,7 +1131,7 @@ If `CODE_REVIEW_ENABLED` is `"false"`: display "Code review skipped (workflow.co
 
 **Invoke review:**
 ```
-Invoke /gsd-code-review ${PHASE_NUMBER} in Pi
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-code-review ${PHASE_NUMBER}; otherwise Invoke /gsd-code-review ${PHASE_NUMBER} in Pi.
 ```
 
 **Check results using deterministic path (not glob):**

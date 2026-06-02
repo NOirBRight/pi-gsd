@@ -661,7 +661,7 @@ AUTO_CHAIN=$(gsd_run query check auto-mode --pick auto_chain_active 2>/dev/null 
 
 Auto-generate UI-SPEC without prompting:
 ```
-Invoke /gsd-ui-phase ${PHASE} --auto ${GSD_WS} in Pi
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-ui-phase ${PHASE} --auto ${GSD_WS}; otherwise Invoke /gsd-ui-phase ${PHASE} --auto ${GSD_WS} in Pi.
 ```
 After `gsd-ui-phase` returns, re-read:
 ```bash
@@ -1694,7 +1694,7 @@ Plans ready. Launching execute-phase...
 
 Launch execute-phase using the Skill tool to avoid nested Task sessions (which cause runtime freezes due to deep agent nesting):
 ```
-Invoke /gsd-execute-phase ${PHASE} --auto --no-transition ${GSD_WS} in Pi
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-execute-phase ${PHASE} --auto --no-transition ${GSD_WS}; otherwise Invoke /gsd-execute-phase ${PHASE} --auto --no-transition ${GSD_WS} in Pi.
 ```
 
 The `--no-transition` flag tells execute-phase to return status after verification instead of chaining further. This keeps the auto-advance chain flat — each phase runs at the same nesting level rather than spawning deeper Task agents.

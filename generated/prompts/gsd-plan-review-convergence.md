@@ -15,7 +15,7 @@ If the `subagent` tool is unavailable, stop and ask the user to install or enabl
 Cross-AI plan convergence loop — an outer revision gate around gsd-review and gsd-planner.
 Repeatedly: review plans with external AI CLIs → if HIGH concerns found → replan with --reviews feedback → re-review. Stops when no HIGH concerns remain or max cycles reached.
 
-**Flow:** Agent→Invoke /gsd-plan-phase in Pi → Agent→Invoke /gsd-review in Pi → check HIGHs → Agent→Invoke /gsd-plan-phase --reviews in Pi → Agent→Invoke /gsd-review in Pi → ... → Converge or escalate
+**Flow:** Agent→If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase; otherwise Invoke /gsd-plan-phase in Pi. → Agent→If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-review; otherwise Invoke /gsd-review in Pi. → check HIGHs → Agent→If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase --reviews; otherwise Invoke /gsd-plan-phase --reviews in Pi. → Agent→If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-review; otherwise Invoke /gsd-review in Pi. → ... → Converge or escalate
 
 Replaces gsd-plan-phase's internal gsd-plan-checker with external AI reviewers (codex, gemini, etc.). Each step runs inside an isolated Agent that calls the corresponding existing Skill — orchestrator only does loop control.
 

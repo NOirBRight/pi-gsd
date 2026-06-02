@@ -4,6 +4,7 @@ import {
   addPiSubagentGuidance,
   buildPiSubagentsTempRoot,
   commandFileToPiPromptName,
+  compileOrchestrationContract,
   compileToolContracts,
   loadOfficialWorkflowConfig,
   normalizeGsdSlashReferences,
@@ -15,10 +16,12 @@ import {
   transformSkillDispatchForPi,
   transformSubagentDispatchForPi,
   transformWorkflowDispatchForPi,
+  verifyOrchestrationContractSnapshot,
   verifyToolContractSnapshot,
   writeFrontmatter,
+  writeOrchestrationContractSnapshot,
   writeToolContractSnapshot
-} from "./chunk-O6URY27T.js";
+} from "./chunk-NGPOIDO5.js";
 
 // src/agent-transform.ts
 var OFFICIAL_ROOT_PLACEHOLDER = "__PI_GSD_OFFICIAL_ROOT__";
@@ -385,6 +388,12 @@ function generateAll(options) {
   });
   const contractSnapshot = compileToolContracts({ cwd: projectRoot });
   writeToolContractSnapshot(contractSnapshot, { cwd: projectRoot });
+  const orchestrationSnapshot = compileOrchestrationContract({
+    cwd: projectRoot,
+    officialPackage: contractSnapshot.officialPackage,
+    officialVersion: contractSnapshot.officialVersion
+  });
+  writeOrchestrationContractSnapshot(orchestrationSnapshot, { cwd: projectRoot });
   return { prompts, agents, workflows };
 }
 function writeOfficialVersionStamp(options) {
@@ -640,6 +649,23 @@ function runDoctor(options) {
       messages.push("tool contracts: ok");
     } else {
       messages.push("tool contracts: skipped (no snapshot; run `npm run generate` to enable)");
+    }
+    const orchestrationContractResult = verifyOrchestrationContractSnapshot({ cwd: options.startDir ?? process.cwd() });
+    if (orchestrationContractResult.failures.length > 0) {
+      ok = false;
+      messages.push(`orchestration contract: invalid (${orchestrationContractResult.failures.length} dispatch-critical drift)`);
+      for (const failure of orchestrationContractResult.failures) {
+        messages.push(`  field:${failure.failedField}`);
+      }
+    } else if (orchestrationContractResult.warnings.length > 0) {
+      messages.push(`orchestration contract: warning (${orchestrationContractResult.warnings.length} prose/docs drift)`);
+      for (const warning of orchestrationContractResult.warnings) {
+        messages.push(`  field:${warning.field}`);
+      }
+    } else if (orchestrationContractResult.snapshotPresent) {
+      messages.push("orchestration contract: ok");
+    } else {
+      messages.push("orchestration contract: skipped (no snapshot; run `npm run generate` to enable)");
     }
     return { ok, messages };
   } finally {

@@ -8,6 +8,29 @@ import { generateAll, generatePrompts, generateWorkflows } from "../src/generato
 import { runDoctor, checkPiSubagentsTempAcl } from "../src/doctor.js";
 
 describe("runDoctor", () => {
+  it("fails on orchestration contract drift", () => {
+    const fixture = createOfficialFixture();
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    const agentsDir = join(fixture.root, "generated", "agents");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir, agentsDir, safeRoot: fixture.root });
+    const snapshotPath = join(fixture.root, "generated", "orchestration-contract.json");
+    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(snapshotPath, JSON.stringify({ ...snapshot, contractHash: "bad-hash" }), "utf8");
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: promptsDir,
+      generatedAgentsDir: agentsDir,
+      generatedWorkflowsDir: workflowsDir,
+      aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("orchestration contract: invalid");
+    expect(result.messages.join("\n")).toContain("field:contractHash");
+  });
+
   it("fails on dispatch-critical Tool Contract drift but only warns for prose drift", () => {
     const fixture = createOfficialFixture();
     writeFileSync(join(fixture.packageRoot, "agents", "gsd-planner.md"), "---\nname: gsd-planner\ndescription: Plans phases\ntools: bash, edit\n---\nBody\n", "utf8");

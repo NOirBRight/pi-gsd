@@ -105,5 +105,14 @@ describe("E2E: workflow generation fidelity", () => {
       expect(codeReviewFix).not.toContain("Agent(subagent_type=");
       expect(codeReviewFix).not.toContain("Workflow(");
     });
+
+    it("guards generated chain dispatch when native orchestrator owns the chain", () => {
+      generateWorkflowsToTemp();
+
+      const planPhase = readFileSync(join(tempDir, "workflows", "plan-phase.md"), "utf8");
+
+      expect(planPhase).toContain("If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator");
+      expect(planPhase).toContain("otherwise Invoke /gsd-execute-phase ${PHASE} --auto --no-transition ${GSD_WS} in Pi");
+    });
   });
 });

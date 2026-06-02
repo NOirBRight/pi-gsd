@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
+import { readOrchestrationContractSnapshot } from "../orchestration-contract/index.js";
 import { splitFrontmatter } from "../frontmatter.js";
 import type { OrchestrationOutcome, UnitType } from "./types.js";
 
 export type PostDispatchPolicy = {
   artifactSuffix?: string;
+  artifactSuffixes?: string[];
+  requiredArtifacts?: string[];
   passStatuses?: string[];
   pauseStatuses?: Record<string, string>;
   passMarkers?: string[];
@@ -14,6 +17,7 @@ export type PostDispatchPolicy = {
 
 export type OutcomePolicyInput = {
   artifactPath?: string;
+  artifactPaths?: string[];
   messages?: string[];
   outcome?: OrchestrationOutcome;
   phase: string;
@@ -35,7 +39,21 @@ export const POST_DISPATCH_POLICIES: Partial<Record<UnitType, PostDispatchPolicy
     },
     requireRecognizedOutcome: true,
   },
-  execute: { artifactSuffix: "SUMMARY.md" },
+  execute: {
+    artifactSuffixes: ["SUMMARY.md", "VERIFICATION.md"],
+    requiredArtifacts: ["SUMMARY.md", "VERIFICATION.md"],
+    passStatuses: ["passed", "pass"],
+    pauseStatuses: {
+      gaps_found: "Execution verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+      human_needed: "Execution verification requires human verification before phase completion.",
+    },
+    pauseMarkers: {
+      gaps_found: "Execution verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+      human_needed: "Execution verification requires human verification before phase completion.",
+      verification_failed: "Execution verification failed; inspect VERIFICATION.md before continuing.",
+    },
+    requireRecognizedOutcome: true,
+  },
   "code-review": {
     artifactSuffix: "REVIEW.md",
     passStatuses: ["clean", "skipped", "issues_found"],
@@ -79,6 +97,16 @@ export const POST_DISPATCH_POLICIES: Partial<Record<UnitType, PostDispatchPolicy
   },
   "ui-review": { artifactSuffix: "UI-REVIEW.md", passMarkers: ["ui_review_complete"] },
 };
+
+export function resolvePostDispatchPolicy(unitType: UnitType, cwd?: string): PostDispatchPolicy | undefined {
+  const fallback = POST_DISPATCH_POLICIES[unitType];
+  const contractPolicy = cwd ? readOrchestrationContractSnapshot(cwd)?.outcomes[unitType] : undefined;
+  if (!contractPolicy) return fallback;
+  return {
+    ...fallback,
+    ...contractPolicy,
+  };
+}
 
 export function evaluatePostDispatchPolicy(policy: PostDispatchPolicy, input: OutcomePolicyInput): OutcomePolicyResult {
   const signals = collectSignals(input);
@@ -153,16 +181,18 @@ export function collectSignals(input: OutcomePolicyInput) {
     const normalizedValue = normalizeScalar(String(value));
     fields.set(normalizedKey, normalizedValue);
     evidence.push(`field:${normalizedKey}:${normalizedValue}`);
-    if (normalizedKey === "status") addStatus(String(value));
+    if (["status", "verification", "verdict", "outcome"].includes(normalizedKey)) addStatus(String(value));
   };
 
-  if (input.artifactPath) {
-    evidence.push(`artifact:${input.artifactPath}`);
-    const parsed = splitFrontmatter(readFileSync(input.artifactPath, "utf8"));
+  const artifactPaths = unique([...(input.artifactPath ? [input.artifactPath] : []), ...(input.artifactPaths ?? [])]);
+  for (const artifactPath of artifactPaths) {
+    evidence.push(`artifact:${artifactPath}`);
+    const parsed = splitFrontmatter(readFileSync(artifactPath, "utf8"));
     for (const [key, value] of Object.entries(parsed.data)) {
       if (Array.isArray(value)) continue;
       addField(key, value);
     }
+    for (const [key, value] of knownFields(parsed.body)) addField(key, value);
     for (const marker of knownMarkers(parsed.body)) addMarker(marker);
   }
 
@@ -175,6 +205,7 @@ export function collectSignals(input: OutcomePolicyInput) {
   }
 
   for (const message of input.messages ?? []) {
+    for (const [key, value] of knownFields(message)) addField(key, value);
     for (const marker of knownMarkers(message)) addMarker(marker);
   }
 
@@ -218,6 +249,7 @@ function fail(template: string, phase: string, evidence: string[]): OutcomePolic
 
 function knownMarkers(text: string): string[] {
   const markers = [
+    "PHASE COMPLETE",
     "VERIFICATION PASSED",
     "ISSUES FOUND",
     "UI-SPEC VERIFIED",
@@ -229,8 +261,20 @@ function knownMarkers(text: string): string[] {
     "UI REVIEW COMPLETE",
     "APPROVED",
     "BLOCKED",
+    "GAPS FOUND",
+    "HUMAN NEEDED",
+    "VERIFICATION FAILED",
   ];
   return markers.filter((marker) => new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${escapeRegExp(marker)}\\b`, "i").test(text));
+}
+
+function knownFields(text: string): Array<[string, string]> {
+  const fields: Array<[string, string]> = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*(Verification|Status|Outcome|Verdict):\s*(.+?)\s*$/i);
+    if (match) fields.push([match[1], match[2]]);
+  }
+  return fields;
 }
 
 function normalizeSignal(value: string): string {

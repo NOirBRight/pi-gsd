@@ -96,6 +96,7 @@ export type QueueBuildInput = {
   cwd?: string;
   configPath?: string;
   startAt?: UnitType;
+  extraArgs?: string;
   settings?: ResolvedWorkflowSettings;
   phaseSignals?: {
     isUiPhase?: boolean;
@@ -206,6 +207,7 @@ export type OrchestratorSessionContext = {
   cwd?: string;
   configPath?: string;
   startAt?: UnitType;
+  extraArgs?: string;
 };
 
 export type OrchestratorResult = {

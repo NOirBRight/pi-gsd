@@ -3,7 +3,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import { classifyFailure } from "../recovery/classify-failure.js";
 import { compileToolContracts, readSnapshot, validateUnitToolContract, validateUnitToolContractAgainstDisk } from "../tool-contract/index.js";
 import { prepareUnitRoot as prepareSafeUnitRoot } from "../worktree-safety/index.js";
-import { evaluatePostDispatchPolicy, POST_DISPATCH_POLICIES } from "./outcomes.js";
+import { evaluatePostDispatchPolicy, resolvePostDispatchPolicy } from "./outcomes.js";
 import { reconcileBeforeDispatch } from "./reconciliation.js";
 import type { GateAdapter, GateName, GateResult, OrchestrationOutcome, OrchestrationSnapshot, OrchestrationUnit } from "./types.js";
 import type { ToolContractSnapshot } from "../tool-contract/types.js";
@@ -50,14 +50,27 @@ export function runPostDispatchGate(snapshot: OrchestrationSnapshot, unit: Orche
     return pass("artifact", "closeout roadmap/state evidence exists");
   }
 
-  const policy = POST_DISPATCH_POLICIES[unit.type];
+  const policy = resolvePostDispatchPolicy(unit.type, cwd);
   if (policy) {
-    const artifactPath = policy.artifactSuffix ? findMatchingArtifact(cwd, phaseDir, unit.phase, policy.artifactSuffix, exists, options.written) : undefined;
-    if (policy.artifactSuffix && !artifactPath) {
-      return fail(`${unit.label} Unit did not produce a *-${policy.artifactSuffix} artifact.`, [`missing:${unit.phase}-*-${policy.artifactSuffix}`]);
+    const suffixes = unique([
+      ...(policy.artifactSuffix ? [policy.artifactSuffix] : []),
+      ...(policy.artifactSuffixes ?? []),
+      ...(policy.requiredArtifacts ?? []),
+    ]);
+    const artifactPaths = suffixes
+      .map((suffix) => [suffix, findMatchingArtifact(cwd, phaseDir, unit.phase, suffix, exists, options.written)] as const);
+    const requiredSuffixes = policy.requiredArtifacts ?? (policy.artifactSuffix ? [policy.artifactSuffix] : []);
+    const missingRequired = requiredSuffixes
+      .filter((suffix) => !artifactPaths.some(([candidateSuffix, path]) => candidateSuffix === suffix && path));
+    if (missingRequired.length > 0) {
+      const evidence = missingRequired.map((suffix) => `missing:${unit.phase}-*-${suffix}`);
+      const resumeHint = policy.requiredArtifacts
+        ? `${unit.label} Unit did not produce required verification artifacts.`
+        : `${unit.label} Unit did not produce a *-${missingRequired[0]} artifact.`;
+      return fail(resumeHint, evidence);
     }
     const outcome = evaluatePostDispatchPolicy(policy, {
-      artifactPath,
+      artifactPaths: artifactPaths.map(([, path]) => path).filter((path): path is string => Boolean(path)),
       messages: options.messages,
       outcome: options.outcome,
       phase: unit.phase,
@@ -264,6 +277,10 @@ function escapeRegExp(value: string): string {
 
 function normalizeWrittenPath(cwd: string, value: string): string {
   return resolve(isAbsolute(value) ? value : resolve(cwd, value));
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function closeoutEvidence(cwd: string, phase: string, written?: string[]): boolean {

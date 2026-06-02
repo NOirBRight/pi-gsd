@@ -360,6 +360,15 @@ describe("transformWorkflowDispatchForPi", () => {
     expect(result).not.toContain("Skill(");
   });
 
+  it("guards workflow Skill dispatch when native chain owner is set", () => {
+    const input = 'Skill(skill="gsd-execute-phase", args="${PHASE} --auto --no-transition ${GSD_WS}")';
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain("If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator");
+    expect(result).toContain("otherwise Invoke /gsd-execute-phase ${PHASE} --auto --no-transition ${GSD_WS} in Pi");
+  });
+
   it("rewrites Workflow dispatch to generated workflow execution instructions", () => {
     const input = 'Workflow(workflow="get-shit-done/workflows/code-review-fix.md", args="${FIX_ARGS}")';
 

@@ -6,9 +6,9 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 });
 
 // src/extension.ts
-import { accessSync, constants as fsConstants, mkdirSync as mkdirSync5, rmSync } from "fs";
+import { accessSync, constants as fsConstants, mkdirSync as mkdirSync6, rmSync } from "fs";
 import { tmpdir } from "os";
-import { dirname as dirname6, join as join17, resolve as resolve7 } from "path";
+import { dirname as dirname6, join as join20, resolve as resolve7 } from "path";
 import { fileURLToPath } from "url";
 
 // src/official.ts
@@ -496,7 +496,8 @@ function formatSkillDispatchInstruction(dispatch) {
   return `Use the /${dispatch.name} skill (${invokePart}) or read the corresponding workflow prompt to continue.`;
 }
 function formatWorkflowSkillDispatchInstruction(dispatch) {
-  return `Invoke ${formatSlashInvocation(dispatch)} in Pi`;
+  const slashInvocation = formatSlashInvocation(dispatch);
+  return `If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for ${slashInvocation}; otherwise Invoke ${slashInvocation} in Pi.`;
 }
 function formatSlashInvocation(dispatch) {
   return dispatch.args ? `/${dispatch.name} ${dispatch.args}` : `/${dispatch.name}`;
@@ -1047,9 +1048,245 @@ async function chooseTierModel(tier, agents, scoped, all, ctx, currentModelId) {
 }
 
 // src/orchestrator/dispatch.ts
-import { existsSync as existsSync3 } from "fs";
+import { existsSync as existsSync5 } from "fs";
 import { spawnSync } from "child_process";
+import { join as join6 } from "path";
+
+// src/orchestration-contract/compile.ts
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { join as join4, relative } from "path";
+
+// src/orchestration-contract/snapshot.ts
+import { createHash } from "crypto";
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2 } from "fs";
 import { join as join3 } from "path";
+function calculateOrchestrationContractHash(snapshot) {
+  return createHash("sha256").update(stableStringify({ ...snapshot, contractHash: "" }), "utf8").digest("hex");
+}
+function writeOrchestrationContractSnapshot(snapshot, options) {
+  const outDir = options.outDir ?? join3(options.cwd, "generated");
+  const outFileName = options.outFileName ?? "orchestration-contract.json";
+  const outPath = join3(outDir, outFileName);
+  mkdirSync2(outDir, { recursive: true });
+  const stamped = {
+    ...snapshot,
+    contractHash: calculateOrchestrationContractHash(snapshot)
+  };
+  writeFileSync2(outPath, `${stableStringify(stamped)}
+`, "utf8");
+  return outPath;
+}
+function stableStringify(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+  return `{${entries.map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`).join(",")}}`;
+}
+
+// src/orchestration-contract/compile.ts
+var DISCUSS_CHAIN_PATH = "generated/workflows/workflows/discuss-phase/modes/chain.md";
+var PLAN_PATH = "generated/workflows/workflows/plan-phase.md";
+var EXECUTE_PATH = "generated/workflows/workflows/execute-phase.md";
+function compileOrchestrationContract(options) {
+  const generatedRoot = join4(options.cwd, "generated");
+  const discussChain = readRequired(options.cwd, DISCUSS_CHAIN_PATH);
+  const plan = readRequired(options.cwd, PLAN_PATH);
+  const execute = readRequired(options.cwd, EXECUTE_PATH);
+  requireText(
+    discussChain,
+    /\bgsd-plan-phase\b[\s\S]{0,120}--auto\b/,
+    DISCUSS_CHAIN_PATH,
+    "discuss chain must launch plan --auto"
+  );
+  requireText(
+    plan,
+    /\bgsd-execute-phase\b[\s\S]{0,160}--auto\b[\s\S]{0,80}--no-transition\b/,
+    PLAN_PATH,
+    "plan auto must launch execute --auto --no-transition"
+  );
+  requireText(execute, /##\s*PHASE COMPLETE/i, EXECUTE_PATH, "execute must emit PHASE COMPLETE");
+  requireText(execute, /Verification:\s*\{?\s*Passed\s*\|\s*Gaps Found\s*\}?/i, EXECUTE_PATH, "execute must report verification result");
+  const executeOutcome = {
+    artifactSuffixes: ["SUMMARY.md", "VERIFICATION.md"],
+    requiredArtifacts: ["SUMMARY.md", "VERIFICATION.md"],
+    passStatuses: ["passed", "pass"],
+    pauseStatuses: {
+      gaps_found: "Execution verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+      human_needed: "Execution verification requires human verification before phase completion."
+    },
+    pauseMarkers: {
+      gaps_found: "Execution verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+      human_needed: "Execution verification requires human verification before phase completion.",
+      verification_failed: "Execution verification failed; inspect VERIFICATION.md before continuing."
+    },
+    requireRecognizedOutcome: true,
+    sourcePaths: [EXECUTE_PATH]
+  };
+  const snapshot = {
+    contractVersion: 1,
+    contractHash: "",
+    ...options.officialPackage ? { officialPackage: options.officialPackage } : {},
+    ...options.officialVersion ? { officialVersion: options.officialVersion } : {},
+    generatedRoot: relative(options.cwd, generatedRoot) || "generated",
+    phaseIdPolicy: {
+      lexicalPattern: "^\\d+(?:\\.\\d+)*$",
+      examples: ["9", "09", "2.1", "02.1"],
+      validationHint: "Use upstream roadmap.get-phase/find-phase for existence checks."
+    },
+    chain: {
+      defaultQueue: [
+        { unitType: "discuss", argsByMode: { chain: "--chain", auto: "--auto" }, required: false, sourcePaths: [DISCUSS_CHAIN_PATH] },
+        { unitType: "plan", argsByMode: { chain: "--auto", auto: "--auto" }, required: true, sourcePaths: [PLAN_PATH] },
+        { unitType: "execute", argsByMode: { chain: "--auto --no-transition", auto: "--auto --no-transition" }, required: true, sourcePaths: [PLAN_PATH, EXECUTE_PATH] }
+      ],
+      standaloneStarts: {
+        "gsd-discuss-phase": "discuss",
+        "gsd-plan-phase": "plan",
+        "gsd-execute-phase": "execute",
+        "gsd-verify-work": "verify",
+        "gsd-ship": "closeout"
+      }
+    },
+    outcomes: {
+      discuss: { artifactSuffixes: ["CONTEXT.md"], sourcePaths: [DISCUSS_CHAIN_PATH] },
+      plan: { artifactSuffixes: ["PLAN.md"], sourcePaths: [PLAN_PATH] },
+      execute: executeOutcome,
+      verify: {
+        artifactSuffixes: ["VERIFICATION.md"],
+        passStatuses: ["passed", "pass"],
+        pauseStatuses: {
+          gaps_found: "Verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+          human_needed: "Phase verification requires human verification before closeout."
+        },
+        requireRecognizedOutcome: true,
+        sourcePaths: ["generated/workflows/workflows/verify-work.md"]
+      }
+    },
+    piOverlay: {
+      nativeOwnerEnv: "PI_GSD_NATIVE_CHAIN_OWNER",
+      noNestedWorkflowDispatchWhenNativeOwner: true
+    }
+  };
+  snapshot.contractHash = calculateOrchestrationContractHash(snapshot);
+  return snapshot;
+}
+function readRequired(cwd, path) {
+  const abs = join4(cwd, path);
+  if (!existsSync3(abs)) throw new Error(`orchestration contract source missing: ${path}`);
+  return readFileSync3(abs, "utf8");
+}
+function requireText(content, pattern, sourcePath, reason) {
+  if (!pattern.test(content)) {
+    throw new Error(`orchestration contract drift in ${sourcePath}: ${reason}`);
+  }
+}
+
+// src/orchestration-contract/validate.ts
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
+import { join as join5 } from "path";
+function readOrchestrationContractSnapshot(cwd) {
+  const path = join5(cwd, "generated", "orchestration-contract.json");
+  if (!existsSync4(path)) return void 0;
+  try {
+    return JSON.parse(readFileSync4(path, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function verifyOrchestrationContractSnapshot(options) {
+  const loaded = options.snapshot ? { snapshot: options.snapshot } : loadSnapshotForValidation(options.cwd);
+  if ("failure" in loaded) {
+    return { ok: false, failures: [loaded.failure], warnings: [], snapshotPresent: loaded.snapshotPresent };
+  }
+  const snapshot = loaded.snapshot;
+  if (!snapshot) return { ok: true, failures: [], warnings: [], snapshotPresent: false };
+  const failures = [];
+  const expectedHash = calculateOrchestrationContractHash(snapshot);
+  if (snapshot.contractHash !== expectedHash) {
+    failures.push({
+      failedField: "contractHash",
+      expected: expectedHash,
+      actual: snapshot.contractHash,
+      sourcePaths: ["generated/orchestration-contract.json"]
+    });
+  }
+  if (!snapshot.chain.defaultQueue.some((unit2) => unit2.unitType === "execute")) {
+    failures.push({
+      failedField: "chain.defaultQueue",
+      expected: "execute unit",
+      actual: snapshot.chain.defaultQueue.map((unit2) => unit2.unitType).join(","),
+      sourcePaths: ["generated/orchestration-contract.json"]
+    });
+  }
+  if (!snapshot.outcomes.execute?.requireRecognizedOutcome) {
+    failures.push({
+      failedField: "outcomes.execute.requireRecognizedOutcome",
+      expected: "true",
+      actual: String(snapshot.outcomes.execute?.requireRecognizedOutcome),
+      sourcePaths: ["generated/orchestration-contract.json"]
+    });
+  }
+  for (const path of requiredSourcePaths(snapshot)) {
+    if (!existsSync4(join5(options.cwd, path))) {
+      failures.push({
+        failedField: "sourcePaths",
+        expected: "present",
+        actual: "missing",
+        sourcePaths: [path]
+      });
+    }
+  }
+  try {
+    const compiled = compileOrchestrationContract({
+      cwd: options.cwd,
+      officialPackage: snapshot.officialPackage,
+      officialVersion: snapshot.officialVersion
+    });
+    if (compiled.contractHash !== snapshot.contractHash) {
+      failures.push({
+        failedField: "generatedWorkflows",
+        expected: snapshot.contractHash,
+        actual: compiled.contractHash,
+        sourcePaths: compiled.chain.defaultQueue.flatMap((unit2) => unit2.sourcePaths)
+      });
+    }
+  } catch (error) {
+    failures.push({
+      failedField: "generatedWorkflows",
+      expected: "compiled orchestration contract",
+      actual: error instanceof Error ? error.message : String(error),
+      sourcePaths: ["generated/workflows"]
+    });
+  }
+  return { ok: failures.length === 0, failures, warnings: [], snapshotPresent: true };
+}
+function loadSnapshotForValidation(cwd) {
+  const path = join5(cwd, "generated", "orchestration-contract.json");
+  if (!existsSync4(path)) return {};
+  try {
+    return { snapshot: JSON.parse(readFileSync4(path, "utf8")) };
+  } catch (error) {
+    return {
+      failure: {
+        failedField: "contractJson",
+        expected: "valid JSON",
+        actual: error instanceof Error ? error.message : String(error),
+        sourcePaths: ["generated/orchestration-contract.json"]
+      },
+      snapshotPresent: true
+    };
+  }
+}
+function requiredSourcePaths(snapshot) {
+  return Array.from(/* @__PURE__ */ new Set([
+    ...snapshot.chain.defaultQueue.flatMap((unit2) => unit2.sourcePaths),
+    ...Object.values(snapshot.outcomes).flatMap((outcome) => outcome?.sourcePaths ?? [])
+  ]));
+}
+
+// src/orchestrator/dispatch.ts
 var dispatchTargets = {
   discuss: { prompt: "generated/prompts/gsd-discuss-phase.md" },
   research: { prompt: "generated/prompts/gsd-explore.md" },
@@ -1072,11 +1309,11 @@ function resolveUnitDispatchTarget(unit2) {
 function dispatchUnit(options, unit2, snapshot) {
   const target = resolveUnitDispatchTarget(unit2);
   const resourceRoot = options.resourceRoot ?? options.cwd;
-  const promptPath = join3(resourceRoot, target.prompt);
-  if (!existsSync3(promptPath)) {
+  const promptPath = join6(resourceRoot, target.prompt);
+  if (!existsSync5(promptPath)) {
     return { ok: false, messages: [`missing dispatch prompt: ${target.prompt}`] };
   }
-  if (target.agent && !existsSync3(join3(resourceRoot, "generated", "agents", `${target.agent}.md`))) {
+  if (target.agent && !existsSync5(join6(resourceRoot, "generated", "agents", `${target.agent}.md`))) {
     return { ok: false, messages: [`missing dispatch agent: ${target.agent}`] };
   }
   if (!options.runner) {
@@ -1085,7 +1322,8 @@ function dispatchUnit(options, unit2, snapshot) {
       messages: [`native Pi dispatch unavailable for ${unit2.type}; provide a dispatch runner or Pi subagent bridge`]
     };
   }
-  return options.runner({ unit: unit2, snapshot, target, env: { GSD_AUDIT: "1" } });
+  const nativeOwnerEnv = readOrchestrationContractSnapshot(options.cwd)?.piOverlay.nativeOwnerEnv ?? "PI_GSD_NATIVE_CHAIN_OWNER";
+  return options.runner({ unit: unit2, snapshot, target, env: { GSD_AUDIT: "1", [nativeOwnerEnv]: "1" } });
 }
 function createCommandDispatchRunner(options) {
   return (request) => {
@@ -1125,7 +1363,7 @@ function parseDispatchCommandOutput(output) {
     }
   } catch {
   }
-  return {};
+  return { outcome: parsePlainTextOutcome(output) };
 }
 function parseOutcome(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
@@ -1145,40 +1383,54 @@ function parseOutcomeData(value) {
   });
   return entries.length ? Object.fromEntries(entries) : void 0;
 }
+function parsePlainTextOutcome(output) {
+  const marker = /##\s*PHASE COMPLETE/i.test(output) ? "phase_complete" : void 0;
+  if (hasLineMarker(output, "GAPS FOUND")) return { status: "gaps_found", ...marker ? { marker } : {} };
+  if (hasLineMarker(output, "HUMAN NEEDED")) return { status: "human_needed", ...marker ? { marker } : {} };
+  if (hasLineMarker(output, "VERIFICATION FAILED")) return { status: "verification_failed", ...marker ? { marker } : {} };
+  const verification = output.match(/^\s*Verification:\s*(Passed|Gaps Found)\s*$/im);
+  const verificationValue = verification?.[1]?.toLowerCase();
+  if (verificationValue === "passed") return { status: "passed", ...marker ? { marker } : {} };
+  if (verificationValue === "gaps found") return { status: "gaps_found", ...marker ? { marker } : {} };
+  return marker ? { marker } : void 0;
+}
+function hasLineMarker(output, marker) {
+  return new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${marker}\\b`, "i").test(output);
+}
 
 // src/orchestrator/settings.ts
-import { readdirSync, readFileSync as readFileSync5 } from "fs";
-import { join as join6 } from "path";
+import { readdirSync, readFileSync as readFileSync7 } from "fs";
+import { join as join9 } from "path";
 
 // src/settings-bridge/source.ts
-import { existsSync as existsSync4, readFileSync as readFileSync3, statSync as statSync2 } from "fs";
-import { createHash } from "crypto";
-import { isAbsolute, join as join4, resolve } from "path";
+import { existsSync as existsSync6, readFileSync as readFileSync5, statSync as statSync2 } from "fs";
+import { createHash as createHash2 } from "crypto";
+import { isAbsolute, join as join7, resolve } from "path";
 function resolveGsdConfigSource(options) {
   const projectRoot = resolve(options.projectRoot ?? options.cwd);
   if (options.configPath) {
     const absolutePath = isAbsolute(options.configPath) ? options.configPath : resolve(projectRoot, options.configPath);
     return readSource(absolutePath, "explicit");
   }
-  const activeWorkstreamPath = join4(projectRoot, ".planning", "active-workstream");
-  if (existsSync4(activeWorkstreamPath)) {
+  const activeWorkstreamPath = join7(projectRoot, ".planning", "active-workstream");
+  if (existsSync6(activeWorkstreamPath)) {
     try {
-      const slug = readFileSync3(activeWorkstreamPath, "utf8").trim();
+      const slug = readFileSync5(activeWorkstreamPath, "utf8").trim();
       if (isSafeWorkstreamSlug(slug)) {
-        const workstreamConfigPath = join4(projectRoot, ".planning", "workstreams", slug, "config.json");
-        if (existsSync4(workstreamConfigPath)) {
+        const workstreamConfigPath = join7(projectRoot, ".planning", "workstreams", slug, "config.json");
+        if (existsSync6(workstreamConfigPath)) {
           return readSource(workstreamConfigPath, "active-workstream");
         }
       }
     } catch {
     }
   }
-  const planningConfigPath = join4(projectRoot, ".planning", "config.json");
-  if (existsSync4(planningConfigPath)) {
+  const planningConfigPath = join7(projectRoot, ".planning", "config.json");
+  if (existsSync6(planningConfigPath)) {
     return readSource(planningConfigPath, "planning-config");
   }
-  const rootConfigPath = join4(projectRoot, "config.json");
-  if (existsSync4(rootConfigPath)) {
+  const rootConfigPath = join7(projectRoot, "config.json");
+  if (existsSync6(rootConfigPath)) {
     return readSource(rootConfigPath, "root-config");
   }
   return {
@@ -1194,9 +1446,9 @@ function isSafeWorkstreamSlug(slug) {
 }
 function readSource(path, kind) {
   try {
-    const content = readFileSync3(path, "utf8");
+    const content = readFileSync5(path, "utf8");
     const stat = statSync2(path);
-    const hash = createHash("sha256").update(content, "utf8").digest("hex");
+    const hash = createHash2("sha256").update(content, "utf8").digest("hex");
     let parsed;
     try {
       parsed = JSON.parse(content);
@@ -1230,16 +1482,16 @@ function readSource(path, kind) {
 }
 
 // src/orchestrator/official-config.ts
-import { readFileSync as readFileSync4 } from "fs";
-import { join as join5 } from "path";
+import { readFileSync as readFileSync6 } from "fs";
+import { join as join8 } from "path";
 function loadOfficialWorkflowConfig(options = {}) {
   const official = options.officialRoot ? {
     packageName: OFFICIAL_PACKAGE_NAME,
     version: readPackageVersion(options.officialRoot),
     packageRoot: options.officialRoot,
     paths: {
-      configDefaultsManifest: join5(options.officialRoot, "get-shit-done", "bin", "shared", "config-defaults.manifest.json"),
-      configSchemaManifest: join5(options.officialRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json")
+      configDefaultsManifest: join8(options.officialRoot, "get-shit-done", "bin", "shared", "config-defaults.manifest.json"),
+      configSchemaManifest: join8(options.officialRoot, "get-shit-done", "bin", "shared", "config-schema.manifest.json")
     }
   } : resolveOfficialPackage({ startDir: options.startDir });
   const defaults = readJson(official.paths.configDefaultsManifest);
@@ -1261,14 +1513,14 @@ function loadOfficialWorkflowConfig(options = {}) {
 }
 function readPackageVersion(officialRoot) {
   try {
-    const parsed = readJson(join5(officialRoot, "package.json"));
+    const parsed = readJson(join8(officialRoot, "package.json"));
     return typeof parsed.version === "string" ? parsed.version : "unknown";
   } catch {
     return "unknown";
   }
 }
 function readJson(path) {
-  return JSON.parse(readFileSync4(path, "utf8"));
+  return JSON.parse(readFileSync6(path, "utf8"));
 }
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1332,30 +1584,109 @@ function buildUnitQueue(input) {
     const resumeHint = "Phase signals require UI planning but workflow.ui_phase is disabled. Ask the user whether to enable workflow.ui_phase or continue without the UI Unit.";
     return { decision: "pause_for_user", settings, resumeHint, units: [unit(phase, "pause-for-user", settings, { resumeHint, source: "phase-signal" })] };
   }
-  const units = [];
-  if (!settings.workflow.skip_discuss) units.push(unit(phase, "discuss", settings, withArgs(input, "discuss")));
-  if (settings.workflow.research) units.push(unit(phase, "research", settings));
-  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_phase) units.push(unit(phase, "settings-gate", settings, { label: "UI phase settings gate", source: "phase-signal", metadata: { setting: "workflow.ui_phase" } }));
-  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_safety_gate) units.push(unit(phase, "ui-safety-gate", settings, { label: "UI Safety Gate", source: "phase-signal", metadata: { setting: "workflow.ui_safety_gate" } }));
-  if (input.phaseSignals?.isAiPhase && settings.workflow.ai_integration_phase) units.push(unit(phase, "ai-integration", settings, { label: "AI Integration", source: "phase-signal", metadata: { setting: "workflow.ai_integration_phase" } }));
-  units.push(unit(phase, "plan", settings, withArgs(input, "plan")));
-  if (settings.workflow.plan_check) units.push(unit(phase, "plan-check", settings));
-  units.push(unit(phase, "execute", settings, withArgs(input, "execute")));
-  if (settings.workflow.code_review) units.push(unit(phase, "code-review", settings));
-  if (input.phaseSignals?.requiresSecurityReview && settings.workflow.security_enforcement) units.push(unit(phase, "security-review", settings, { source: "phase-signal", metadata: { setting: "workflow.security_enforcement" } }));
-  if (settings.workflow.verifier) units.push(unit(phase, "verify", settings));
-  if (input.phaseSignals?.requiresNyquistValidation && settings.workflow.nyquist_validation) units.push(unit(phase, "nyquist-validation", settings, { source: "phase-signal", metadata: { setting: "workflow.nyquist_validation" } }));
-  if (input.phaseSignals?.requiresUiReview && settings.workflow.ui_review) units.push(unit(phase, "ui-review", settings));
-  units.push(unit(phase, "closeout", settings));
+  const orchestrationContract = readOrchestrationContractSnapshot(input.cwd ?? process.cwd());
+  const queueContract = orchestrationContract?.chain.defaultQueue ?? fallbackDefaultQueue();
+  const units = buildContractQueue(input, settings, queueContract);
   if (input.startAt) {
     const startIndex = units.findIndex((candidate) => candidate.type === input.startAt);
-    if (startIndex === -1) {
+    if (startIndex >= 0) {
+      return { decision: "dispatch", settings, units: appendExtraArgsToFirstUnit(units.slice(startIndex), input.extraArgs) };
+    }
+    if (standaloneUnitEnabled(input.startAt, settings)) {
+      return { decision: "dispatch", settings, units: appendExtraArgsToFirstUnit([unit(phase, input.startAt, settings, { source: "default" })], input.extraArgs) };
+    } else {
       const resumeHint = `Cannot start at ${input.startAt}; the Unit is disabled by workflow settings. Enable it or run without native auto handoff.`;
       return { decision: "pause_for_user", settings, resumeHint, units: [unit(phase, "pause-for-user", settings, { resumeHint, source: "phase-signal" })] };
     }
-    return { decision: "dispatch", settings, units: units.slice(startIndex) };
   }
   return { decision: "dispatch", settings, units };
+}
+function appendExtraArgsToFirstUnit(units, extraArgs) {
+  const normalizedExtraArgs = normalizeUnitArgs(extraArgs);
+  if (!normalizedExtraArgs || units.length === 0) return units;
+  const [first, ...rest] = units;
+  const firstWithArgs = {
+    ...first,
+    metadata: {
+      ...first.metadata,
+      args: mergeUnitArgs(first.metadata?.args, normalizedExtraArgs)
+    }
+  };
+  if (isTerminalNativeMode(first.type, normalizedExtraArgs)) return [firstWithArgs];
+  return [firstWithArgs, ...rest];
+}
+function mergeUnitArgs(baseArgs, extraArgs) {
+  return [normalizeUnitArgs(baseArgs), normalizeUnitArgs(extraArgs)].filter(Boolean).join(" ") || void 0;
+}
+function normalizeUnitArgs(args) {
+  return args?.trim().replace(/\s+/g, " ") ?? "";
+}
+function isTerminalNativeMode(type, extraArgs) {
+  if (type === "discuss") return hasFlag(extraArgs, "assumptions");
+  if (type === "plan") return hasFlag(extraArgs, "research-phase");
+  return false;
+}
+function hasFlag(args, flag) {
+  return new RegExp(`(?:^|\\s)--${flag}(?=\\s|$)`).test(args);
+}
+function buildContractQueue(input, settings, queueContract) {
+  const phase = input.phase;
+  const units = [];
+  for (const entry of queueContract) {
+    if (entry.unitType === "discuss" && settings.workflow.skip_discuss) continue;
+    if (entry.unitType === "plan") units.push(...prePlanSignalUnits(input, settings));
+    units.push(unitFromContract(phase, entry, input, settings));
+    if (entry.unitType === "execute") units.push(...postExecuteSignalUnits(input, settings));
+  }
+  return units;
+}
+function unitFromContract(phase, entry, input, settings) {
+  const args = entry.argsByMode[input.mode];
+  return unit(phase, entry.unitType, settings, {
+    required: entry.required,
+    source: "default",
+    metadata: {
+      ...args ? { args } : {},
+      contractSource: entry.sourcePaths.join(",")
+    }
+  });
+}
+function prePlanSignalUnits(input, settings) {
+  const phase = input.phase;
+  const units = [];
+  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_phase) units.push(unit(phase, "settings-gate", settings, { label: "UI phase settings gate", source: "phase-signal", metadata: { setting: "workflow.ui_phase" } }));
+  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_safety_gate) units.push(unit(phase, "ui-safety-gate", settings, { label: "UI Safety Gate", source: "phase-signal", metadata: { setting: "workflow.ui_safety_gate" } }));
+  if (input.phaseSignals?.isAiPhase && settings.workflow.ai_integration_phase) units.push(unit(phase, "ai-integration", settings, { label: "AI Integration", source: "phase-signal", metadata: { setting: "workflow.ai_integration_phase" } }));
+  return units;
+}
+function postExecuteSignalUnits(input, settings) {
+  const phase = input.phase;
+  const units = [];
+  if (input.phaseSignals?.requiresSecurityReview && settings.workflow.security_enforcement) units.push(unit(phase, "security-review", settings, { source: "phase-signal", metadata: { setting: "workflow.security_enforcement" } }));
+  if (input.phaseSignals?.requiresNyquistValidation && settings.workflow.nyquist_validation) units.push(unit(phase, "nyquist-validation", settings, { source: "phase-signal", metadata: { setting: "workflow.nyquist_validation" } }));
+  if (input.phaseSignals?.requiresUiReview && settings.workflow.ui_review) units.push(unit(phase, "ui-review", settings));
+  return units;
+}
+function fallbackDefaultQueue() {
+  return [
+    { unitType: "discuss", argsByMode: { chain: "--chain", auto: "--auto" }, required: false, sourcePaths: ["fallback"] },
+    { unitType: "plan", argsByMode: { chain: "--auto", auto: "--auto" }, required: true, sourcePaths: ["fallback"] },
+    { unitType: "execute", argsByMode: { chain: "--auto --no-transition", auto: "--auto --no-transition" }, required: true, sourcePaths: ["fallback"] }
+  ];
+}
+function standaloneUnitEnabled(type, settings) {
+  if (type === "verify") return settings.workflow.verifier;
+  if (type === "closeout") return true;
+  if (type === "code-review") return settings.workflow.code_review;
+  if (type === "research") return settings.workflow.research;
+  if (type === "plan-check") return Boolean(settings.workflow.plan_review_convergence);
+  if (type === "settings-gate") return Boolean(settings.workflow.ui_phase);
+  if (type === "ui-safety-gate") return Boolean(settings.workflow.ui_safety_gate);
+  if (type === "security-review") return Boolean(settings.workflow.security_enforcement);
+  if (type === "nyquist-validation") return Boolean(settings.workflow.nyquist_validation);
+  if (type === "ai-integration") return Boolean(settings.workflow.ai_integration_phase);
+  if (type === "ui-review") return Boolean(settings.workflow.ui_review);
+  return type !== "pause-for-user";
 }
 function unit(phase, type, settings, overrides = {}) {
   return {
@@ -1368,17 +1699,6 @@ function unit(phase, type, settings, overrides = {}) {
     source: settings.sources?.[settingForType(type) ?? "_auto_chain_active"] ?? "default",
     ...overrides
   };
-}
-function withArgs(input, type, overrides = {}) {
-  const args = argsForUnit(input, type);
-  if (!args) return overrides;
-  return { ...overrides, metadata: { ...overrides.metadata, args } };
-}
-function argsForUnit(input, type) {
-  if (type === "discuss") return input.mode === "auto" ? "--auto" : "--chain";
-  if (type === "plan") return "--auto";
-  if (type === "execute") return "--auto --no-transition";
-  return void 0;
 }
 function labelForType(type) {
   return type.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ");
@@ -1402,7 +1722,7 @@ function settingForType(type) {
 }
 function inferPhaseSignals(options) {
   const cwd = options.cwd ?? process.cwd();
-  const phaseRoot = join6(cwd, ".planning", "phases");
+  const phaseRoot = join9(cwd, ".planning", "phases");
   const phaseText = readPhaseSignalText(phaseRoot, options.phase).toLowerCase();
   return {
     isUiPhase: /(?:requires|phase[_ -]signals?):[^\n]*(?:ui|frontend)|(?:^|\n)phase-kind:\s*(?:ui|frontend)/.test(phaseText),
@@ -1416,9 +1736,9 @@ function readPhaseSignalText(phaseRoot, phase) {
   try {
     const direct = readdirSync(phaseRoot, { withFileTypes: true }).find((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`));
     if (!direct) return "";
-    return readdirSync(join6(phaseRoot, direct.name)).filter((name) => /(^|-)PLAN\.md$/i.test(name) || /^phase-signals\.(md|json|ya?ml)$/i.test(name)).map((name) => {
+    return readdirSync(join9(phaseRoot, direct.name)).filter((name) => /(^|-)PLAN\.md$/i.test(name) || /^phase-signals\.(md|json|ya?ml)$/i.test(name)).map((name) => {
       try {
-        return readFileSync5(join6(phaseRoot, direct.name, name), "utf8");
+        return readFileSync7(join9(phaseRoot, direct.name, name), "utf8");
       } catch {
         return "";
       }
@@ -1540,7 +1860,7 @@ function isRecord2(value) {
 
 // src/worktree-safety/git.ts
 import { execFileSync } from "child_process";
-import { existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync2, readFileSync as readFileSync6, unlinkSync, writeFileSync as writeFileSync2 } from "fs";
+import { existsSync as existsSync8, lstatSync, mkdirSync as mkdirSync3, readFileSync as readFileSync8, unlinkSync, writeFileSync as writeFileSync3 } from "fs";
 import { hostname } from "os";
 function readCurrentBranch(root) {
   try {
@@ -1553,12 +1873,12 @@ function hasGitMarker(root, deps = defaultWorktreeSafetyDeps) {
   return deps.existsSync(`${root}/.git`);
 }
 var defaultWorktreeSafetyDeps = {
-  existsSync: existsSync6,
+  existsSync: existsSync8,
   lstatSync,
-  readFileSync: (path) => readFileSync6(path, "utf8"),
-  writeFileSync: (path, content) => writeFileSync2(path, content, "utf8"),
+  readFileSync: (path) => readFileSync8(path, "utf8"),
+  writeFileSync: (path, content) => writeFileSync3(path, content, "utf8"),
   unlinkSync,
-  mkdirSync: mkdirSync2,
+  mkdirSync: mkdirSync3,
   cwd: () => process.cwd(),
   env: (name) => process.env[name],
   currentBranch: readCurrentBranch,
@@ -1577,7 +1897,7 @@ var defaultWorktreeSafetyDeps = {
 };
 
 // src/worktree-safety/lease.ts
-import { dirname as dirname3, isAbsolute as isAbsolute2, relative, resolve as resolve2 } from "path";
+import { dirname as dirname3, isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2 } from "path";
 
 // src/recovery/types.ts
 var RECOVERY_CLASSES = [
@@ -1823,7 +2143,7 @@ function resolveLeasePath(root, leasePath) {
   return { ok: true, path: candidate };
 }
 function isInsideOrSame(parent, child) {
-  const rel = relative(parent, child);
+  const rel = relative2(parent, child);
   return rel === "" || !rel.startsWith("..") && !isAbsolute2(rel);
 }
 
@@ -1902,13 +2222,13 @@ function fail(reasonCode, message, remediation, input, root, branch, extra = {})
 }
 
 // src/orchestrator/gates.ts
-import { existsSync as existsSync16, readdirSync as readdirSync3, readFileSync as readFileSync15, statSync as statSync4 } from "fs";
-import { basename as basename3, isAbsolute as isAbsolute4, join as join15, resolve as resolve5 } from "path";
+import { existsSync as existsSync18, readdirSync as readdirSync3, readFileSync as readFileSync17, statSync as statSync4 } from "fs";
+import { basename as basename3, isAbsolute as isAbsolute4, join as join18, resolve as resolve5 } from "path";
 
 // src/tool-contract/compile.ts
-import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
-import { createHash as createHash3 } from "crypto";
-import { basename, join as join8, posix, relative as relative2 } from "path";
+import { existsSync as existsSync10, readFileSync as readFileSync10 } from "fs";
+import { createHash as createHash4 } from "crypto";
+import { basename, join as join11, posix, relative as relative3 } from "path";
 
 // src/frontmatter.ts
 var supportedPromptKeys = [
@@ -2047,31 +2367,31 @@ function needsQuoting(value) {
 }
 
 // src/tool-contract/snapshot.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync3, readFileSync as readFileSync7, writeFileSync as writeFileSync3 } from "fs";
-import { dirname as dirname4, join as join7 } from "path";
-import { createHash as createHash2 } from "crypto";
+import { existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync9, writeFileSync as writeFileSync4 } from "fs";
+import { dirname as dirname4, join as join10 } from "path";
+import { createHash as createHash3 } from "crypto";
 function writeToolContractSnapshot(snapshot, options) {
-  const outDir = options.outDir ?? join7(options.cwd, "generated");
+  const outDir = options.outDir ?? join10(options.cwd, "generated");
   const outFileName = options.outFileName ?? "tool-contracts.json";
-  const outPath = join7(outDir, outFileName);
-  mkdirSync3(outDir, { recursive: true });
+  const outPath = join10(outDir, outFileName);
+  mkdirSync4(outDir, { recursive: true });
   const contentHash = calculateToolContractHash(snapshot);
   const stamped = { ...snapshot, contractHash: contentHash };
-  const stampedJson = stableStringify(stamped);
-  writeFileSync3(outPath, `${stampedJson}
+  const stampedJson = stableStringify2(stamped);
+  writeFileSync4(outPath, `${stampedJson}
 `, "utf8");
   return outPath;
 }
 function calculateToolContractHash(snapshot) {
-  return createHash2("sha256").update(stableStringify({ ...snapshot, contractHash: "" }), "utf8").digest("hex");
+  return createHash3("sha256").update(stableStringify2({ ...snapshot, contractHash: "" }), "utf8").digest("hex");
 }
-function stableStringify(value) {
+function stableStringify2(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+    return `[${value.map((item) => stableStringify2(item)).join(",")}]`;
   }
   const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(",")}}`;
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify2(v)}`).join(",")}}`;
 }
 
 // src/tool-contract/compile.ts
@@ -2088,7 +2408,7 @@ var PROMPT_OBLIGATION_MARKERS = [
 var CLOSEOUT_REQUIREMENTS = ["update-roadmap", "update-state", "phase-summary-exists"];
 function compileToolContracts(options) {
   const cwd = options.cwd;
-  const generatedRoot = join8(cwd, "generated");
+  const generatedRoot = join11(cwd, "generated");
   const official = resolveOfficialPackage({ startDir: cwd });
   const officialConfig = loadOfficialWorkflowConfig({ startDir: cwd });
   const schemaKeys = officialConfig.schema.workflowKeys;
@@ -2112,19 +2432,19 @@ function compileToolContracts(options) {
   for (const unitType of unitTypes) {
     const target = resolveUnitDispatchTarget({ type: unitType, id: `${unitType}-compile`, status: "pending", phase: "compile", label: unitType, required: true, source: "default" });
     const promptRelative = target.prompt;
-    const promptAbs = join8(cwd, promptRelative);
-    if (!existsSync8(promptAbs)) continue;
-    const promptContent = readFileSync8(promptAbs, "utf8");
+    const promptAbs = join11(cwd, promptRelative);
+    if (!existsSync10(promptAbs)) continue;
+    const promptContent = readFileSync10(promptAbs, "utf8");
     const promptHash = hashContent(promptContent);
     const agent = target.agent;
     let allowedTools = [];
     let agentPath;
     if (agent) {
       const agentRel = posix.join("generated", "agents", `${agent}.md`);
-      const agentAbs = join8(cwd, agentRel);
-      if (existsSync8(agentAbs)) {
+      const agentAbs = join11(cwd, agentRel);
+      if (existsSync10(agentAbs)) {
         agentPath = agentRel;
-        const agentContent = readFileSync8(agentAbs, "utf8");
+        const agentContent = readFileSync10(agentAbs, "utf8");
         const parsed = splitFrontmatter(agentContent);
         allowedTools = parseToolList(parsed.data.tools);
       }
@@ -2159,7 +2479,7 @@ function compileToolContracts(options) {
     contractHash: "",
     officialPackage: official.packageName,
     officialVersion: official.version,
-    generatedRoot: relative2(cwd, generatedRoot) || "generated",
+    generatedRoot: relative3(cwd, generatedRoot) || "generated",
     contracts
   };
   snapshot.contractHash = calculateToolContractHash(snapshot);
@@ -2230,7 +2550,7 @@ function parseToolList(value) {
   return trimmed.split(",").map((tool) => tool.trim()).filter(Boolean);
 }
 function hashContent(content) {
-  return createHash3("sha256").update(content, "utf8").digest("hex");
+  return createHash4("sha256").update(content, "utf8").digest("hex");
 }
 function verifyToolContractSnapshot(options) {
   const cwd = options.cwd;
@@ -2258,8 +2578,8 @@ function verifyToolContractSnapshot(options) {
     });
   }
   for (const contract of snapshot.contracts) {
-    const promptAbs = join8(cwd, contract.promptPath);
-    if (!existsSync8(promptAbs)) {
+    const promptAbs = join11(cwd, contract.promptPath);
+    if (!existsSync10(promptAbs)) {
       failures.push({
         unitType: contract.unitType,
         contractHash: snapshot.contractHash,
@@ -2271,9 +2591,9 @@ function verifyToolContractSnapshot(options) {
       });
       continue;
     }
-    const currentPromptHash = hashContent(readFileSync8(promptAbs, "utf8"));
+    const currentPromptHash = hashContent(readFileSync10(promptAbs, "utf8"));
     if (currentPromptHash !== contract.promptHash) {
-      const currentPrompt = readFileSync8(promptAbs, "utf8");
+      const currentPrompt = readFileSync10(promptAbs, "utf8");
       const currentObligations = extractPromptObligations(currentPrompt);
       const missing = contract.validationRequirements.filter((req) => {
         if (req === "dispatch-target-present") return false;
@@ -2308,8 +2628,8 @@ function verifyToolContractSnapshot(options) {
       }
     }
     if (contract.agentPath) {
-      const agentAbs = join8(cwd, contract.agentPath);
-      if (!existsSync8(agentAbs)) {
+      const agentAbs = join11(cwd, contract.agentPath);
+      if (!existsSync10(agentAbs)) {
         failures.push({
           unitType: contract.unitType,
           contractHash: snapshot.contractHash,
@@ -2321,7 +2641,7 @@ function verifyToolContractSnapshot(options) {
         });
         continue;
       }
-      const currentAgent = readFileSync8(agentAbs, "utf8");
+      const currentAgent = readFileSync10(agentAbs, "utf8");
       const currentTools = parseToolList(splitFrontmatter(currentAgent).data.tools);
       const contractToolSet = new Set(contract.allowedTools);
       const currentToolSet = new Set(currentTools);
@@ -2356,18 +2676,18 @@ function verifyToolContractSnapshot(options) {
   return { ok: failures.length === 0, failures, warnings, snapshotPresent: true };
 }
 function readSnapshot(cwd) {
-  const path = join8(cwd, "generated", "tool-contracts.json");
-  if (!existsSync8(path)) return void 0;
+  const path = join11(cwd, "generated", "tool-contracts.json");
+  if (!existsSync10(path)) return void 0;
   try {
-    return JSON.parse(readFileSync8(path, "utf8"));
+    return JSON.parse(readFileSync10(path, "utf8"));
   } catch {
     return void 0;
   }
 }
 
 // src/tool-contract/validate.ts
-import { existsSync as existsSync9 } from "fs";
-import { join as join9 } from "path";
+import { existsSync as existsSync11 } from "fs";
+import { join as join12 } from "path";
 var MAX_FIELD_SUMMARY = 80;
 function validateUnitToolContract(unit2, options) {
   const { snapshot } = options;
@@ -2428,8 +2748,8 @@ function validateUnitToolContractAgainstDisk(options) {
       })
     };
   }
-  const promptAbs = join9(cwd, expectedPromptRel);
-  if (!existsSync9(promptAbs)) {
+  const promptAbs = join12(cwd, expectedPromptRel);
+  if (!existsSync11(promptAbs)) {
     return {
       ok: false,
       failure: boundedFailure({
@@ -2507,8 +2827,8 @@ function validateUnitToolContractAgainstDisk(options) {
         })
       };
     }
-    const agentAbs = join9(cwd, contract.agentPath);
-    if (!existsSync9(agentAbs)) {
+    const agentAbs = join12(cwd, contract.agentPath);
+    if (!existsSync11(agentAbs)) {
       return {
         ok: false,
         failure: boundedFailure({
@@ -2544,7 +2864,7 @@ function truncate(value, max = MAX_FIELD_SUMMARY) {
 }
 
 // src/orchestrator/outcomes.ts
-import { readFileSync as readFileSync9 } from "fs";
+import { readFileSync as readFileSync11 } from "fs";
 var POST_DISPATCH_POLICIES = {
   discuss: { artifactSuffix: "CONTEXT.md" },
   research: { artifactSuffix: "RESEARCH.md" },
@@ -2556,7 +2876,21 @@ var POST_DISPATCH_POLICIES = {
     },
     requireRecognizedOutcome: true
   },
-  execute: { artifactSuffix: "SUMMARY.md" },
+  execute: {
+    artifactSuffixes: ["SUMMARY.md", "VERIFICATION.md"],
+    requiredArtifacts: ["SUMMARY.md", "VERIFICATION.md"],
+    passStatuses: ["passed", "pass"],
+    pauseStatuses: {
+      gaps_found: "Execution verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+      human_needed: "Execution verification requires human verification before phase completion."
+    },
+    pauseMarkers: {
+      gaps_found: "Execution verification found gaps; run /gsd-plan-phase {phase} --gaps, then /gsd-execute-phase {phase} --gaps-only.",
+      human_needed: "Execution verification requires human verification before phase completion.",
+      verification_failed: "Execution verification failed; inspect VERIFICATION.md before continuing."
+    },
+    requireRecognizedOutcome: true
+  },
   "code-review": {
     artifactSuffix: "REVIEW.md",
     passStatuses: ["clean", "skipped", "issues_found"],
@@ -2600,6 +2934,15 @@ var POST_DISPATCH_POLICIES = {
   },
   "ui-review": { artifactSuffix: "UI-REVIEW.md", passMarkers: ["ui_review_complete"] }
 };
+function resolvePostDispatchPolicy(unitType, cwd) {
+  const fallback = POST_DISPATCH_POLICIES[unitType];
+  const contractPolicy = cwd ? readOrchestrationContractSnapshot(cwd)?.outcomes[unitType] : void 0;
+  if (!contractPolicy) return fallback;
+  return {
+    ...fallback,
+    ...contractPolicy
+  };
+}
 function evaluatePostDispatchPolicy(policy, input) {
   const signals = collectSignals(input);
   if (policy.custom === "security") {
@@ -2662,15 +3005,17 @@ function collectSignals(input) {
     const normalizedValue = normalizeScalar(String(value));
     fields.set(normalizedKey, normalizedValue);
     evidence.push(`field:${normalizedKey}:${normalizedValue}`);
-    if (normalizedKey === "status") addStatus(String(value));
+    if (["status", "verification", "verdict", "outcome"].includes(normalizedKey)) addStatus(String(value));
   };
-  if (input.artifactPath) {
-    evidence.push(`artifact:${input.artifactPath}`);
-    const parsed = splitFrontmatter(readFileSync9(input.artifactPath, "utf8"));
+  const artifactPaths = unique([...input.artifactPath ? [input.artifactPath] : [], ...input.artifactPaths ?? []]);
+  for (const artifactPath of artifactPaths) {
+    evidence.push(`artifact:${artifactPath}`);
+    const parsed = splitFrontmatter(readFileSync11(artifactPath, "utf8"));
     for (const [key, value] of Object.entries(parsed.data)) {
       if (Array.isArray(value)) continue;
       addField(key, value);
     }
+    for (const [key, value] of knownFields(parsed.body)) addField(key, value);
     for (const marker of knownMarkers(parsed.body)) addMarker(marker);
   }
   if (input.outcome) {
@@ -2681,6 +3026,7 @@ function collectSignals(input) {
     for (const [key, value] of Object.entries(input.outcome.data ?? {})) addField(key, value);
   }
   for (const message of input.messages ?? []) {
+    for (const [key, value] of knownFields(message)) addField(key, value);
     for (const marker of knownMarkers(message)) addMarker(marker);
   }
   return { statuses, markers, fields, evidence: unique(evidence) };
@@ -2717,6 +3063,7 @@ function fail2(template, phase, evidence) {
 }
 function knownMarkers(text) {
   const markers = [
+    "PHASE COMPLETE",
     "VERIFICATION PASSED",
     "ISSUES FOUND",
     "UI-SPEC VERIFIED",
@@ -2727,9 +3074,20 @@ function knownMarkers(text) {
     "ESCALATE",
     "UI REVIEW COMPLETE",
     "APPROVED",
-    "BLOCKED"
+    "BLOCKED",
+    "GAPS FOUND",
+    "HUMAN NEEDED",
+    "VERIFICATION FAILED"
   ];
   return markers.filter((marker) => new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${escapeRegExp(marker)}\\b`, "i").test(text));
+}
+function knownFields(text) {
+  const fields = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*(Verification|Status|Outcome|Verdict):\s*(.+?)\s*$/i);
+    if (match) fields.push([match[1], match[2]]);
+  }
+  return fields;
 }
 function normalizeSignal(value) {
   return normalizeScalar(value.replace(/^#+\s*/, ""));
@@ -2750,11 +3108,11 @@ function escapeRegExp(value) {
 }
 
 // src/orchestrator/reconciliation.ts
-import { relative as relative4 } from "path";
+import { relative as relative5 } from "path";
 
 // src/state-reconciliation/index.ts
-import { existsSync as existsSync15 } from "fs";
-import { join as join14 } from "path";
+import { existsSync as existsSync17 } from "fs";
+import { join as join17 } from "path";
 
 // src/state-reconciliation/drift/noncanonical-plan-like-file.ts
 function detectNoncanonicalPlanLikeFiles(input) {
@@ -2766,7 +3124,7 @@ function detectNoncanonicalPlanLikeFiles(input) {
 }
 
 // src/state-reconciliation/drift/completion-timestamp.ts
-import { readFileSync as readFileSync10 } from "fs";
+import { readFileSync as readFileSync12 } from "fs";
 function detectCompletionTimestampDrift(input) {
   if (!input.roadmap) return empty();
   const repairs = [];
@@ -2819,7 +3177,7 @@ function detectCompletionTimestampDrift(input) {
 function provenCompletionDate(summaryPaths) {
   const dates = /* @__PURE__ */ new Set();
   for (const path of summaryPaths) {
-    const match = /^completed:\s*["']?(?<date>\d{4}-\d{2}-\d{2})["']?\s*$/m.exec(readFileSync10(path, "utf8"));
+    const match = /^completed:\s*["']?(?<date>\d{4}-\d{2}-\d{2})["']?\s*$/m.exec(readFileSync12(path, "utf8"));
     if (match?.groups) dates.add(match.groups.date);
   }
   return dates.size === 1 ? [...dates][0] : void 0;
@@ -3060,15 +3418,15 @@ function classifyDrift(input) {
 }
 
 // src/state-reconciliation/journal.ts
-import { existsSync as existsSync10, readFileSync as readFileSync11 } from "fs";
-import { join as join10 } from "path";
+import { existsSync as existsSync12, readFileSync as readFileSync13 } from "fs";
+import { join as join13 } from "path";
 function readJournalState(basePath) {
-  const path = join10(basePath, ".planning", "orchestration-state.json");
-  if (!existsSync10(path)) {
+  const path = join13(basePath, ".planning", "orchestration-state.json");
+  if (!existsSync12(path)) {
     return { ok: true, path, blockers: [] };
   }
   try {
-    const parsed = JSON.parse(readFileSync11(path, "utf8"));
+    const parsed = JSON.parse(readFileSync13(path, "utf8"));
     if (!isJournal(parsed)) {
       return blocked(path, "orchestration-state.json has an invalid journal shape.");
     }
@@ -3113,22 +3471,22 @@ function blocked(path, message) {
 }
 
 // src/state-reconciliation/repair.ts
-import { existsSync as existsSync13, readFileSync as readFileSync14, writeFileSync as writeFileSync4 } from "fs";
-import { isAbsolute as isAbsolute3, relative as relative3, resolve as resolve4 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync16, writeFileSync as writeFileSync5 } from "fs";
+import { isAbsolute as isAbsolute3, relative as relative4, resolve as resolve4 } from "path";
 
 // src/state-reconciliation/roadmap.ts
-import { existsSync as existsSync11, readFileSync as readFileSync12 } from "fs";
-import { join as join11 } from "path";
+import { existsSync as existsSync13, readFileSync as readFileSync14 } from "fs";
+import { join as join14 } from "path";
 function readRoadmapState(basePath) {
-  const path = join11(basePath, ".planning", "ROADMAP.md");
-  if (!existsSync11(path)) {
+  const path = join14(basePath, ".planning", "ROADMAP.md");
+  if (!existsSync13(path)) {
     return {
       path,
       phases: [],
       blockers: [metadataBlocker("roadmap", path, "Missing ROADMAP.md metadata file.")]
     };
   }
-  const lines = readFileSync12(path, "utf8").split(/\r?\n/);
+  const lines = readFileSync14(path, "utf8").split(/\r?\n/);
   const phases = [];
   for (const [index, line] of lines.entries()) {
     const cells = parseTableRow(line);
@@ -3206,11 +3564,11 @@ function metadataBlocker(artifact, path, message) {
 }
 
 // src/state-reconciliation/state.ts
-import { existsSync as existsSync12, readFileSync as readFileSync13 } from "fs";
-import { join as join12 } from "path";
+import { existsSync as existsSync14, readFileSync as readFileSync15 } from "fs";
+import { join as join15 } from "path";
 function readStateDigest(basePath) {
-  const path = join12(basePath, ".planning", "STATE.md");
-  if (!existsSync12(path)) {
+  const path = join15(basePath, ".planning", "STATE.md");
+  if (!existsSync14(path)) {
     return {
       path,
       frontmatter: {},
@@ -3218,7 +3576,7 @@ function readStateDigest(basePath) {
       blockers: [metadataBlocker2(path, "Missing STATE.md metadata file.")]
     };
   }
-  const content = readFileSync13(path, "utf8");
+  const content = readFileSync15(path, "utf8");
   return {
     path,
     frontmatter: parseFrontmatter2(content),
@@ -3366,7 +3724,7 @@ function checkPreconditions(basePath, repair, fs) {
 function isInsidePlanning(basePath, path) {
   const planningRoot = resolve4(basePath, ".planning");
   const target = resolve4(path);
-  const rel = relative3(planningRoot, target);
+  const rel = relative4(planningRoot, target);
   return rel === "" || !!rel && !rel.startsWith("..") && !isAbsolute3(rel);
 }
 function repairBlocker(message, repair) {
@@ -3395,14 +3753,14 @@ function repairKind(path) {
   return void 0;
 }
 var defaultFileSystem = {
-  exists: existsSync13,
-  readFile: (path) => readFileSync14(path, "utf8"),
-  writeFile: (path, content) => writeFileSync4(path, content, "utf8")
+  exists: existsSync15,
+  readFile: (path) => readFileSync16(path, "utf8"),
+  writeFile: (path, content) => writeFileSync5(path, content, "utf8")
 };
 
 // src/state-reconciliation/scan.ts
-import { existsSync as existsSync14, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
-import { join as join13 } from "path";
+import { existsSync as existsSync16, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join16 } from "path";
 
 // src/state-reconciliation/artifacts.ts
 var PLAN_ARTIFACT = /^(?<phase>\d{2})-(?<plan>\d{2})-PLAN\.md$/;
@@ -3446,8 +3804,8 @@ function canonical(filename, kind, phase, plan) {
 
 // src/state-reconciliation/scan.ts
 function scanPlanningArtifacts(basePath) {
-  const phasesPath = join13(basePath, ".planning", "phases");
-  if (!existsSync14(phasesPath)) {
+  const phasesPath = join16(basePath, ".planning", "phases");
+  if (!existsSync16(phasesPath)) {
     const blocker = {
       reasonCode: "unknown-drift",
       artifact: "state",
@@ -3462,10 +3820,10 @@ function scanPlanningArtifacts(basePath) {
   const blockers = [];
   for (const entry of readdirSync2(phasesPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (!entry.isDirectory()) continue;
-    const phaseDir = join13(phasesPath, entry.name);
+    const phaseDir = join16(phasesPath, entry.name);
     for (const file of readdirSync2(phaseDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       if (!file.isFile()) continue;
-      const path = join13(phaseDir, file.name);
+      const path = join16(phaseDir, file.name);
       if (!statSync3(path).isFile()) continue;
       const classification = classifyArtifactName(file.name);
       if (classification.canonical) {
@@ -3620,10 +3978,10 @@ function totalsFor(phases) {
   };
 }
 function readOptionalRoadmapState(basePath) {
-  return existsSync15(join14(basePath, ".planning", "ROADMAP.md")) ? readRoadmapState(basePath) : void 0;
+  return existsSync17(join17(basePath, ".planning", "ROADMAP.md")) ? readRoadmapState(basePath) : void 0;
 }
 function readOptionalStateDigest(basePath) {
-  return existsSync15(join14(basePath, ".planning", "STATE.md")) ? readStateDigest(basePath) : void 0;
+  return existsSync17(join17(basePath, ".planning", "STATE.md")) ? readStateDigest(basePath) : void 0;
 }
 
 // src/orchestrator/reconciliation.ts
@@ -3709,7 +4067,7 @@ function evidenceToStrings(evidence, basePath) {
   return values;
 }
 function safeRelativePath(basePath, path) {
-  const rel = relative4(basePath, path);
+  const rel = relative5(basePath, path);
   return rel && !rel.startsWith("..") ? rel : path;
 }
 function truncateEvidence(value) {
@@ -3736,9 +4094,9 @@ function runPreDispatchGates(snapshot, unit2, overrides = {}) {
   return { ok: true, gate: "persistRuntimeState", evidence: [...orderedGates.map(([name]) => name), ...releaseEvidence], journalEvents: journalEvents.length ? journalEvents : void 0 };
 }
 function runPostDispatchGate(snapshot, unit2, options = {}) {
-  const exists = options.exists ?? existsSync16;
+  const exists = options.exists ?? existsSync18;
   const cwd = options.cwd ?? process.cwd();
-  const phaseDir = join15(cwd, ".planning", "phases");
+  const phaseDir = join18(cwd, ".planning", "phases");
   if (unit2.type === "verify") {
     if (options.verifierSkip || !snapshot.settings.workflow.verifier) return pass("artifact", "verifier skipped by settings");
   }
@@ -3751,14 +4109,23 @@ function runPostDispatchGate(snapshot, unit2, options = {}) {
     }
     return pass("artifact", "closeout roadmap/state evidence exists");
   }
-  const policy = POST_DISPATCH_POLICIES[unit2.type];
+  const policy = resolvePostDispatchPolicy(unit2.type, cwd);
   if (policy) {
-    const artifactPath = policy.artifactSuffix ? findMatchingArtifact(cwd, phaseDir, unit2.phase, policy.artifactSuffix, exists, options.written) : void 0;
-    if (policy.artifactSuffix && !artifactPath) {
-      return fail3(`${unit2.label} Unit did not produce a *-${policy.artifactSuffix} artifact.`, [`missing:${unit2.phase}-*-${policy.artifactSuffix}`]);
+    const suffixes = unique2([
+      ...policy.artifactSuffix ? [policy.artifactSuffix] : [],
+      ...policy.artifactSuffixes ?? [],
+      ...policy.requiredArtifacts ?? []
+    ]);
+    const artifactPaths = suffixes.map((suffix) => [suffix, findMatchingArtifact(cwd, phaseDir, unit2.phase, suffix, exists, options.written)]);
+    const requiredSuffixes = policy.requiredArtifacts ?? (policy.artifactSuffix ? [policy.artifactSuffix] : []);
+    const missingRequired = requiredSuffixes.filter((suffix) => !artifactPaths.some(([candidateSuffix, path]) => candidateSuffix === suffix && path));
+    if (missingRequired.length > 0) {
+      const evidence = missingRequired.map((suffix) => `missing:${unit2.phase}-*-${suffix}`);
+      const resumeHint = policy.requiredArtifacts ? `${unit2.label} Unit did not produce required verification artifacts.` : `${unit2.label} Unit did not produce a *-${missingRequired[0]} artifact.`;
+      return fail3(resumeHint, evidence);
     }
     const outcome = evaluatePostDispatchPolicy(policy, {
-      artifactPath,
+      artifactPaths: artifactPaths.map(([, path]) => path).filter((path) => Boolean(path)),
       messages: options.messages,
       outcome: options.outcome,
       phase: unit2.phase,
@@ -3921,8 +4288,8 @@ function findMatchingArtifact(cwd, phaseRoot, phase, suffix, exists, written, re
   const artifactPattern = new RegExp(`^${escapeRegExp2(phase)}(?:-\\d+)?-${escapeRegExp2(suffix)}$`);
   try {
     const candidates = [
-      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join15(phaseRoot, entry.name)),
-      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync3(join15(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join15(phaseRoot, entry.name, child.name)))
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join18(phaseRoot, entry.name)),
+      ...readdirSync3(phaseRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && entry.name.startsWith(`${phase}-`)).flatMap((entry) => readdirSync3(join18(phaseRoot, entry.name), { withFileTypes: true }).filter((child) => child.isFile()).map((child) => join18(phaseRoot, entry.name, child.name)))
     ];
     return candidates.find((path) => artifactPattern.test(basename3(path)) && (!writtenSet || writtenSet.has(resolve5(path))) && exists(path));
   } catch {
@@ -3935,6 +4302,9 @@ function escapeRegExp2(value) {
 function normalizeWrittenPath(cwd, value) {
   return resolve5(isAbsolute4(value) ? value : resolve5(cwd, value));
 }
+function unique2(values) {
+  return [...new Set(values)];
+}
 function closeoutEvidence(cwd, phase, written) {
   if (!written?.length) return false;
   const writtenSet = new Set(written.map((path) => normalizeWrittenPath(cwd, path)));
@@ -3942,9 +4312,9 @@ function closeoutEvidence(cwd, phase, written) {
   const statePath = resolve5(cwd, ".planning", "STATE.md");
   if (!writtenSet.has(roadmapPath) || !writtenSet.has(statePath)) return false;
   try {
-    const roadmap = readFileSync15(roadmapPath, "utf8");
-    const state = readFileSync15(statePath, "utf8");
-    statSync4(join15(cwd, ".planning", "phases"));
+    const roadmap = readFileSync17(roadmapPath, "utf8");
+    const state = readFileSync17(statePath, "utf8");
+    statSync4(join18(cwd, ".planning", "phases"));
     return roadmapPhaseComplete(roadmap, phase) && statePhaseComplete(state, phase);
   } catch {
     return false;
@@ -3953,7 +4323,7 @@ function closeoutEvidence(cwd, phase, written) {
 function phaseVerificationPassed(cwd, phaseRoot, phase, exists) {
   const verificationPath = findMatchingArtifact(cwd, phaseRoot, phase, "VERIFICATION.md", exists, void 0, false);
   if (!verificationPath) return false;
-  const content = readFileSync15(verificationPath, "utf8");
+  const content = readFileSync17(verificationPath, "utf8");
   const status = /^status:\s*(\S+)/m.exec(content)?.[1]?.trim().toLowerCase();
   return status === "passed" || status === "pass";
 }
@@ -4386,6 +4756,7 @@ function createAutoOrchestrator(deps = {}) {
         cwd: sessionContext.cwd,
         configPath: sessionContext.configPath,
         startAt: sessionContext.startAt,
+        extraArgs: sessionContext.extraArgs,
         settings,
         phaseSignals
       });
@@ -4496,8 +4867,8 @@ function withLastEvent(snapshot, event) {
 }
 
 // src/orchestrator/journal.ts
-import { existsSync as existsSync17, mkdirSync as mkdirSync4, readFileSync as readFileSync16, writeFileSync as writeFileSync5 } from "fs";
-import { dirname as dirname5, isAbsolute as isAbsolute5, resolve as resolve6, relative as relative5 } from "path";
+import { existsSync as existsSync19, mkdirSync as mkdirSync5, readFileSync as readFileSync18, writeFileSync as writeFileSync6 } from "fs";
+import { dirname as dirname5, isAbsolute as isAbsolute5, resolve as resolve6, relative as relative6 } from "path";
 var DEFAULT_JOURNAL_PATH = ".planning/orchestration-state.json";
 var allowedEventKeys = /* @__PURE__ */ new Set(["type", "event", "ts", "phase", "unitId", "status", "attempt", "reason", "resumeHint", "evidence", "recoveryDecision", "exitReason", "action", "recoveryClass", "reasonCode", "root", "branch", "paths", "written", "message", "host", "pid"]);
 var unsafeEventKeys = /* @__PURE__ */ new Set(["prompt", "userText", "env", "token", "secret", "password", "apiKey", "api_key", "authorization", "bearer", "args", "arguments", "rawArgs"]);
@@ -4526,11 +4897,11 @@ function createJournalAdapter(options) {
 function readJournal(options) {
   const resolved = resolveJournalPath(options);
   if (!resolved.ok) return { ok: false, messages: resolved.messages };
-  if (!existsSync17(resolved.path)) {
+  if (!existsSync19(resolved.path)) {
     return { ok: true, messages: ["orchestration journal not found"] };
   }
   try {
-    const parsed = JSON.parse(readFileSync16(resolved.path, "utf8"));
+    const parsed = JSON.parse(readFileSync18(resolved.path, "utf8"));
     const journal = normalizeJournal(parsed);
     if (!journal) {
       return { ok: false, messages: ["orchestration journal is invalid"] };
@@ -4640,8 +5011,8 @@ function redactUnit(unit2) {
 }
 function writeJournal(path, journal) {
   try {
-    mkdirSync4(dirname5(path), { recursive: true });
-    writeFileSync5(path, `${JSON.stringify(journal, null, 2)}
+    mkdirSync5(dirname5(path), { recursive: true });
+    writeFileSync6(path, `${JSON.stringify(journal, null, 2)}
 `, "utf8");
     return { ok: true, messages: ["orchestration journal written"], written: [path], snapshot: journal.snapshot, status: journal.snapshot ? void 0 : void 0 };
   } catch (error) {
@@ -4658,7 +5029,7 @@ function resolveJournalPath(options) {
   return { ok: true, path: candidate };
 }
 function isInsideOrSame2(parent, child) {
-  const rel = relative5(parent, child);
+  const rel = relative6(parent, child);
   return rel === "" || !rel.startsWith("..") && !isAbsolute5(rel);
 }
 function normalizeJournal(value) {
@@ -4744,9 +5115,20 @@ function bounded(value) {
 }
 
 // src/orchestrator/phase.ts
-var PHASE_ID_PATTERN = /^\d{2}$/;
-function isValidPhaseId(phase) {
-  return PHASE_ID_PATTERN.test(phase);
+var PHASE_ID_PATTERN = /^\d+(?:\.\d+)*$/;
+function isValidPhaseId(phase, options = {}) {
+  const pattern = phasePattern(options.cwd);
+  return pattern.test(phase);
+}
+function phasePattern(cwd) {
+  if (!cwd) return PHASE_ID_PATTERN;
+  const lexicalPattern = readOrchestrationContractSnapshot(cwd)?.phaseIdPolicy.lexicalPattern;
+  if (!lexicalPattern) return PHASE_ID_PATTERN;
+  try {
+    return new RegExp(lexicalPattern);
+  } catch {
+    return PHASE_ID_PATTERN;
+  }
 }
 
 // src/orchestrator/trigger.ts
@@ -4754,8 +5136,9 @@ function detectNativeAutoTrigger(input) {
   const match = input.trim().match(/^\/(gsd-(?:discuss-phase|plan-phase|execute-phase|verify-work|ship))\s+(\S+)([\s\S]*)$/);
   if (!match) return void 0;
   const [, command, phase, rest] = match;
-  if (/\s--chain(?:\s|$)/.test(rest)) return { command, phase, mode: "chain" };
-  if (/\s--auto(?:\s|$)/.test(rest)) return { command, phase, mode: "auto" };
+  if (phase.startsWith("--")) return void 0;
+  if (/\s--chain(?:\s|$)/.test(rest)) return trigger(command, phase, "chain", rest);
+  if (/\s--auto(?:\s|$)/.test(rest)) return trigger(command, phase, "auto", rest);
   return void 0;
 }
 var commandStart = {
@@ -4767,13 +5150,13 @@ var commandStart = {
 };
 function createNativeAutoHandoff(options) {
   return (input) => {
-    const trigger = detectNativeAutoTrigger(input);
-    if (!trigger) return void 0;
-    if (!isValidPhaseId(trigger.phase)) {
-      return { ok: false, messages: ["Invalid phase; expected two digits such as 09"], status: { status: "idle", remainingUnits: [], attempt: 0 } };
+    const trigger2 = detectNativeAutoTrigger(input);
+    if (!trigger2) return void 0;
+    if (!isValidPhaseId(trigger2.phase, { cwd: options.cwd })) {
+      return { ok: false, messages: ["Invalid phase; expected integer or decimal phase id such as 9 or 2.1"], status: { status: "idle", remainingUnits: [], attempt: 0 } };
     }
     const orchestrator = options.createOrchestrator();
-    let result = orchestrator.start({ phase: trigger.phase, mode: trigger.mode, cwd: options.cwd, startAt: commandStart[trigger.command] });
+    let result = orchestrator.start({ phase: trigger2.phase, mode: trigger2.mode, cwd: options.cwd, startAt: commandStart[trigger2.command], extraArgs: trigger2.extraArgs });
     let guard = 0;
     while (result.ok && result.status?.status === "running" && guard < 100) {
       result = orchestrator.advance();
@@ -4782,9 +5165,18 @@ function createNativeAutoHandoff(options) {
     return result;
   };
 }
+function trigger(command, phase, mode, rest) {
+  const extraArgs = rest.replace(/(^|\s)--(?:chain|auto)(?=\s|$)/g, " ").trim().replace(/\s+/g, " ");
+  return {
+    command,
+    phase,
+    mode,
+    ...extraArgs ? { extraArgs } : {}
+  };
+}
 
 // src/settings-bridge/cache.ts
-import { createHash as createHash4 } from "crypto";
+import { createHash as createHash5 } from "crypto";
 
 // src/settings-bridge/format.ts
 function formatSettingsContext(resolved, options) {
@@ -5056,14 +5448,14 @@ function buildPiSubagentsTempRoot() {
     return "unknown";
   })();
   const sanitized = username.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
-  return join17(tmpdir(), `pi-subagents-user-${sanitized}`);
+  return join20(tmpdir(), `pi-subagents-user-${sanitized}`);
 }
 function guardPiSubagentsTempDirs(options) {
   try {
-    const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync5 };
+    const fsImpl = options?.fs ?? { accessSync, rmSync, mkdirSync: mkdirSync6 };
     const tempRoot = options?.tempRoot ?? buildPiSubagentsTempRoot();
     for (const subdir of TEMP_DIR_SUBDIRS) {
-      const dirPath = join17(tempRoot, subdir);
+      const dirPath = join20(tempRoot, subdir);
       try {
         fsImpl.accessSync(dirPath, fsConstants.R_OK | fsConstants.W_OK);
       } catch {
@@ -5154,8 +5546,8 @@ function piGsdExtension(pi) {
   pi.on("input", (event, ctx) => {
     const text = isRecord4(event) && typeof event.text === "string" ? event.text : void 0;
     if (!text) return { action: "continue" };
-    const trigger = detectNativeAutoTrigger(text);
-    if (!trigger) return { action: "continue" };
+    const trigger2 = detectNativeAutoTrigger(text);
+    if (!trigger2) return { action: "continue" };
     if (!process.env.PI_GSD_DISPATCH_COMMAND) return { action: "continue" };
     const bridge = getSettingsBridge(ctx.cwd);
     bridge.refresh();
@@ -5288,6 +5680,9 @@ export {
   resolveOfficialPackage,
   rewriteOfficialClaudePaths,
   rewriteRuntimeMessageText,
+  writeOrchestrationContractSnapshot,
+  compileOrchestrationContract,
+  verifyOrchestrationContractSnapshot,
   createCommandDispatchRunner,
   createDispatchAdapter,
   loadOfficialWorkflowConfig,

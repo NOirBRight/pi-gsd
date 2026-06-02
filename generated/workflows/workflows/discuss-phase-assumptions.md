@@ -655,7 +655,7 @@ Display banner:
 Context captured (assumptions mode). Launching plan-phase...
 ```
 
-Launch: `Invoke /gsd-plan-phase ${PHASE} --auto in Pi`
+Launch: `If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase ${PHASE} --auto; otherwise Invoke /gsd-plan-phase ${PHASE} --auto in Pi.`
 
 Handle return: PHASE COMPLETE / PLANNING COMPLETE / INCONCLUSIVE / GAPS FOUND
 (identical handling to discuss-phase.md auto_advance step)

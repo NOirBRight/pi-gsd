@@ -6,6 +6,7 @@ import { syncAgents, type AgentSyncScope } from "./agent-sync.js";
 import { buildPiSubagentsTempRoot, TEMP_DIR_SUBDIRS } from "./extension.js";
 import { generatePrompts, generateWorkflows } from "./generator.js";
 import { loadOfficialWorkflowConfig } from "./orchestrator/official-config.js";
+import { verifyOrchestrationContractSnapshot } from "./orchestration-contract/index.js";
 import { resolveOfficialPackage } from "./official.js";
 import { resolvePiSubagentsPackage } from "./pi-subagents.js";
 import { resolveRpivPackage, RPIV_PACKAGE_NAME } from "./rpiv.js";
@@ -238,6 +239,24 @@ export function runDoctor(options: DoctorOptions): DoctorResult {
       messages.push("tool contracts: ok");
     } else {
       messages.push("tool contracts: skipped (no snapshot; run `npm run generate` to enable)");
+    }
+
+    const orchestrationContractResult = verifyOrchestrationContractSnapshot({ cwd: options.startDir ?? process.cwd() });
+    if (orchestrationContractResult.failures.length > 0) {
+      ok = false;
+      messages.push(`orchestration contract: invalid (${orchestrationContractResult.failures.length} dispatch-critical drift)`);
+      for (const failure of orchestrationContractResult.failures) {
+        messages.push(`  field:${failure.failedField}`);
+      }
+    } else if (orchestrationContractResult.warnings.length > 0) {
+      messages.push(`orchestration contract: warning (${orchestrationContractResult.warnings.length} prose/docs drift)`);
+      for (const warning of orchestrationContractResult.warnings) {
+        messages.push(`  field:${warning.field}`);
+      }
+    } else if (orchestrationContractResult.snapshotPresent) {
+      messages.push("orchestration contract: ok");
+    } else {
+      messages.push("orchestration contract: skipped (no snapshot; run `npm run generate` to enable)");
     }
 
     return { ok, messages };

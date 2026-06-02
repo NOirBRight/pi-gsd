@@ -535,6 +535,7 @@ type QueueBuildInput = {
     cwd?: string;
     configPath?: string;
     startAt?: UnitType;
+    extraArgs?: string;
     settings?: ResolvedWorkflowSettings;
     phaseSignals?: {
         isUiPhase?: boolean;
@@ -629,6 +630,7 @@ type OrchestratorSessionContext = {
     cwd?: string;
     configPath?: string;
     startAt?: UnitType;
+    extraArgs?: string;
 };
 type OrchestratorResult = {
     ok: boolean;

@@ -28,6 +28,7 @@ export function createAutoOrchestrator(deps: AutoOrchestratorDependencies = {}):
         cwd: sessionContext.cwd,
         configPath: sessionContext.configPath,
         startAt: sessionContext.startAt,
+        extraArgs: sessionContext.extraArgs,
         settings,
         phaseSignals,
       });

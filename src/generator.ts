@@ -12,6 +12,7 @@ import {
   transformWorkflowDispatchForPi,
 } from "./prompt-transform.js";
 import { OFFICIAL_PACKAGE_NAME } from "./official.js";
+import { compileOrchestrationContract, writeOrchestrationContractSnapshot } from "./orchestration-contract/index.js";
 import { compileToolContracts, writeToolContractSnapshot } from "./tool-contract/index.js";
 import { generateAgents, type GenerateAgentsResult } from "./agent-generator.js";
 import { assertSafeOutDir } from "./safe-output.js";
@@ -202,6 +203,12 @@ export function generateAll(options: GenerateAllOptions): GenerateAllResult {
   // directory), so the snapshot lands at `<projectRoot>/generated/tool-contracts.json`.
   const contractSnapshot = compileToolContracts({ cwd: projectRoot });
   writeToolContractSnapshot(contractSnapshot, { cwd: projectRoot });
+  const orchestrationSnapshot = compileOrchestrationContract({
+    cwd: projectRoot,
+    officialPackage: contractSnapshot.officialPackage,
+    officialVersion: contractSnapshot.officialVersion,
+  });
+  writeOrchestrationContractSnapshot(orchestrationSnapshot, { cwd: projectRoot });
   return { prompts, agents, workflows };
 }
 

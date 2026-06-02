@@ -13,7 +13,7 @@ import {
   syncAgents,
   transformOfficialAgentMarkdown,
   writeOfficialVersionStamp
-} from "./chunk-KDM534GD.js";
+} from "./chunk-Z2SRRCB5.js";
 import {
   OFFICIAL_PACKAGE_NAME,
   OfficialPackageError,
@@ -55,7 +55,7 @@ import {
   transformSubagentDispatchForPi,
   transformWorkflowDispatchForPi,
   writeFrontmatter
-} from "./chunk-O6URY27T.js";
+} from "./chunk-NGPOIDO5.js";
 export {
   OFFICIAL_PACKAGE_NAME,
   OFFICIAL_ROOT_PLACEHOLDER,

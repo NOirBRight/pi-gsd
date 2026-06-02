@@ -223,7 +223,7 @@ Write `.planning/sketches/WRAP-UP-SUMMARY.md` for project history:
 Add an auto-load routing line:
 
 ```
-- **Sketch findings for [project]** (design decisions, CSS patterns, visual direction) → `Invoke /sketch-findings-[project-dir-name] in Pi`
+- **Sketch findings for [project]** (design decisions, CSS patterns, visual direction) → `If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /sketch-findings-[project-dir-name]; otherwise Invoke /sketch-findings-[project-dir-name] in Pi.`
 ```
 
 If this routing line already exists (append mode), leave it as-is.

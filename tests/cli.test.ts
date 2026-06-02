@@ -316,6 +316,17 @@ describe("runCli", () => {
     expect(stderr.join("")).toContain("Invalid --phase");
   });
 
+  it("accepts decimal orchestrate phase ids for status", async () => {
+    const stdout: string[] = [];
+    const code = await runCli(["orchestrate", "--status", "--phase", "2.1"], {
+      stdout: (text) => stdout.push(text),
+      stderr: () => undefined,
+    });
+
+    expect(code).toBe(0);
+    expect(stdout.join("")).toContain("status:");
+  });
+
   it("fails closed when orchestrate dispatch command is not configured", async () => {
     const fixture = createOfficialFixture();
     writeOrchestratorFixture(fixture.root);
@@ -450,7 +461,15 @@ const phaseDir = path.join(process.cwd(), '.planning', 'phases', '09-fixture');
 fs.mkdirSync(phaseDir, { recursive: true });
 const written = [];
 if (input.unit.type === 'plan') { const file = path.join(phaseDir, '09-01-PLAN.md'); fs.writeFileSync(file, 'plan\\n'); written.push(file); }
-if (input.unit.type === 'execute') { const file = path.join(phaseDir, '09-01-SUMMARY.md'); fs.writeFileSync(file, '# Summary\\n\\ncompleted: 2026-06-01\\n'); written.push(file); }
+if (input.unit.type === 'execute') {
+  const summary = path.join(phaseDir, '09-01-SUMMARY.md');
+  const verification = path.join(phaseDir, '09-VERIFICATION.md');
+  fs.writeFileSync(summary, '# Summary\\n\\ncompleted: 2026-06-01\\n');
+  fs.writeFileSync(verification, '---\\nstatus: passed\\n---\\n\\n# Verification\\n');
+  fs.writeFileSync(path.join(process.cwd(), '.planning', 'ROADMAP.md'), '| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\\n');
+  fs.writeFileSync(path.join(process.cwd(), '.planning', 'STATE.md'), '## Current Position\\n\\nPhase: 9 — Auto Orchestration Native Module (**completed**)\\n');
+  written.push(summary, verification, path.join(process.cwd(), '.planning', 'ROADMAP.md'), path.join(process.cwd(), '.planning', 'STATE.md'));
+}
 if (input.unit.type === 'verify') { const file = path.join(phaseDir, '09-VERIFICATION.md'); fs.writeFileSync(file, '---\\nstatus: passed\\n---\\n\\n# Verification\\n'); written.push(file); }
 if (input.unit.type === 'closeout') {
   fs.writeFileSync(path.join(process.cwd(), '.planning', 'ROADMAP.md'), '| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\\n');

@@ -5,7 +5,7 @@ import {
   runDoctor,
   syncAgents,
   writeOfficialVersionStamp
-} from "./chunk-KDM534GD.js";
+} from "./chunk-Z2SRRCB5.js";
 import {
   createAutoOrchestrator,
   createCommandDispatchRunner,
@@ -15,7 +15,7 @@ import {
   isValidPhaseId,
   resolveOfficialPackage,
   resolveWorkflowSettings
-} from "./chunk-O6URY27T.js";
+} from "./chunk-NGPOIDO5.js";
 
 // src/cli.ts
 import { spawnSync } from "child_process";
@@ -196,8 +196,8 @@ function runOrchestratorCli(args, io) {
     io.stderr("Missing value for --phase\n");
     return 2;
   }
-  if (!isValidPhaseId(phase)) {
-    io.stderr("Invalid --phase; expected two digits such as 09\n");
+  if (!isValidPhaseId(phase, { cwd })) {
+    io.stderr("Invalid --phase; expected integer or decimal phase id such as 9 or 2.1\n");
     return 2;
   }
   let result;

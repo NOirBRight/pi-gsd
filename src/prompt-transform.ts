@@ -607,7 +607,8 @@ function formatSkillDispatchInstruction(dispatch: ParsedDispatch): string {
 }
 
 function formatWorkflowSkillDispatchInstruction(dispatch: ParsedDispatch): string {
-  return `Invoke ${formatSlashInvocation(dispatch)} in Pi`;
+  const slashInvocation = formatSlashInvocation(dispatch);
+  return `If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for ${slashInvocation}; otherwise Invoke ${slashInvocation} in Pi.`;
 }
 
 function formatSlashInvocation(dispatch: ParsedDispatch): string {
