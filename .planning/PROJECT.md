@@ -1,4 +1,4 @@
-# pi-gsd-redux
+# pi-gsd-core
 
 ## Summary
 
@@ -6,7 +6,7 @@ Pi adapter for Get Shit Done (GSD) — an upstream-compatible extension that gen
 
 ## Goals
 
-- Transparent upstream compatibility: re-generate from `@opengsd/get-shit-done-redux` without forking
+- Transparent upstream compatibility: re-generate from `@opengsd/gsd-core` without forking
 - Runtime slash command rewriting (`/gsd:xxx` → `/gsd-xxx`)
 - Agent frontmatter normalization (CRLF-safe, Pi-compatible)
 - Interactive model routing: `/gsd-models` command maps upstream model tiers to local Pi models
@@ -24,5 +24,5 @@ Pi adapter for Get Shit Done (GSD) — an upstream-compatible extension that gen
 
 - TypeScript, Vitest, Node.js CLI
 - Pi extension API (`registerCommand`, `on`, `ctx.ui`, `ctx.modelRegistry`)
-- `@opengsd/get-shit-done-redux` (upstream prompt/agent source)
+- `@opengsd/gsd-core` (upstream prompt/agent source)
 - `pi-subagents` (agent discovery and frontmatter parsing)

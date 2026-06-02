@@ -35,7 +35,7 @@ export type JournalEventOptions = JournalSnapshotOptions & {
   event: JournalEvent;
 };
 
-const allowedEventKeys = new Set(["type", "ts", "phase", "unitId", "status", "attempt", "reason", "resumeHint", "evidence"]);
+const allowedEventKeys = new Set(["type", "event", "ts", "phase", "unitId", "status", "attempt", "reason", "resumeHint", "evidence", "recoveryDecision", "exitReason", "action", "recoveryClass", "reasonCode", "root", "branch", "paths", "written", "message", "host", "pid"]);
 const unsafeEventKeys = new Set(["prompt", "userText", "env", "token", "secret", "password", "apiKey", "api_key", "authorization", "bearer", "args", "arguments", "rawArgs"]);
 const safeMetadataKeys = new Set(["setting", "source", "label", "safe"]);
 const secretPattern = /(?:password|secret|token|api[_-]?key|authorization|bearer)/i;
@@ -130,6 +130,18 @@ export function redactJournalEvent(event: JournalEvent): JournalEvent {
       continue;
     }
 
+    if (key === "recoveryDecision") {
+      const recoveryDecision = sanitizeRecoveryDecision(value);
+      if (recoveryDecision) redacted.recoveryDecision = recoveryDecision as JournalEvent["recoveryDecision"];
+      continue;
+    }
+
+    if (key === "paths" || key === "written") {
+      const values = Array.isArray(value) ? value : [];
+      redacted[key] = values.filter((item): item is string => typeof item === "string").slice(0, maxEvidenceItems).map(safeString);
+      continue;
+    }
+
     if (typeof value === "string") {
       redacted[key] = safeString(value);
       continue;
@@ -141,6 +153,44 @@ export function redactJournalEvent(event: JournalEvent): JournalEvent {
   }
 
   return redacted;
+}
+
+function sanitizeRecoveryDecision(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const key of ["class", "action", "reasonCode", "message", "remediation"] as const) {
+    const item = input[key];
+    if (typeof item === "string") output[key] = safeString(item);
+  }
+  const evidence = input.evidence;
+  if (evidence && typeof evidence === "object") {
+    const source = evidence as Record<string, unknown>;
+    const safeEvidence: Record<string, unknown> = {};
+    for (const key of ["reasonCode", "unitId", "unitType", "phase", "branch", "expectedBranch", "root", "expectedProjectRoot", "actualCwd", "resolvedUnitRoot"] as const) {
+      const item = source[key];
+      if (typeof item === "string") safeEvidence[key] = safeString(item);
+    }
+    for (const key of ["paths", "messages"] as const) {
+      const item = source[key];
+      if (Array.isArray(item)) safeEvidence[key] = item.filter((entry): entry is string => typeof entry === "string").slice(0, maxEvidenceItems).map(safeString);
+    }
+    const written = source.written;
+    if (Array.isArray(written)) safeEvidence.written = written.slice(0, maxEvidenceItems).map(sanitizeWrittenEvidence).filter((entry): entry is Record<string, string> => Boolean(entry));
+    output.evidence = safeEvidence;
+  }
+  return output;
+}
+
+function sanitizeWrittenEvidence(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Record<string, unknown>;
+  const output: Record<string, string> = {};
+  for (const key of ["path", "action", "reasonCode", "kind"] as const) {
+    const item = input[key];
+    if (typeof item === "string") output[key] = safeString(item);
+  }
+  return Object.keys(output).length ? output : undefined;
 }
 
 function redactUnit(unit: OrchestrationSnapshot["remainingUnits"][number]) {

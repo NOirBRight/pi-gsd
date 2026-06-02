@@ -1,6 +1,6 @@
 # pi-gsd-core
 
-Pi adapter for official Open GSD (`@opengsd/get-shit-done-redux`).
+Pi adapter for official Open GSD (`@opengsd/gsd-core`).
 
 This package keeps official GSD as canonical. It generates Pi prompt templates and Pi-compatible GSD agent definitions from the installed official package.
 
@@ -177,7 +177,7 @@ Upstream tier mapping:
 Maintainers should follow the full publishing runbook in [Publishing and Update Runbook](docs/PUBLISHING.md).
 
 ```bash
-npm update @opengsd/get-shit-done-redux
+npm update @opengsd/gsd-core
 npm run build
 node dist/cli.js generate --cwd .
 node dist/cli.js sync-agents --scope project

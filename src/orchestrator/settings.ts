@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadOfficialWorkflowConfig } from "./official-config.js";
 import type { OrchestrationUnit, QueueBuildInput, QueueBuildResult, ResolvedWorkflowSettings, UnitType, WorkflowSettingSource } from "./types.js";
 
 export class OrchestratorSettingsError extends Error {
@@ -9,25 +10,8 @@ export class OrchestratorSettingsError extends Error {
   }
 }
 
-const DEFAULT_WORKFLOW_SETTINGS: ResolvedWorkflowSettings["workflow"] = {
-  _auto_chain_active: false,
-  auto_advance: false,
-  research: true,
-  plan_check: true,
-  verifier: true,
-  ui_phase: true,
-  ui_review: true,
-  code_review: true,
-  security_enforcement: true,
-  nyquist_validation: true,
-  ai_integration_phase: true,
-  ui_safety_gate: true,
-  auto_prune_state: true,
-  research_before_questions: true,
-  skip_discuss: false,
-  worktrees: true,
-  node_repair: true,
-  node_repair_budget: 2,
+const PI_WORKFLOW_DEFAULTS: Partial<ResolvedWorkflowSettings["workflow"]> = {
+  state_reconciliation_apply: false,
   subagent_timeout: 900,
   inline_plan_threshold: 1,
 };
@@ -35,8 +19,14 @@ const DEFAULT_WORKFLOW_SETTINGS: ResolvedWorkflowSettings["workflow"] = {
 type WorkflowKey = keyof ResolvedWorkflowSettings["workflow"];
 
 export function resolveWorkflowSettings(options: { cwd?: string; configPath?: string; defaults?: Partial<ResolvedWorkflowSettings["workflow"]> } = {}): ResolvedWorkflowSettings {
-  const workflow = { ...DEFAULT_WORKFLOW_SETTINGS, ...options.defaults };
+  const officialConfig = loadOfficialWorkflowConfig({ startDir: options.cwd ?? process.cwd() });
+  const workflow = {
+    ...normalizeOfficialWorkflowDefaults(officialConfig.defaults.workflow),
+    ...PI_WORKFLOW_DEFAULTS,
+    ...options.defaults,
+  } as ResolvedWorkflowSettings["workflow"];
   const sources = Object.fromEntries(Object.keys(workflow).map((key) => [key, "default"])) as Record<WorkflowKey, WorkflowSettingSource>;
+  const rawWorkflow: Record<string, unknown> = { ...officialConfig.defaults.workflow };
   const configPath = options.configPath ?? join(options.cwd ?? process.cwd(), ".planning", "config.json");
   const fallbackConfigPath = options.configPath ? undefined : join(options.cwd ?? process.cwd(), "config.json");
   const actualConfigPath = existsSync(configPath) ? configPath : fallbackConfigPath && existsSync(fallbackConfigPath) ? fallbackConfigPath : undefined;
@@ -44,30 +34,21 @@ export function resolveWorkflowSettings(options: { cwd?: string; configPath?: st
   if (actualConfigPath) {
     const config = readConfig(actualConfigPath);
     const configWorkflow = isRecord(config) && isRecord(config.workflow) ? config.workflow : {};
-    applyBoolean(configWorkflow, "_auto_chain_active", workflow, sources);
-    applyBoolean(configWorkflow, "auto_advance", workflow, sources);
-    applyBoolean(configWorkflow, "research", workflow, sources);
-    applyBoolean(configWorkflow, "plan_check", workflow, sources);
-    applyBoolean(configWorkflow, "verifier", workflow, sources);
-    applyBoolean(configWorkflow, "ui_phase", workflow, sources);
-    applyBoolean(configWorkflow, "ui_review", workflow, sources);
-    applyBoolean(configWorkflow, "code_review", workflow, sources);
-    applyBoolean(configWorkflow, "security_enforcement", workflow, sources);
-    applyBoolean(configWorkflow, "nyquist_validation", workflow, sources);
-    applyBoolean(configWorkflow, "ai_integration_phase", workflow, sources);
-    applyBoolean(configWorkflow, "ui_safety_gate", workflow, sources);
-    applyBoolean(configWorkflow, "auto_prune_state", workflow, sources);
-    applyBoolean(configWorkflow, "research_before_questions", workflow, sources);
-    applyBoolean(configWorkflow, "skip_discuss", workflow, sources);
-    applyBooleanAlias(configWorkflow, "worktrees", "use_worktrees", workflow, sources);
-    applyBooleanAlias(configWorkflow, "plan_check", "plan_checker", workflow, sources);
-    applyBoolean(configWorkflow, "node_repair", workflow, sources);
-    applyPositiveInteger(configWorkflow, "node_repair_budget", workflow, sources);
-    applyPositiveInteger(configWorkflow, "subagent_timeout", workflow, sources);
-    applyPositiveInteger(configWorkflow, "inline_plan_threshold", workflow, sources);
+    Object.assign(rawWorkflow, configWorkflow);
+    applyKnownWorkflowConfig(configWorkflow, workflow, sources);
   }
 
-  return { workflow, sources };
+  return {
+    workflow,
+    rawWorkflow,
+    workflowMetadata: {
+      officialPackage: officialConfig.official.packageName,
+      officialVersion: officialConfig.official.version,
+      officialRoot: officialConfig.official.packageRoot,
+      schemaKeys: officialConfig.schema.workflowKeys,
+    },
+    sources,
+  };
 }
 
 export function buildUnitQueue(input: QueueBuildInput): QueueBuildResult {
@@ -80,14 +61,14 @@ export function buildUnitQueue(input: QueueBuildInput): QueueBuildResult {
   }
 
   const units: OrchestrationUnit[] = [];
-  if (!settings.workflow.skip_discuss) units.push(unit(phase, "discuss", settings));
+  if (!settings.workflow.skip_discuss) units.push(unit(phase, "discuss", settings, withArgs(input, "discuss")));
   if (settings.workflow.research) units.push(unit(phase, "research", settings));
   if (input.phaseSignals?.isUiPhase && settings.workflow.ui_phase) units.push(unit(phase, "settings-gate", settings, { label: "UI phase settings gate", source: "phase-signal", metadata: { setting: "workflow.ui_phase" } }));
   if (input.phaseSignals?.isUiPhase && settings.workflow.ui_safety_gate) units.push(unit(phase, "ui-safety-gate", settings, { label: "UI Safety Gate", source: "phase-signal", metadata: { setting: "workflow.ui_safety_gate" } }));
   if (input.phaseSignals?.isAiPhase && settings.workflow.ai_integration_phase) units.push(unit(phase, "ai-integration", settings, { label: "AI Integration", source: "phase-signal", metadata: { setting: "workflow.ai_integration_phase" } }));
-  units.push(unit(phase, "plan", settings));
+  units.push(unit(phase, "plan", settings, withArgs(input, "plan")));
   if (settings.workflow.plan_check) units.push(unit(phase, "plan-check", settings));
-  units.push(unit(phase, "execute", settings));
+  units.push(unit(phase, "execute", settings, withArgs(input, "execute")));
   if (settings.workflow.code_review) units.push(unit(phase, "code-review", settings));
   if (input.phaseSignals?.requiresSecurityReview && settings.workflow.security_enforcement) units.push(unit(phase, "security-review", settings, { source: "phase-signal", metadata: { setting: "workflow.security_enforcement" } }));
   if (settings.workflow.verifier) units.push(unit(phase, "verify", settings));
@@ -118,6 +99,19 @@ function unit(phase: string, type: UnitType, settings: ResolvedWorkflowSettings,
     source: settings.sources?.[settingForType(type) ?? "_auto_chain_active"] ?? "default",
     ...overrides,
   };
+}
+
+function withArgs(input: QueueBuildInput, type: UnitType, overrides: Partial<OrchestrationUnit> = {}): Partial<OrchestrationUnit> {
+  const args = argsForUnit(input, type);
+  if (!args) return overrides;
+  return { ...overrides, metadata: { ...overrides.metadata, args } };
+}
+
+function argsForUnit(input: QueueBuildInput, type: UnitType): string | undefined {
+  if (type === "discuss") return input.mode === "auto" ? "--auto" : "--chain";
+  if (type === "plan") return "--auto";
+  if (type === "execute") return "--auto --no-transition";
+  return undefined;
 }
 
 function labelForType(type: UnitType) {
@@ -180,6 +174,71 @@ function readConfig(configPath: string) {
   }
 }
 
+function normalizeOfficialWorkflowDefaults(source: Record<string, unknown>): ResolvedWorkflowSettings["workflow"] {
+  return {
+    _auto_chain_active: booleanValue(source._auto_chain_active, false),
+    auto_advance: booleanValue(source.auto_advance, false),
+    research: booleanValue(source.research, true),
+    plan_check: booleanValue(source.plan_check, true),
+    verifier: booleanValue(source.verifier, true),
+    ui_phase: booleanValue(source.ui_phase, true),
+    ui_review: booleanValue(source.ui_review, true),
+    code_review: booleanValue(source.code_review, true),
+    code_review_depth: stringValue(source.code_review_depth, "standard"),
+    code_review_command: nullableStringValue(source.code_review_command),
+    plan_review_convergence: booleanValue(source.plan_review_convergence, false),
+    max_discuss_passes: positiveIntegerValue(source.max_discuss_passes, 3),
+    plan_bounce: booleanValue(source.plan_bounce, false),
+    plan_bounce_passes: positiveIntegerValue(source.plan_bounce_passes, 2),
+    post_planning_gaps: booleanValue(source.post_planning_gaps, true),
+    security_enforcement: booleanValue(source.security_enforcement, true),
+    nyquist_validation: booleanValue(source.nyquist_validation, true),
+    ai_integration_phase: booleanValue(source.ai_integration_phase, true),
+    ui_safety_gate: booleanValue(source.ui_safety_gate, true),
+    auto_prune_state: booleanValue(source.auto_prune_state, false),
+    research_before_questions: booleanValue(source.research_before_questions, false),
+    skip_discuss: booleanValue(source.skip_discuss, false),
+    worktrees: booleanValue(source.use_worktrees ?? source.worktrees, true),
+    node_repair: booleanValue(source.node_repair, true),
+    node_repair_budget: positiveIntegerValue(source.node_repair_budget, 2),
+    state_reconciliation_apply: false,
+    subagent_timeout: positiveIntegerValue(source.subagent_timeout, 300000),
+    inline_plan_threshold: 1,
+  };
+}
+
+function applyKnownWorkflowConfig(source: Record<string, unknown>, workflow: ResolvedWorkflowSettings["workflow"], sources: Record<WorkflowKey, WorkflowSettingSource>) {
+  applyBoolean(source, "_auto_chain_active", workflow, sources);
+  applyBoolean(source, "auto_advance", workflow, sources);
+  applyBoolean(source, "research", workflow, sources);
+  applyBoolean(source, "plan_check", workflow, sources);
+  applyBoolean(source, "verifier", workflow, sources);
+  applyBoolean(source, "ui_phase", workflow, sources);
+  applyBoolean(source, "ui_review", workflow, sources);
+  applyBoolean(source, "code_review", workflow, sources);
+  applyString(source, "code_review_depth", workflow, sources);
+  applyNullableString(source, "code_review_command", workflow, sources);
+  applyBoolean(source, "plan_review_convergence", workflow, sources);
+  applyPositiveInteger(source, "max_discuss_passes", workflow, sources);
+  applyBoolean(source, "plan_bounce", workflow, sources);
+  applyPositiveInteger(source, "plan_bounce_passes", workflow, sources);
+  applyBoolean(source, "post_planning_gaps", workflow, sources);
+  applyBoolean(source, "security_enforcement", workflow, sources);
+  applyBoolean(source, "nyquist_validation", workflow, sources);
+  applyBoolean(source, "ai_integration_phase", workflow, sources);
+  applyBoolean(source, "ui_safety_gate", workflow, sources);
+  applyBoolean(source, "auto_prune_state", workflow, sources);
+  applyBoolean(source, "research_before_questions", workflow, sources);
+  applyBoolean(source, "skip_discuss", workflow, sources);
+  applyBooleanAlias(source, "worktrees", "use_worktrees", workflow, sources);
+  applyBooleanAlias(source, "plan_check", "plan_checker", workflow, sources);
+  applyBoolean(source, "node_repair", workflow, sources);
+  applyBoolean(source, "state_reconciliation_apply", workflow, sources);
+  applyPositiveInteger(source, "node_repair_budget", workflow, sources);
+  applyPositiveInteger(source, "subagent_timeout", workflow, sources);
+  applyPositiveInteger(source, "inline_plan_threshold", workflow, sources);
+}
+
 function applyBoolean(source: Record<string, unknown>, key: WorkflowKey, workflow: ResolvedWorkflowSettings["workflow"], sources: Record<WorkflowKey, WorkflowSettingSource>) {
   if (typeof source[key] === "boolean") {
     workflow[key] = source[key] as never;
@@ -196,11 +255,41 @@ function applyBooleanAlias(source: Record<string, unknown>, key: WorkflowKey, al
   applyBoolean(source, key, workflow, sources);
 }
 
-function applyPositiveInteger(source: Record<string, unknown>, key: "node_repair_budget" | "subagent_timeout" | "inline_plan_threshold", workflow: ResolvedWorkflowSettings["workflow"], sources: Record<WorkflowKey, WorkflowSettingSource>) {
-  if (typeof source[key] === "number" && Number.isInteger(source[key]) && source[key] > 0) {
-    workflow[key] = source[key];
+function applyString(source: Record<string, unknown>, key: WorkflowKey, workflow: ResolvedWorkflowSettings["workflow"], sources: Record<WorkflowKey, WorkflowSettingSource>) {
+  if (typeof source[key] === "string") {
+    workflow[key] = source[key] as never;
     sources[key] = "config";
   }
+}
+
+function applyNullableString(source: Record<string, unknown>, key: WorkflowKey, workflow: ResolvedWorkflowSettings["workflow"], sources: Record<WorkflowKey, WorkflowSettingSource>) {
+  if (typeof source[key] === "string" || source[key] === null) {
+    workflow[key] = source[key] as never;
+    sources[key] = "config";
+  }
+}
+
+function applyPositiveInteger(source: Record<string, unknown>, key: WorkflowKey, workflow: ResolvedWorkflowSettings["workflow"], sources: Record<WorkflowKey, WorkflowSettingSource>) {
+  if (typeof source[key] === "number" && Number.isInteger(source[key]) && source[key] > 0) {
+    workflow[key] = source[key] as never;
+    sources[key] = "config";
+  }
+}
+
+function booleanValue(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function stringValue(value: unknown, fallback: string) {
+  return typeof value === "string" ? value : fallback;
+}
+
+function nullableStringValue(value: unknown) {
+  return typeof value === "string" || value === null ? value : null;
+}
+
+function positiveIntegerValue(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

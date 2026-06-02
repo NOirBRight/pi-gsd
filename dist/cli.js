@@ -3,8 +3,9 @@ import {
   generateAll,
   generatePrompts,
   runDoctor,
-  syncAgents
-} from "./chunk-E25V7VD3.js";
+  syncAgents,
+  writeOfficialVersionStamp
+} from "./chunk-MYLJCXPV.js";
 import {
   createAutoOrchestrator,
   createCommandDispatchRunner,
@@ -12,8 +13,9 @@ import {
   createJournalAdapter,
   createStateDigestAdapter,
   isValidPhaseId,
-  resolveOfficialPackage
-} from "./chunk-GBKM44ZU.js";
+  resolveOfficialPackage,
+  resolveWorkflowSettings
+} from "./chunk-VVO6HX3Q.js";
 
 // src/cli.ts
 import { spawnSync } from "child_process";
@@ -31,7 +33,7 @@ Commands:
   doctor [--prompts <dir>] [--agents [dir]] [--workflows [dir]] [--scope project|user] [--cwd <dir>]
   sync-agents [--scope project|user] [--agents <dir>] [--cwd <dir>] [--dry-run] [--check]
   official [--cwd <dir>] [--] [...args]
-  orchestrate (--auto|--chain|--resume|--status|--stop <reason>) --phase <phase> [--cwd <dir>]
+  orchestrate (--auto|--chain|--resume|--status|--stop <reason>) --phase <phase> [--cwd <dir>] [--reconcile-apply]
 `;
 var packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 async function runCli(argv, io = defaultIO) {
@@ -42,7 +44,9 @@ async function runCli(argv, io = defaultIO) {
       const cwd = resolve(options.cwd ?? process.cwd());
       const officialPackage = resolveOfficialPackage({ startDir: cwd });
       if (options.out) {
-        const result2 = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir: resolve(cwd, options.out), safeRoot: cwd });
+        const outDir = resolve(cwd, options.out);
+        const result2 = generatePrompts({ officialRoot: officialPackage.packageRoot, outDir, safeRoot: cwd });
+        writeOfficialVersionStamp({ officialRoot: officialPackage.packageRoot, generatedRoot: dirname(outDir) });
         io.stdout(`generated ${result2.written.length} prompt(s)
 `);
         return 0;
@@ -183,11 +187,11 @@ function parseSyncScope(scope) {
   throw new Error(`Invalid sync scope: ${scope}`);
 }
 function runOrchestratorCli(args, io) {
-  const options = parseOptions(args, { auto: false, chain: false, resume: false, status: false, stop: true, phase: true, cwd: true });
+  const options = parseOptions(args, { auto: false, chain: false, resume: false, status: false, stop: true, phase: true, cwd: true, "reconcile-apply": false });
   const cwd = resolve(options.cwd ?? process.cwd());
   const phase = options.phase;
   const mode = Object.hasOwn(options, "auto") ? "auto" : "chain";
-  const orchestrator = createProductionOrchestrator(cwd);
+  const orchestrator = createProductionOrchestrator(cwd, { reconcileApply: options["reconcile-apply"] === "true" });
   if (!phase) {
     io.stderr("Missing value for --phase\n");
     return 2;
@@ -225,8 +229,16 @@ function runOrchestratorCli(args, io) {
   if (result.status) printStatus(result.status, io);
   return result.ok ? 0 : 1;
 }
-function createProductionOrchestrator(cwd) {
+function createProductionOrchestrator(cwd, options = {}) {
   return createAutoOrchestrator({
+    settingsResolver: (context) => {
+      const settings = resolveWorkflowSettings({ cwd: context.cwd, configPath: context.configPath });
+      return options.reconcileApply ? {
+        ...settings,
+        workflow: { ...settings.workflow, state_reconciliation_apply: true },
+        sources: { ...settings.sources, state_reconciliation_apply: "override" }
+      } : settings;
+    },
     journal: createJournalAdapter({ cwd }),
     stateDigest: createStateDigestAdapter({ cwd }),
     dispatch: createDispatchAdapter({

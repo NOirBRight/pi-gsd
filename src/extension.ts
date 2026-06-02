@@ -10,7 +10,7 @@ import { createDispatchAdapter } from "./orchestrator/dispatch.js";
 import { createAutoOrchestrator } from "./orchestrator/index.js";
 import { createJournalAdapter } from "./orchestrator/journal.js";
 import { createStateDigestAdapter } from "./orchestrator/state-digest.js";
-import { createNativeAutoHandoff } from "./orchestrator/trigger.js";
+import { createNativeAutoHandoff, detectNativeAutoTrigger } from "./orchestrator/trigger.js";
 
 const piGsdPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -163,6 +163,9 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
   pi.on("input", (event: unknown, ctx: { cwd: string; ui: { notify(message: string, type?: "info" | "warning" | "error"): void } }) => {
     const text = isRecord(event) && typeof event.text === "string" ? event.text : undefined;
     if (!text) return { action: "continue" as const };
+    const trigger = detectNativeAutoTrigger(text);
+    if (!trigger) return { action: "continue" as const };
+    if (!process.env.PI_GSD_DISPATCH_COMMAND) return { action: "continue" as const };
     const resourceRoot = piGsdPackageRoot;
     const handoff = createNativeAutoHandoff({
       cwd: ctx.cwd,

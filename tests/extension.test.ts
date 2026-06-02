@@ -1,4 +1,4 @@
-import { accessSync, constants as fsConstants, mkdirSync, rmSync } from "node:fs";
+import { accessSync, constants as fsConstants, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rewriteMessageForRuntime, guardPiSubagentsTempDirs, buildPiSubagentsTempRoot, TEMP_DIR_SUBDIRS } from "../src/extension.js";
@@ -57,7 +57,7 @@ describe("piGsdExtension command registration", () => {
     expect(pi.on).toHaveBeenCalledWith("input", expect.any(Function));
   });
 
-  it("continues normal GSD slash prompts and handles only native auto/chain input", () => {
+  it("continues normal GSD slash prompts and does not claim native handoff without a dispatch bridge", () => {
     const pi = {
       on: vi.fn(),
       registerCommand: vi.fn(),
@@ -65,11 +65,33 @@ describe("piGsdExtension command registration", () => {
     };
     piGsdExtension(pi as never);
     const inputHandler = pi.on.mock.calls.find(([name]) => name === "input")?.[1] as (event: unknown, ctx: { cwd: string; ui: { notify: (...args: unknown[]) => void } }) => unknown;
-    const ctx = { cwd: process.cwd(), ui: { notify: vi.fn() } };
+    const ctx = { cwd: writeNativeDispatchFixture(), ui: { notify: vi.fn() } };
 
     expect(inputHandler({ text: "/gsd-execute-phase 09" }, ctx)).toEqual({ action: "continue" });
-    expect(inputHandler({ text: "/gsd-execute-phase 09 --auto" }, ctx)).toEqual({ action: "handled" });
-    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("PI_GSD_DISPATCH_COMMAND"), "warning");
+    expect(inputHandler({ text: "/gsd-execute-phase 09 --auto" }, ctx)).toEqual({ action: "continue" });
+    expect(inputHandler({ text: "/gsd-discuss-phase 09 --chain" }, ctx)).toEqual({ action: "continue" });
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("handles native auto/chain input when a dispatch bridge is configured", () => {
+    const oldDispatchCommand = process.env.PI_GSD_DISPATCH_COMMAND;
+    process.env.PI_GSD_DISPATCH_COMMAND = "node -e \"process.stdin.resume()\"";
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: vi.fn(),
+    };
+    piGsdExtension(pi as never);
+    const inputHandler = pi.on.mock.calls.find(([name]) => name === "input")?.[1] as (event: unknown, ctx: { cwd: string; ui: { notify: (...args: unknown[]) => void } }) => unknown;
+    const ctx = { cwd: writeNativeDispatchFixture(), ui: { notify: vi.fn() } };
+
+    try {
+      expect(inputHandler({ text: "/gsd-execute-phase 09 --auto" }, ctx)).toEqual({ action: "handled" });
+      expect(ctx.ui.notify).toHaveBeenCalled();
+    } finally {
+      if (oldDispatchCommand === undefined) delete process.env.PI_GSD_DISPATCH_COMMAND;
+      else process.env.PI_GSD_DISPATCH_COMMAND = oldDispatchCommand;
+    }
   });
 
   it("registers the gsd-models command", () => {
@@ -92,6 +114,19 @@ describe("piGsdExtension command registration", () => {
     expect(typeof (commands["gsd-models"] as any).handler).toBe("function");
   });
 });
+
+function writeNativeDispatchFixture() {
+  const root = join(tmpdir(), `pi-gsd-extension-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  mkdirSync(join(root, ".planning", "phases", "09-fixture"), { recursive: true });
+  mkdirSync(join(root, "generated", "prompts"), { recursive: true });
+  mkdirSync(join(root, "generated", "agents"), { recursive: true });
+  writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: false, ui_phase: false, ui_review: false } }), "utf8");
+  writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 0/0 | Executing | — |\n", "utf8");
+  writeFileSync(join(root, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (executing)\n", "utf8");
+  writeFileSync(join(root, "generated", "prompts", "gsd-execute-phase.md"), "# execute\n", "utf8");
+  writeFileSync(join(root, "generated", "agents", "gsd-executor.md"), "---\nname: gsd-executor\n---\n", "utf8");
+  return root;
+}
 
 describe("guardPiSubagentsTempDirs", () => {
   let tempRoot: string;

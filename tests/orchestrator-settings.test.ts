@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadOfficialWorkflowConfig } from "../src/orchestrator/official-config.js";
 import { buildUnitQueue, inferPhaseSignals, resolveWorkflowSettings } from "../src/orchestrator/settings.js";
 
 function writeConfig(workflow: Record<string, unknown>) {
@@ -10,6 +11,32 @@ function writeConfig(workflow: Record<string, unknown>) {
 }
 
 describe("orchestrator settings", () => {
+  describe("official workflow config manifests", () => {
+    it("loads workflow defaults and schema keys from official manifests", () => {
+      const config = loadOfficialWorkflowConfig({ startDir: process.cwd() });
+
+      expect(config.defaults.workflow.plan_check).toBe(true);
+      expect(config.defaults.workflow.code_review).toBe(true);
+      expect(config.defaults.workflow.code_review_depth).toBe("standard");
+      expect(config.schema.workflowKeys).toEqual(expect.arrayContaining([
+        "workflow.plan_check",
+        "workflow.code_review",
+        "workflow.code_review_depth",
+        "workflow.code_review_command",
+        "workflow.plan_review_convergence",
+        "workflow.post_planning_gaps",
+      ]));
+    });
+
+    it("fails clearly when the official manifest files are missing", () => {
+      const root = mkdtempSync(join(tmpdir(), "pi-gsd-missing-manifest-"));
+      mkdirSync(join(root, "node_modules", "@opengsd", "gsd-core"), { recursive: true });
+
+      expect(() => loadOfficialWorkflowConfig({ officialRoot: join(root, "node_modules", "@opengsd", "gsd-core") }))
+        .toThrow(/config-defaults\.manifest\.json|config-schema\.manifest\.json/);
+    });
+  });
+
   it("builds workflow-step units for default chain mode", () => {
     const result = buildUnitQueue({ mode: "chain", phase: "09" });
 
@@ -25,6 +52,34 @@ describe("orchestrator settings", () => {
       "closeout",
     ]);
     expect(result.units.every((unit) => unit.id.startsWith("09:"))).toBe(true);
+  });
+
+  it("attaches upstream args for chain mode", () => {
+    const result = buildUnitQueue({
+      mode: "chain",
+      phase: "09",
+      settings: resolveWorkflowSettings({
+        defaults: { skip_discuss: false, research: false, plan_check: false, code_review: false, verifier: true },
+      }),
+    });
+
+    expect(result.units.find((unit) => unit.type === "discuss")?.metadata).toMatchObject({ args: "--chain" });
+    expect(result.units.find((unit) => unit.type === "plan")?.metadata).toMatchObject({ args: "--auto" });
+    expect(result.units.find((unit) => unit.type === "execute")?.metadata).toMatchObject({ args: "--auto --no-transition" });
+  });
+
+  it("attaches upstream args for auto mode", () => {
+    const result = buildUnitQueue({
+      mode: "auto",
+      phase: "09",
+      settings: resolveWorkflowSettings({
+        defaults: { skip_discuss: false, research: false, plan_check: false, code_review: false, verifier: true },
+      }),
+    });
+
+    expect(result.units.find((unit) => unit.type === "discuss")?.metadata).toMatchObject({ args: "--auto" });
+    expect(result.units.find((unit) => unit.type === "plan")?.metadata).toMatchObject({ args: "--auto" });
+    expect(result.units.find((unit) => unit.type === "execute")?.metadata).toMatchObject({ args: "--auto --no-transition" });
   });
 
   it("starts queue at requested command unit", () => {
@@ -141,6 +196,38 @@ describe("orchestrator settings", () => {
       research_before_questions: false,
       subagent_timeout: 120,
       inline_plan_threshold: 3,
+    });
+  });
+
+  it("resolves official workflow keys used by native orchestration", () => {
+    const settings = resolveWorkflowSettings({ cwd: process.cwd() });
+
+    expect(settings.workflow).toMatchObject({
+      plan_check: true,
+      code_review: true,
+      code_review_depth: "standard",
+      node_repair_budget: 2,
+    });
+    expect(settings.workflowMetadata?.officialVersion).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it("preserves official workflow keys not used directly by native Unit building", () => {
+    const root = writeConfig({
+      code_review_depth: "deep",
+      code_review_command: "custom review command",
+      plan_review_convergence: true,
+      post_planning_gaps: false,
+    });
+
+    const settings = resolveWorkflowSettings({ cwd: root });
+
+    expect(settings.workflow.code_review_depth).toBe("deep");
+    expect(settings.workflow.code_review_command).toBe("custom review command");
+    expect(settings.workflow.plan_review_convergence).toBe(true);
+    expect(settings.workflow.post_planning_gaps).toBe(false);
+    expect(settings.rawWorkflow).toMatchObject({
+      code_review_depth: "deep",
+      code_review_command: "custom review command",
     });
   });
 

@@ -18,7 +18,7 @@ import {
   type TierModelMap,
 } from "../src/gsd-models.js";
 
-const GSD_ROOT = join(process.cwd(), "node_modules", "@opengsd", "get-shit-done-redux");
+const GSD_ROOT = join(process.cwd(), "node_modules", "@opengsd", "gsd-core");
 const catalog = loadModelCatalog(GSD_ROOT);
 
 // ── capitalize ──────────────────────────────────────────────────────

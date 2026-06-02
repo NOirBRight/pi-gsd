@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import type { OrchestrationSnapshot, OrchestrationUnit, OrchestratorResult } from "./types.js";
+import type { OrchestrationOutcome, OrchestrationSnapshot, OrchestrationUnit, OrchestratorResult } from "./types.js";
 
 export type UnitDispatchTarget = { agent?: string; prompt: string };
 export type DispatchRequest = {
@@ -56,10 +56,11 @@ export function createCommandDispatchRunner(options: { cwd: string; command?: st
   return (request) => {
     const command = options.command ?? process.env.PI_GSD_DISPATCH_COMMAND;
     if (!command) return { ok: false, messages: ["PI_GSD_DISPATCH_COMMAND is required for native dispatch"] };
-    const payload = JSON.stringify({ unit: request.unit, snapshot: request.snapshot, target: request.target });
+    const args = request.unit.metadata?.args ?? "";
+    const payload = JSON.stringify({ unit: request.unit, snapshot: request.snapshot, target: request.target, args });
     const child = spawnSync(command, [], {
       cwd: options.cwd,
-      env: { ...process.env, ...request.env, PI_GSD_DISPATCH_REQUEST: payload },
+      env: { ...process.env, ...request.env, PI_GSD_DISPATCH_REQUEST: payload, PI_GSD_DISPATCH_ARGS: args },
       input: `${payload}\n`,
       shell: true,
       encoding: "utf8",
@@ -68,7 +69,7 @@ export function createCommandDispatchRunner(options: { cwd: string; command?: st
     if (child.error) return { ok: false, messages: [`dispatch command failed: ${child.error.message}`, ...messages] };
     if (child.status !== 0) return { ok: false, messages: [`dispatch command exited ${child.status ?? "unknown"}`, ...messages] };
     const parsed = parseDispatchCommandOutput(child.stdout);
-    return { ok: true, messages: messages.length ? messages : ["dispatch command completed"], written: parsed.written };
+    return { ok: true, messages: messages.length ? messages : ["dispatch command completed"], written: parsed.written, outcome: parsed.outcome };
   };
 }
 
@@ -77,14 +78,42 @@ export function createDispatchAdapter(options: { cwd: string; resourceRoot?: str
   return (unit: OrchestrationUnit, snapshot: OrchestrationSnapshot): OrchestratorResult => dispatchUnit({ ...options, runner }, unit, snapshot);
 }
 
-function parseDispatchCommandOutput(output: string): { written?: string[] } {
+function parseDispatchCommandOutput(output: string): { written?: string[]; outcome?: OrchestrationOutcome } {
   try {
     const parsed = JSON.parse(output) as unknown;
-    if (parsed && typeof parsed === "object" && Array.isArray((parsed as { written?: unknown }).written)) {
-      return { written: (parsed as { written: unknown[] }).written.filter((path): path is string => typeof path === "string") };
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      const written = Array.isArray(record.written)
+        ? record.written.filter((path): path is string => typeof path === "string")
+        : undefined;
+      return {
+        written,
+        outcome: parseOutcome(record.outcome ?? record),
+      };
     }
   } catch {
     // Plain-text dispatch output is allowed; it just has no structured artifacts.
   }
   return {};
+}
+
+function parseOutcome(value: unknown): OrchestrationOutcome | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const status = typeof record.status === "string" ? record.status : undefined;
+  const marker = typeof record.marker === "string" ? record.marker : undefined;
+  const verdict = typeof record.verdict === "string" ? record.verdict : undefined;
+  const data = parseOutcomeData(record.data);
+  if (!status && !marker && !verdict && !data) return undefined;
+  return { ...(status ? { status } : {}), ...(marker ? { marker } : {}), ...(verdict ? { verdict } : {}), ...(data ? { data } : {}) };
+}
+
+function parseOutcomeData(value: unknown): OrchestrationOutcome["data"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, string | number | boolean] => {
+      const candidate = entry[1];
+      return typeof candidate === "string" || typeof candidate === "number" || typeof candidate === "boolean";
+    });
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }

@@ -4,149 +4,17 @@ import {
   addPiSubagentGuidance,
   buildPiSubagentsTempRoot,
   commandFileToPiPromptName,
+  loadOfficialWorkflowConfig,
   normalizeGsdSlashReferences,
   resolveOfficialPackage,
   splitCodeFences,
+  splitFrontmatter,
   transformAskUserQuestionForPi,
+  transformGsdRunLauncher,
   transformSkillDispatchForPi,
-  transformSubagentDispatchForPi
-} from "./chunk-GBKM44ZU.js";
-
-// src/frontmatter.ts
-var supportedPromptKeys = [
-  // Fields preserved in generated prompts:
-  // - description: command description for Pi slash command registration
-  // - argument-hint: usage hint for command arguments
-  // - argument-instructions: detailed argument parsing instructions for the model
-  // - requires: command dependencies (helps model understand available subcommands)
-  //
-  // Fields intentionally dropped (Claude Code concepts, not used by Pi):
-  // - name: redundant with the Pi prompt filename (gsd-xxx.md)
-  // - allowed-tools: Claude Code tool allowlist — Pi has its own tool system
-  // - type: Claude Code prompt type classifier — Pi doesn't use this
-  "description",
-  "argument-hint",
-  "argument-instructions",
-  "requires"
-];
-function splitFrontmatter(input) {
-  const opening = /^---\r?\n/.exec(input);
-  if (!opening) {
-    return { data: {}, body: input };
-  }
-  const closing = /\r?\n---\r?\n/.exec(input.slice(opening[0].length));
-  if (!closing) {
-    return { data: {}, body: input };
-  }
-  const endIndex = opening[0].length + closing.index;
-  const rawFrontmatter = input.slice(opening[0].length, endIndex);
-  const body = input.slice(endIndex + closing[0].length);
-  return { data: parseFrontmatter(rawFrontmatter), body };
-}
-function writeFrontmatter(data, body) {
-  const lines = supportedPromptKeys.flatMap((key) => {
-    const value = data[key];
-    if (value === void 0 || value === null) return [];
-    return formatValue(key, value);
-  });
-  return `---
-${lines.join("\n")}
----
-${body}`;
-}
-function formatValue(key, value) {
-  if (Array.isArray(value)) {
-    return [`${key}:`, ...value.map((v) => `  - ${formatScalar(v)}`)];
-  }
-  if (typeof value === "string") {
-    if (value.includes("\n")) {
-      return [`${key}: |`, ...value.split("\n").map((l) => `  ${l}`)];
-    }
-    return [`${key}: ${formatScalar(value)}`];
-  }
-  return [String(value)];
-}
-function parseFrontmatter(rawFrontmatter) {
-  const data = {};
-  const lines = rawFrontmatter.split(/\r?\n/);
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const scalarMatch = /^(?<key>[A-Za-z0-9_-]+):(?:\s*(?<value>.*))?$/.exec(line);
-    if (!scalarMatch?.groups) {
-      i += 1;
-      continue;
-    }
-    const key = scalarMatch.groups.key;
-    const value = scalarMatch.groups.value ?? "";
-    const trimmedValue = value.trim();
-    if (trimmedValue === "|" || trimmedValue === ">") {
-      const blockLines = [];
-      let j = i + 1;
-      while (j < lines.length && (lines[j].startsWith("  ") || lines[j].startsWith("	") || lines[j] === "")) {
-        if (lines[j] !== "") {
-          blockLines.push(lines[j].replace(/^  /, "").replace(/^\t/, ""));
-        } else {
-          blockLines.push("");
-        }
-        j += 1;
-      }
-      while (blockLines.length > 0 && blockLines[blockLines.length - 1] === "") {
-        blockLines.pop();
-      }
-      data[key] = blockLines.join("\n");
-      i = j;
-      continue;
-    }
-    if (value !== "" && trimmedValue !== "") {
-      data[key] = unquoteScalar(value);
-      i += 1;
-      continue;
-    }
-    if (value === "" || trimmedValue === "") {
-      const list = [];
-      let nextListMatch = i + 1 < lines.length ? /^\s+-\s*(?<value>.*)$/.exec(lines[i + 1]) : null;
-      if (nextListMatch?.groups) {
-        while (nextListMatch?.groups) {
-          const groups = nextListMatch.groups;
-          list.push(unquoteScalar(groups.value));
-          i += 1;
-          nextListMatch = i + 1 < lines.length ? /^\s+-\s*(?<value>.*)$/.exec(lines[i + 1]) : null;
-        }
-        data[key] = list;
-        i += 1;
-        continue;
-      }
-      data[key] = "";
-      i += 1;
-      continue;
-    }
-    i += 1;
-  }
-  return data;
-}
-function unquoteScalar(value) {
-  if (value.length >= 2) {
-    const first = value[0];
-    const last = value[value.length - 1];
-    if (first === '"' && last === '"' || first === "'" && last === "'") {
-      return value.slice(1, -1);
-    }
-  }
-  return value;
-}
-function formatScalar(value) {
-  if (!needsQuoting(value)) {
-    return value;
-  }
-  if (!value.includes("'")) {
-    return `'${value}'`;
-  }
-  return `"${value.replaceAll('"', '\\"')}"`;
-}
-function needsQuoting(value) {
-  return value === "" || value !== value.trim() || /[:[\]{}#,&*!|>'"%@`]/.test(value);
-}
+  transformSubagentDispatchForPi,
+  writeFrontmatter
+} from "./chunk-VVO6HX3Q.js";
 
 // src/agent-transform.ts
 var OFFICIAL_ROOT_PLACEHOLDER = "__PI_GSD_OFFICIAL_ROOT__";
@@ -427,7 +295,7 @@ function applyPromptTransforms(body, _packageName) {
   return transformSkillDispatchForPi(
     transformSubagentDispatchForPi(
       transformAskUserQuestionForPi(
-        addPiSubagentGuidance(normalizeGsdSlashReferences(body))
+        addPiSubagentGuidance(normalizeGsdSlashReferences(transformGsdRunLauncher(body)))
       )
     )
   );
@@ -487,7 +355,21 @@ function generateAll(options) {
   const agents = generateAgents({ officialRoot: options.officialRoot, outDir: options.agentsDir, safeRoot: options.safeRoot });
   const workflowsDir = join3(dirname(options.promptsDir), "workflows");
   const workflows = generateWorkflows({ officialRoot: options.officialRoot, outDir: workflowsDir, safeRoot: options.safeRoot });
+  writeOfficialVersionStamp({
+    officialRoot: resolve4(options.officialRoot),
+    generatedRoot: dirname(resolve4(options.promptsDir))
+  });
   return { prompts, agents, workflows };
+}
+function writeOfficialVersionStamp(options) {
+  const packageJson = JSON.parse(readFileSync3(join3(options.officialRoot, "package.json"), "utf8"));
+  mkdirSync3(options.generatedRoot, { recursive: true });
+  writeFileSync3(join3(options.generatedRoot, ".official-version.json"), JSON.stringify({
+    packageName: packageJson.name ?? OFFICIAL_PACKAGE_NAME,
+    version: packageJson.version ?? "unknown",
+    officialRoot: options.officialRoot,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  }, null, 2), "utf8");
 }
 
 // src/pi-subagents.ts
@@ -514,19 +396,21 @@ function resolvePiSubagentsPackage(options = {}) {
 // src/doctor.ts
 import { accessSync, constants as fsConstants, mkdtempSync, readdirSync as readdirSync5, readFileSync as readFileSync6, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { basename, join as join5, relative as relative2 } from "path";
+import { basename, dirname as dirname4, join as join5, relative as relative2 } from "path";
 
 // src/rpiv.ts
 import { readFileSync as readFileSync5 } from "fs";
 import { createRequire as createRequire2 } from "module";
+import { homedir as homedir2 } from "os";
 import { dirname as dirname3, join as join4 } from "path";
 var RPIV_PACKAGE_NAME = "@juicesharp/rpiv-ask-user-question";
 function resolveRpivPackage(options = {}) {
   const startDir = options.startDir ?? process.cwd();
   const require2 = createRequire2(import.meta.url);
+  const resolvePaths = [startDir, piNpmPackageRoot()];
   let packageJsonPath;
   try {
-    packageJsonPath = require2.resolve(`${RPIV_PACKAGE_NAME}/package.json`, { paths: [startDir] });
+    packageJsonPath = require2.resolve(`${RPIV_PACKAGE_NAME}/package.json`, { paths: resolvePaths });
   } catch {
     try {
       packageJsonPath = require2.resolve(`${RPIV_PACKAGE_NAME}/package.json`);
@@ -535,7 +419,7 @@ function resolveRpivPackage(options = {}) {
   }
   if (!packageJsonPath) {
     try {
-      const entryPath = require2.resolve(RPIV_PACKAGE_NAME, { paths: [startDir] });
+      const entryPath = require2.resolve(RPIV_PACKAGE_NAME, { paths: resolvePaths });
       let dir = dirname3(entryPath);
       for (let i = 0; i < 10; i++) {
         const candidate = join4(dir, "package.json");
@@ -561,8 +445,38 @@ function resolveRpivPackage(options = {}) {
   }
   return { packageRoot: dirname3(packageJsonPath), packageName: RPIV_PACKAGE_NAME, version: packageJson.version };
 }
+function piNpmPackageRoot() {
+  return join4(process.env.PI_CODING_AGENT_DIR ?? join4(homedir2(), ".pi", "agent"), "npm");
+}
 
 // src/doctor.ts
+var REQUIRED_OFFICIAL_WORKFLOW_SCHEMA_KEYS = [
+  "workflow.research",
+  "workflow.plan_check",
+  "workflow.verifier",
+  "workflow.nyquist_validation",
+  "workflow.ai_integration_phase",
+  "workflow.ui_phase",
+  "workflow.ui_safety_gate",
+  "workflow.ui_review",
+  "workflow.auto_advance",
+  "workflow.node_repair",
+  "workflow.node_repair_budget",
+  "workflow.research_before_questions",
+  "workflow.skip_discuss",
+  "workflow.auto_prune_state",
+  "workflow.use_worktrees",
+  "workflow.code_review",
+  "workflow.code_review_depth",
+  "workflow.code_review_command",
+  "workflow.plan_bounce",
+  "workflow.plan_bounce_passes",
+  "workflow.plan_review_convergence",
+  "workflow.post_planning_gaps",
+  "workflow.security_enforcement",
+  "workflow.subagent_timeout",
+  "workflow.inline_plan_threshold"
+];
 function checkPiSubagentsTempAcl(options) {
   const messages = [];
   let ok = true;
@@ -609,6 +523,7 @@ function runDoctor(options) {
     `official root: ${officialPackage.packageRoot}`
   ];
   let ok = true;
+  ok = checkOfficialConfigParity({ officialRoot: officialPackage.packageRoot, messages }) && ok;
   try {
     const piSubagentsResolver = options.piSubagentsResolver ?? resolvePiSubagentsPackage;
     const piSubagents = piSubagentsResolver({ startDir: options.startDir });
@@ -630,6 +545,12 @@ function runDoctor(options) {
   const aclResult = aclChecker();
   ok = ok && aclResult.ok;
   messages.push(...aclResult.messages);
+  ok = checkGeneratedOfficialVersion({
+    generatedRoot: dirname4(options.generatedPromptsDir),
+    expectedPackageName: officialPackage.packageName,
+    expectedVersion: officialPackage.version,
+    messages
+  }) && ok;
   const tempDir = mkdtempSync(join5(tmpdir(), "pi-gsd-doctor-"));
   try {
     const expectedDir = join5(tempDir, "prompts");
@@ -677,6 +598,43 @@ function runDoctor(options) {
     rmSync3(tempDir, { recursive: true, force: true });
   }
 }
+function checkOfficialConfigParity(options) {
+  const officialConfig = loadOfficialWorkflowConfig({ officialRoot: options.officialRoot });
+  const schemaKeys = new Set(officialConfig.schema.workflowKeys);
+  const missing = REQUIRED_OFFICIAL_WORKFLOW_SCHEMA_KEYS.filter((key) => !schemaKeys.has(key));
+  if (missing.length > 0) {
+    options.messages.push(`official config schema parity: missing workflow keys (${missing.join(", ")})`);
+    return false;
+  }
+  options.messages.push("official config schema parity: ok");
+  return true;
+}
+function checkGeneratedOfficialVersion(options) {
+  const metadataPath = join5(options.generatedRoot, ".official-version.json");
+  let metadata;
+  try {
+    metadata = JSON.parse(readFileSync6(metadataPath, "utf8"));
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      options.messages.push("generated official version: missing (run generate to enable version drift checks)");
+      return false;
+    }
+    options.messages.push(`generated official version invalid: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+  if (!isRecord(metadata)) {
+    options.messages.push("generated official version invalid: metadata is not an object");
+    return false;
+  }
+  const packageName = typeof metadata.packageName === "string" ? metadata.packageName : void 0;
+  const version = typeof metadata.version === "string" ? metadata.version : void 0;
+  if (packageName !== options.expectedPackageName || version !== options.expectedVersion) {
+    options.messages.push(`generated official version stale: expected ${options.expectedPackageName}@${options.expectedVersion}, found ${packageName ?? "unknown"}@${version ?? "unknown"}`);
+    return false;
+  }
+  options.messages.push(`generated official version: ok (${options.expectedPackageName}@${options.expectedVersion})`);
+  return true;
+}
 function compareGeneratedFiles(options) {
   const expectedFileNames = new Set(options.expectedPaths.map((expectedPath) => expectedResourceName(expectedPath, options.expectedDir)));
   let ok = true;
@@ -711,6 +669,9 @@ function compareGeneratedFiles(options) {
 function isMissingFileError(error) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function normalizeLineEndings(content) {
   return content.replace(/\r\n/g, "\n");
 }
@@ -730,8 +691,6 @@ function readGeneratedMarkdownFileNames(generatedPromptsDir) {
 }
 
 export {
-  splitFrontmatter,
-  writeFrontmatter,
   OFFICIAL_ROOT_PLACEHOLDER,
   transformOfficialAgentMarkdown,
   materializeOfficialAgentPaths,
@@ -741,6 +700,7 @@ export {
   generatePrompts,
   generateWorkflows,
   generateAll,
+  writeOfficialVersionStamp,
   PI_SUBAGENTS_PACKAGE_NAME,
   resolvePiSubagentsPackage,
   checkPiSubagentsTempAcl,

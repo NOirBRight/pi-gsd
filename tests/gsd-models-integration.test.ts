@@ -13,7 +13,7 @@ import {
 } from "../src/gsd-models.js";
 import { describe, expect, it } from "vitest";
 
-const GSD_ROOT = join(process.cwd(), "node_modules", "@opengsd", "get-shit-done-redux");
+const GSD_ROOT = join(process.cwd(), "node_modules", "@opengsd", "gsd-core");
 const catalog = loadModelCatalog(GSD_ROOT);
 
 describe("integration: config write and GSD SDK readback", () => {

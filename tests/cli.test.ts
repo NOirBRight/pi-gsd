@@ -20,6 +20,7 @@ describe("runCli", () => {
 
     expect(code).toBe(0);
     expect(readFileSync(join(outDir, "gsd-plan-phase.md"), "utf8")).toContain("description: Plan");
+    expect(readFileSync(join(fixture.root, ".official-version.json"), "utf8")).toContain("@opengsd/gsd-core");
     expect(stdout.join("")).toContain("generated 1 prompt");
   });
 
@@ -278,6 +279,32 @@ describe("runCli", () => {
     expect(statusOut.join("")).toContain("status: completed");
   });
 
+  it("orchestrate --reconcile-apply enables native metadata repair before dispatch", async () => {
+    const fixture = createOfficialFixture();
+    writeOrchestratorFixture(fixture.root);
+    rmSync(join(fixture.root, "generated"), { recursive: true, force: true });
+    const dispatchScript = writeDispatchScript(fixture.root);
+    const phaseDir = join(fixture.root, ".planning", "phases", "09-fixture");
+    writeFileSync(join(phaseDir, "09-01-PLAN.md"), "plan\n", "utf8");
+    writeFileSync(join(phaseDir, "09-01-SUMMARY.md"), "# Summary\n\ncompleted: 2026-06-01\n", "utf8");
+    writeFileSync(join(fixture.root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 0/1 | Executing | — |\n", "utf8");
+    const oldDispatchCommand = process.env.PI_GSD_DISPATCH_COMMAND;
+    process.env.PI_GSD_DISPATCH_COMMAND = `"${process.execPath}" "${dispatchScript}"`;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const code = await runCli(["orchestrate", "--chain", "--phase", "09", "--cwd", fixture.root, "--reconcile-apply"], {
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    });
+    if (oldDispatchCommand === undefined) delete process.env.PI_GSD_DISPATCH_COMMAND;
+    else process.env.PI_GSD_DISPATCH_COMMAND = oldDispatchCommand;
+
+    expect(code, `${stdout.join("")}\n${stderr.join("")}`).toBe(0);
+    expect(stdout.join("")).toContain("status: completed");
+    expect(readFileSync(join(fixture.root, ".planning", "ROADMAP.md"), "utf8")).toContain("| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |");
+  });
+
   it("rejects invalid orchestrate phase ids before dispatch", async () => {
     const stderr: string[] = [];
     const code = await runCli(["orchestrate", "--chain", "--phase", "../../x"], {
@@ -394,10 +421,12 @@ function writeAgent(packageRoot: string) {
 }
 
 function writeOrchestratorFixture(root: string) {
+  mkdirSync(join(root, ".git"), { recursive: true });
   mkdirSync(join(root, ".planning", "phases", "09-fixture"), { recursive: true });
   writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: true, ui_phase: false, ui_review: false } }), "utf8");
-  writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |\n", "utf8");
-  writeFileSync(join(root, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
+  writeFileSync(join(root, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 0/0 | Executing | — |\n", "utf8");
+  writeFileSync(join(root, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (executing)\n", "utf8");
+  writeFileSync(join(root, ".planning", "phases", "09-fixture", "09-PLAN-CHECK.md"), "noncanonical plan-like evidence\n", "utf8");
 
   const promptsDir = join(root, "generated", "prompts");
   const agentsDir = join(root, "generated", "agents");
@@ -420,10 +449,14 @@ const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const phaseDir = path.join(process.cwd(), '.planning', 'phases', '09-fixture');
 fs.mkdirSync(phaseDir, { recursive: true });
 const written = [];
-if (input.unit.type === 'plan') { const file = path.join(phaseDir, '09-PLAN.md'); fs.writeFileSync(file, 'plan\\n'); written.push(file); }
-if (input.unit.type === 'execute') { const file = path.join(phaseDir, '09-SUMMARY.md'); fs.writeFileSync(file, 'summary\\n'); written.push(file); }
-if (input.unit.type === 'verify') { const file = path.join(phaseDir, '09-VERIFICATION.md'); fs.writeFileSync(file, 'verification\\n'); written.push(file); }
-if (input.unit.type === 'closeout') { written.push(path.join(process.cwd(), '.planning', 'ROADMAP.md'), path.join(process.cwd(), '.planning', 'STATE.md')); }
+if (input.unit.type === 'plan') { const file = path.join(phaseDir, '09-01-PLAN.md'); fs.writeFileSync(file, 'plan\\n'); written.push(file); }
+if (input.unit.type === 'execute') { const file = path.join(phaseDir, '09-01-SUMMARY.md'); fs.writeFileSync(file, '# Summary\\n\\ncompleted: 2026-06-01\\n'); written.push(file); }
+if (input.unit.type === 'verify') { const file = path.join(phaseDir, '09-VERIFICATION.md'); fs.writeFileSync(file, '---\\nstatus: passed\\n---\\n\\n# Verification\\n'); written.push(file); }
+if (input.unit.type === 'closeout') {
+  fs.writeFileSync(path.join(process.cwd(), '.planning', 'ROADMAP.md'), '| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\\n');
+  fs.writeFileSync(path.join(process.cwd(), '.planning', 'STATE.md'), '## Current Position\\n\\nPhase: 9 — Auto Orchestration Native Module (**completed**)\\n');
+  written.push(path.join(process.cwd(), '.planning', 'ROADMAP.md'), path.join(process.cwd(), '.planning', 'STATE.md'));
+}
 console.log(JSON.stringify({ written }));
 `, "utf8");
   return script;

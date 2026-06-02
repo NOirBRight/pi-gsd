@@ -1,9 +1,24 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createOfficialFixture } from "./fixtures.js";
-import { generatePrompts } from "../src/generator.js";
+import { generateAll, generatePrompts } from "../src/generator.js";
 
 describe("generatePrompts", () => {
+  it("writes generated official version metadata", () => {
+    const fixture = createOfficialFixture();
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    const agentsDir = join(fixture.root, "generated", "agents");
+
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir, agentsDir, safeRoot: fixture.root });
+
+    const metadata = JSON.parse(readFileSync(join(fixture.root, "generated", ".official-version.json"), "utf8"));
+    expect(metadata).toMatchObject({
+      packageName: "@opengsd/gsd-core",
+      version: expect.any(String),
+    });
+    expect(metadata.generatedAt).toEqual(expect.any(String));
+  });
+
   it("generates Pi prompt files from official command files", () => {
     const fixture = createOfficialFixture();
     const commandPath = join(fixture.packageRoot, "commands", "gsd", "plan-phase.md");
