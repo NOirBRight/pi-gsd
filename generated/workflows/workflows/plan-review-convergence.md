@@ -112,7 +112,7 @@ Agent(
   description="Initial planning Phase {PHASE}",
   prompt="Run /gsd-plan-phase for Phase {PHASE}.
 
-Execute: Skill('gsd-plan-phase', args='{PHASE} {GSD_WS}')
+Execute: If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase {PHASE} {GSD_WS}; otherwise Invoke /gsd-plan-phase {PHASE} {GSD_WS} in Pi.
 
 Complete the full planning workflow. Do NOT return until planning is complete and PLAN.md files are committed.",
   mode="auto"
@@ -148,7 +148,7 @@ Agent(
   description="Cross-AI review Phase {PHASE} cycle {cycle}",
   prompt="Run /gsd-review for Phase {PHASE}.
 
-Execute: Skill('gsd-review', args='--phase {PHASE} {REVIEWER_FLAGS} {GSD_WS}')
+Execute: If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-review --phase {PHASE} {REVIEWER_FLAGS} {GSD_WS}; otherwise Invoke /gsd-review --phase {PHASE} {REVIEWER_FLAGS} {GSD_WS} in Pi.
 
 Complete the full review workflow. Do NOT return until REVIEWS.md is committed.
 
@@ -322,7 +322,7 @@ Agent(
   description="Replan Phase {PHASE} with review feedback cycle {cycle}",
   prompt="Run /gsd-plan-phase with --reviews for Phase {PHASE}.
 
-Execute: Skill('gsd-plan-phase', args='{PHASE} --reviews --skip-research {GSD_WS}')
+Execute: If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase {PHASE} --reviews --skip-research {GSD_WS}; otherwise Invoke /gsd-plan-phase {PHASE} --reviews --skip-research {GSD_WS} in Pi.
 
 This will replan incorporating cross-AI review feedback from REVIEWS.md.
 Do NOT return until replanning is complete and updated PLAN.md files are committed.
@@ -338,9 +338,9 @@ After agent returns → go back to **step 5a** (review again).
 
 <success_criteria>
 - [ ] Config gate checked before running — exits with enable instructions if workflow.plan_review_convergence is false
-- [ ] Initial planning via Agent → Skill("gsd-plan-phase") if no plans exist
-- [ ] Review via Agent → Skill("gsd-review") — isolated, not inline; {GSD_WS} forwarded
-- [ ] Replan via Agent → Skill("gsd-plan-phase --reviews") — isolated, not inline
+- [ ] Initial planning via Agent → If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase; otherwise Invoke /gsd-plan-phase in Pi. if no plans exist
+- [ ] Review via Agent → If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-review; otherwise Invoke /gsd-review in Pi. — isolated, not inline; {GSD_WS} forwarded
+- [ ] Replan via Agent → If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase --reviews; otherwise Invoke /gsd-plan-phase --reviews in Pi. — isolated, not inline
 - [ ] Orchestrator only does: init, config gate, loop control, parse CYCLE_SUMMARY for HIGH count, stall detection, escalation
 - [ ] HIGH count extracted from review agent's CYCLE_SUMMARY return message (not by grepping REVIEWS.md)
 - [ ] Review agent prompt defines CYCLE_SUMMARY: current_high=<N> contract with PARTIALLY/FULLY RESOLVED definitions

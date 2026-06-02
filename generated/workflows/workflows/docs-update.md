@@ -390,12 +390,7 @@ Use `run_in_background=true` for all three to enable parallel execution.
 **Agent 1: README**
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate README.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: readme
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -405,19 +400,13 @@ project_context: {INIT JSON}
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Agent 2: ARCHITECTURE**
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate ARCHITECTURE.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: architecture
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -427,19 +416,13 @@ project_context: {INIT JSON}
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Agent 3: CONFIGURATION**
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate CONFIGURATION.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: configuration
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -450,8 +433,7 @@ note: Apply VERIFY markers to any infrastructure claim not discoverable from the
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **CRITICAL:** Agent prompts must contain ONLY the `<doc_assignment>` block, the `${AGENT_SKILLS}` variable, and the return instruction. Do not include project planning context, workflow prose, or any internal tooling references in agent prompts.
@@ -519,12 +501,7 @@ Use `run_in_background=true` for all Wave 2 agents to enable parallel execution 
 **Agent: GETTING-STARTED**
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate GETTING-STARTED.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: getting_started
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -538,19 +515,13 @@ wave_1_outputs:
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Agent: DEVELOPMENT**
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate DEVELOPMENT.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: development
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -564,19 +535,13 @@ wave_1_outputs:
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Agent: TESTING**
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate TESTING.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: testing
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -590,19 +555,13 @@ wave_1_outputs:
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Conditional Agent: API** (only if `has_api_routes` was true — spawn only if API.md was queued)
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate API.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: api
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -616,19 +575,13 @@ wave_1_outputs:
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Conditional Agent: DEPLOYMENT** (only if `has_deploy_config` was true — spawn only if DEPLOYMENT.md was queued)
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate DEPLOYMENT.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: deployment
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -643,19 +596,13 @@ wave_1_outputs:
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **Conditional Agent: CONTRIBUTING** (only if `is_open_source` was true — spawn only if CONTRIBUTING.md was queued)
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate CONTRIBUTING.md for target project",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: contributing
 mode: {create|update|supplement}
 preservation_mode: {preserve|supplement|regenerate|null}
@@ -669,8 +616,7 @@ wave_1_outputs:
 
 {AGENT_SKILLS}
 
-Write the doc file directly. Return confirmation only — do not return doc content."
-)
+Write the doc file directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 **CRITICAL:** Agent prompts must contain ONLY the `<doc_assignment>` block, the `${AGENT_SKILLS}` variable, and the return instruction. Do not include project planning context, workflow prose, or any internal tooling references in agent prompts.
@@ -739,12 +685,7 @@ Determine mode:
 Spawn a `gsd-doc-writer` agent with `run_in_background=true`:
 
 ```
-Agent(
-  subagent_type="gsd-doc-writer",
-  model="{doc_writer_model}",
-  run_in_background=true,
-  description="Generate per-package README for {package_dir}",
-  prompt="<doc_assignment>
+Use the Pi subagent tool: subagent({agent: "gsd-doc-writer", task: "<doc_assignment>
 type: readme
 mode: {create|update}
 scope: per_package
@@ -755,8 +696,7 @@ project_context: {INIT JSON with project_root set to package directory}
 
 {AGENT_SKILLS}
 
-Write {package_dir}/README.md directly. Return confirmation only — do not return doc content."
-)
+Write {package_dir}/README.md directly. Return confirmation only — do not return doc content."}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling all per-package Agent() calls above with `run_in_background=true`, do NOT generate any package READMEs independently while the subagents are active. Wait for all agents to complete via TaskOutput before proceeding. This prevents duplicate work and wasted context.

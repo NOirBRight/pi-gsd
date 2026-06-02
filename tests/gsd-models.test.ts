@@ -16,6 +16,7 @@ import {
   getRequiredTiers,
   inferTierModelsFromOverrides,
   readCurrentGsdConfig,
+  buildModelRoutingSummary,
 } from "../src/gsd-models.js";
 
 // Load real catalog for tests
@@ -271,6 +272,32 @@ describe("isValidProfile", () => {
 });
 
 // ── invalidateModelCatalog ─────────────────────────────────────────
+
+describe("buildModelRoutingSummary", () => {
+  it("summarizes inherit without listing agents", () => {
+    const summary = buildModelRoutingSummary(catalog, "inherit");
+    expect(summary).toContain("inherit");
+    expect(summary).not.toMatch(/gsd-/);
+  });
+
+  it("summarizes balanced profile with tier counts", () => {
+    const summary = buildModelRoutingSummary(catalog, "balanced");
+    expect(summary).toContain("balanced");
+    expect(summary).toMatch(/heavy:\d+/);
+    expect(summary).toMatch(/standard:\d+/);
+    expect(summary).toMatch(/light:\d+/);
+  });
+
+  it("summarizes quality without light tier", () => {
+    const summary = buildModelRoutingSummary(catalog, "quality");
+    expect(summary).toContain("quality");
+    expect(summary).not.toContain("light");
+  });
+
+  it("summarizes null as inherit", () => {
+    expect(buildModelRoutingSummary(catalog, null)).toContain("inherit");
+  });
+});
 
 describe("invalidateModelCatalog", () => {
   it("allows reload after invalidation", () => {

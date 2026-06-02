@@ -82,6 +82,12 @@ export type ResolvedWorkflowSettings = {
     schemaKeys?: string[];
   };
   sources?: Partial<Record<keyof ResolvedWorkflowSettings["workflow"], WorkflowSettingSource>>;
+  settingsSource?: {
+    path?: string;
+    kind: string;
+    hash?: string;
+    mtimeMs?: number;
+  };
 };
 
 export type QueueBuildInput = {
@@ -90,6 +96,7 @@ export type QueueBuildInput = {
   cwd?: string;
   configPath?: string;
   startAt?: UnitType;
+  extraArgs?: string;
   settings?: ResolvedWorkflowSettings;
   phaseSignals?: {
     isUiPhase?: boolean;
@@ -200,6 +207,7 @@ export type OrchestratorSessionContext = {
   cwd?: string;
   configPath?: string;
   startAt?: UnitType;
+  extraArgs?: string;
 };
 
 export type OrchestratorResult = {

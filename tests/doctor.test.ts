@@ -8,6 +8,49 @@ import { generateAll, generatePrompts, generateWorkflows } from "../src/generato
 import { runDoctor, checkPiSubagentsTempAcl } from "../src/doctor.js";
 
 describe("runDoctor", () => {
+  it("fails on orchestration contract drift", () => {
+    const fixture = createOfficialFixture();
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    const agentsDir = join(fixture.root, "generated", "agents");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir, agentsDir, safeRoot: fixture.root });
+    const snapshotPath = join(fixture.root, "generated", "orchestration-contract.json");
+    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(snapshotPath, JSON.stringify({ ...snapshot, contractHash: "bad-hash" }), "utf8");
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: promptsDir,
+      generatedAgentsDir: agentsDir,
+      generatedWorkflowsDir: workflowsDir,
+      aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("orchestration contract: invalid");
+    expect(result.messages.join("\n")).toContain("field:contractHash");
+  });
+
+  it("fails on dispatch-critical Tool Contract drift but only warns for prose drift", () => {
+    const fixture = createOfficialFixture();
+    writeFileSync(join(fixture.packageRoot, "agents", "gsd-planner.md"), "---\nname: gsd-planner\ndescription: Plans phases\ntools: bash, edit\n---\nBody\n", "utf8");
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    const agentsDir = join(fixture.root, "generated", "agents");
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir, agentsDir, safeRoot: fixture.root });
+    const snapshotPath = join(fixture.root, "generated", "tool-contracts.json");
+    const original = readFileSync(snapshotPath, "utf8");
+
+    writeFileSync(join(promptsDir, "gsd-plan-phase.md"), "# Plan Phase changed prose\n", "utf8");
+    const prose = runDoctor({ startDir: fixture.root, generatedPromptsDir: promptsDir, generatedAgentsDir: agentsDir, aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }) });
+    expect(prose.messages.join("\n")).toContain("tool contracts: warning");
+
+    writeFileSync(snapshotPath, original, "utf8");
+    writeFileSync(join(agentsDir, "gsd-planner.md"), "---\nname: gsd-planner\ndescription: Plans phases\ntools: bash\n---\nBody\n", "utf8");
+    const critical = runDoctor({ startDir: fixture.root, generatedPromptsDir: promptsDir, generatedAgentsDir: agentsDir, aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }) });
+    expect(critical.ok).toBe(false);
+    expect(critical.messages.join("\n")).toContain("tool contracts: invalid");
+  });
+
   it("reports success for a generated prompt set matching official commands", () => {
     const fixture = createOfficialFixture();
     const outDir = join(fixture.root, "generated", "prompts");
@@ -74,6 +117,32 @@ describe("runDoctor", () => {
 
     expect(result.ok).toBe(false);
     expect(result.messages.join("\n")).toContain("stale generated workflow: workflows/plan.md");
+  });
+
+  it("reports generated workflow dispatch syntax drift", () => {
+    const fixture = createOfficialFixture();
+    const promptsDir = join(fixture.root, "generated", "prompts");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    const agentsDir = join(fixture.root, "generated", "agents");
+    writeFileSync(join(fixture.packageRoot, "get-shit-done", "workflows", "chain.md"), "# Chain\n", "utf8");
+    generateAll({ officialRoot: fixture.packageRoot, promptsDir, agentsDir, safeRoot: fixture.root });
+    writeFileSync(
+      join(workflowsDir, "workflows", "chain.md"),
+      '# Chain\nSkill("gsd-plan-phase", args="${PHASE} --auto")\n',
+      "utf8",
+    );
+
+    const result = runDoctor({
+      startDir: fixture.root,
+      generatedPromptsDir: promptsDir,
+      generatedAgentsDir: agentsDir,
+      generatedWorkflowsDir: workflowsDir,
+      aclChecker: () => ({ ok: true, messages: ["pi-subagents temp ACL: ok"] }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("dispatch syntax drift");
+    expect(result.messages.join("\n")).toContain("workflows/chain.md");
   });
 
   it("reports stale generated official version metadata", () => {

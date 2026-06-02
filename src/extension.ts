@@ -11,6 +11,7 @@ import { createAutoOrchestrator } from "./orchestrator/index.js";
 import { createJournalAdapter } from "./orchestrator/journal.js";
 import { createStateDigestAdapter } from "./orchestrator/state-digest.js";
 import { createNativeAutoHandoff, detectNativeAutoTrigger } from "./orchestrator/trigger.js";
+import { createSettingsBridge, type SettingsBridge } from "./settings-bridge/index.js";
 
 const piGsdPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -107,18 +108,37 @@ export function guardPiSubagentsTempDirs(options?: GuardOptions): void {
 
 export default function piGsdExtension(pi: ExtensionAPI): void {
   let warnedResolveFailure = false;
-  // Cache the package root after first successful resolution to avoid repeated fs lookups
-  let cachedPackageRoot: string | null = null;
+  // Cache package/settings state per cwd. Pi can reuse one extension instance
+  // across workspaces, so a single global cache would leak settings between projects.
+  const packageRootByCwd = new Map<string, string>();
+  const officialPackageByCwd = new Map<string, { packageName: string; version: string }>();
+  const settingsBridgeByCwd = new Map<string, SettingsBridge>();
 
   function getPackageRoot(startDir: string): string | null {
-    if (cachedPackageRoot !== null) return cachedPackageRoot;
+    const cached = packageRootByCwd.get(startDir);
+    if (cached) return cached;
     try {
       const officialPackage = resolveOfficialPackage({ startDir });
-      cachedPackageRoot = officialPackage.packageRoot;
-      return cachedPackageRoot;
+      packageRootByCwd.set(startDir, officialPackage.packageRoot);
+      officialPackageByCwd.set(startDir, { packageName: officialPackage.packageName, version: officialPackage.version });
+      return officialPackage.packageRoot;
     } catch {
       return null;
     }
+  }
+
+  function getSettingsBridge(cwd: string): SettingsBridge {
+    const cached = settingsBridgeByCwd.get(cwd);
+    if (cached) return cached;
+    const officialPackage = officialPackageByCwd.get(cwd);
+    const bridge = createSettingsBridge({
+      cwd,
+      ...(officialPackage
+        ? { officialPackageName: officialPackage.packageName, officialPackageVersion: officialPackage.version }
+        : {}),
+    });
+    settingsBridgeByCwd.set(cwd, bridge);
+    return bridge;
   }
 
   pi.on("session_start", (_event, ctx) => {
@@ -142,13 +162,33 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
       warnedResolveFailure = true;
       notify(ctx, "pi-gsd: failed to resolve official package", "warning");
     }
+
+    // D-10: parse/cache best-effort during session_start, but do not inject
+    // context here. Notifications are emitted via the bridge for any newly
+    // observed hash and any parse errors (D-15, D-16).
+    const bridge = getSettingsBridge(ctx.cwd);
+    bridge.refresh();
+    for (const notification of bridge.popNotifications()) {
+      notify(ctx, notification.message, notification.kind);
+    }
   });
 
   pi.on("context", (event, ctx) => {
     const pkgRoot = getPackageRoot(ctx.cwd);
     if (!pkgRoot) return undefined;
     const messages = event.messages.map((message) => rewriteMessageForRuntime(message, pkgRoot));
-    return { messages };
+    if (!isGsdRelatedContext(event)) {
+      return { messages };
+    }
+    // D-09/D-10/D-11/D-12: append the formatted settings summary only for
+    // GSD-related sessions. The Bridge already mtime/hash-checks; this is
+    // a cheap lazy refresh.
+    const bridge = getSettingsBridge(ctx.cwd);
+    const settingsContext = bridge.formatContext();
+    for (const notification of bridge.popNotifications()) {
+      notify(ctx, notification.message, notification.kind);
+    }
+    return { messages: appendSettingsContext(messages, settingsContext) };
   });
 
   pi.on("message_end", (event, ctx) => {
@@ -166,6 +206,19 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
     const trigger = detectNativeAutoTrigger(text);
     if (!trigger) return { action: "continue" as const };
     if (!process.env.PI_GSD_DISPATCH_COMMAND) return { action: "continue" as const };
+    // D-14: refresh lazily before native auto handoff.
+    const bridge = getSettingsBridge(ctx.cwd);
+    bridge.refresh();
+    for (const notification of bridge.popNotifications()) {
+      notify(ctx, notification.message, notification.kind);
+    }
+    // D-16: parse failure must block the GSD native command from silently
+    // proceeding with defaults. Notify and return { action: "handled" } so
+    // the user sees the warning, but non-GSD input stays on the normal
+    // continue path.
+    if (bridge.isParseError()) {
+      return { action: "handled" as const };
+    }
     const resourceRoot = piGsdPackageRoot;
     const handoff = createNativeAutoHandoff({
       cwd: ctx.cwd,
@@ -213,6 +266,40 @@ export default function piGsdExtension(pi: ExtensionAPI): void {
       });
     },
   });
+}
+
+/**
+ * Heuristic to detect whether the Pi context is GSD-related (D-10).
+ * Considers slash commands, GSD workflow references, native auto context,
+ * and assistant messages that mention GSD agents or slash commands.
+ */
+function isGsdRelatedContext(event: { messages?: unknown[] }): boolean {
+  if (!Array.isArray(event.messages)) return false;
+  const gsdPattern = /\/gsd-|gsd-(?:planner|executor|verifier|code-reviewer|security-auditor|nyquist-auditor|ui-auditor|ui-checker|ui-researcher|plan-checker|roadmapper|debugger|debug-session-manager)/i;
+  for (const message of event.messages) {
+    if (!isRecord(message)) continue;
+    if (typeof message.text === "string" && gsdPattern.test(message.text)) {
+      return true;
+    }
+    if (typeof message.content === "string" && gsdPattern.test(message.content)) {
+      return true;
+    }
+    if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (!isRecord(block) || typeof block.text !== "string") continue;
+        if (gsdPattern.test(block.text)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function appendSettingsContext<T>(messages: T[], context: string): T[] {
+  if (!context) return messages;
+  const settingsBlock = { role: "system", content: context } as unknown as T;
+  return [settingsBlock, ...messages];
 }
 
 export function rewriteMessageForRuntime<T>(message: T, officialRoot: string): T {

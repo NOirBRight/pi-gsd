@@ -886,7 +886,7 @@ Display spawning indicator:
 Spawn 4 parallel gsd-project-researcher agents with path references:
 
 ```text
-Agent(prompt="<research_type>
+Use the Pi subagent tool: subagent({agent: "gsd-project-researcher", task: "<research_type>
 Project Research — Stack dimension for [domain].
 </research_type>
 
@@ -924,9 +924,9 @@ Your STACK.md feeds into roadmap creation. Be prescriptive:
 Write to: .planning/research/STACK.md
 Use template: ~/.claude/get-shit-done/templates/research-project/STACK.md
 </output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Stack research")
+"}). Wait for the subagent result before continuing this workflow.
 
-Agent(prompt="<research_type>
+Use the Pi subagent tool: subagent({agent: "gsd-project-researcher", task: "<research_type>
 Project Research — Features dimension for [domain].
 </research_type>
 
@@ -964,9 +964,9 @@ Your FEATURES.md feeds into requirements definition. Categorize clearly:
 Write to: .planning/research/FEATURES.md
 Use template: ~/.claude/get-shit-done/templates/research-project/FEATURES.md
 </output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Features research")
+"}). Wait for the subagent result before continuing this workflow.
 
-Agent(prompt="<research_type>
+Use the Pi subagent tool: subagent({agent: "gsd-project-researcher", task: "<research_type>
 Project Research — Architecture dimension for [domain].
 </research_type>
 
@@ -1004,9 +1004,9 @@ Your ARCHITECTURE.md informs phase structure in roadmap. Include:
 Write to: .planning/research/ARCHITECTURE.md
 Use template: ~/.claude/get-shit-done/templates/research-project/ARCHITECTURE.md
 </output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Architecture research")
+"}). Wait for the subagent result before continuing this workflow.
 
-Agent(prompt="<research_type>
+Use the Pi subagent tool: subagent({agent: "gsd-project-researcher", task: "<research_type>
 Project Research — Pitfalls dimension for [domain].
 </research_type>
 
@@ -1044,7 +1044,7 @@ Your PITFALLS.md prevents mistakes in roadmap/planning. For each pitfall:
 Write to: .planning/research/PITFALLS.md
 Use template: ~/.claude/get-shit-done/templates/research-project/PITFALLS.md
 </output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Pitfalls research")
+"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling all 4 researcher Agent() calls above, do NOT read research files or synthesize content independently while the subagents are active. Wait for all 4 researchers to complete before spawning the synthesizer. This prevents duplicate work and wasted context.
@@ -1052,7 +1052,7 @@ Use template: ~/.claude/get-shit-done/templates/research-project/PITFALLS.md
 After all 4 agents complete, spawn synthesizer to create SUMMARY.md:
 
 ```text
-Agent(prompt="
+Use the Pi subagent tool: subagent({agent: "gsd-research-synthesizer", task: "
 <task>
 Synthesize research outputs into SUMMARY.md.
 </task>
@@ -1071,7 +1071,7 @@ Write to: .planning/research/SUMMARY.md
 Use template: ~/.claude/get-shit-done/templates/research-project/SUMMARY.md
 Commit after writing.
 </output>
-", subagent_type="gsd-research-synthesizer", model="{synthesizer_model}", description="Synthesize research")
+"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -1295,7 +1295,7 @@ Pass `PROJECT_MODE` to the roadmapper so it applies the correct template.
 Spawn gsd-roadmapper agent with path references:
 
 ```text
-Agent(prompt="
+Use the Pi subagent tool: subagent({agent: "gsd-roadmapper", task: "
 <planning_context>
 
 <files_to_read>
@@ -1320,7 +1320,7 @@ Create roadmap:
 
 Write files first, then return. This ensures artifacts persist even if context is lost.
 </instructions>
-", subagent_type="gsd-roadmapper", model="{roadmapper_model}", description="Create roadmap")
+"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -1394,7 +1394,7 @@ Use AskUserQuestion:
 - Re-spawn roadmapper with revision context:
 
   ```text
-  Agent(prompt="
+  Use the Pi subagent tool: subagent({agent: "gsd-roadmapper", task: "
   <revision>
   User feedback on roadmap:
   [user's notes]
@@ -1408,7 +1408,7 @@ Use AskUserQuestion:
   Update the roadmap based on feedback. Edit files in place.
   Return ROADMAP REVISED with changes made.
   </revision>
-  ", subagent_type="gsd-roadmapper", model="{roadmapper_model}", description="Revise roadmap")
+  "}). Wait for the subagent result before continuing this workflow.
   ```
 
   > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -1463,7 +1463,7 @@ Present completion summary:
 ╚══════════════════════════════════════════╝
 ```
 
-Exit skill and invoke SlashCommand("/gsd-discuss-phase 1 --auto")
+Exit skill and invoke /gsd-discuss-phase 1 --auto in Pi
 
 **If interactive mode:**
 

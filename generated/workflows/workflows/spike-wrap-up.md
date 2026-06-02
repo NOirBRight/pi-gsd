@@ -201,7 +201,7 @@ Write `.planning/spikes/WRAP-UP-SUMMARY.md` for project history:
 Add an auto-load routing line to the project's CLAUDE.md (create the file if it doesn't exist):
 
 ```
-- **Spike findings for [project]** (implementation patterns, constraints, gotchas) → `Skill("spike-findings-[project-dir-name]")`
+- **Spike findings for [project]** (implementation patterns, constraints, gotchas) → `If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /spike-findings-[project-dir-name]; otherwise Invoke /spike-findings-[project-dir-name] in Pi.`
 ```
 
 If this routing line already exists (append mode), leave it as-is.

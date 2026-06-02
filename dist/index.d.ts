@@ -81,6 +81,12 @@ declare function transformAskUserQuestionForPi(input: string): string;
  */
 declare function transformSkillDispatchForPi(input: string): string;
 /**
+ * Rewrites executable workflow dispatch syntax in both prose and code fences.
+ * Workflow prompts use fenced pseudo-code as executable instructions, so this
+ * transform intentionally does not preserve code-fenced regions.
+ */
+declare function transformWorkflowDispatchForPi(input: string): string;
+/**
  * Rewrites subagent_type="general-purpose" to subagent_type="general" in prompt text.
  * Also rewrites Agent(subagent_type="xxx", prompt="yyy") to subagent({agent: "xxx", task: "yyy"}).
  *
@@ -516,6 +522,12 @@ type ResolvedWorkflowSettings = {
         schemaKeys?: string[];
     };
     sources?: Partial<Record<keyof ResolvedWorkflowSettings["workflow"], WorkflowSettingSource>>;
+    settingsSource?: {
+        path?: string;
+        kind: string;
+        hash?: string;
+        mtimeMs?: number;
+    };
 };
 type QueueBuildInput = {
     mode: OrchestrationMode;
@@ -523,6 +535,7 @@ type QueueBuildInput = {
     cwd?: string;
     configPath?: string;
     startAt?: UnitType;
+    extraArgs?: string;
     settings?: ResolvedWorkflowSettings;
     phaseSignals?: {
         isUiPhase?: boolean;
@@ -617,6 +630,7 @@ type OrchestratorSessionContext = {
     cwd?: string;
     configPath?: string;
     startAt?: UnitType;
+    extraArgs?: string;
 };
 type OrchestratorResult = {
     ok: boolean;
@@ -702,4 +716,4 @@ declare const RECONCILIATION_REASON_TO_RECOVERY_CLASS: {
 };
 declare function classifyFailure(input: RecoveryFailureInput): RecoveryDecision;
 
-export { type AclCheckOptions, type AclCheckResult, type AgentSyncScope, type ArtifactGateRecoveryInput, type AutoOrchestrator, type AutoOrchestratorDependencies, type DispatchAdapter, type DispatchRecoveryInput, type DoctorOptions, type DoctorResult, type ExternalRecoveryInput, type FrontmatterData, type FrontmatterValue, type GateRecoveryInput, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, type GenerateWorkflowsOptions, type GenerateWorkflowsResult, type GitProbeDeps, type LeaseJournalEvent, type LeaseOwnershipEvidence, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, type OrchestrationUnit, type OrchestratorResult, type OrchestratorSessionContext, type OrchestratorStatus, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type PrepareUnitRootInput, type PrepareUnitRootOptions, type PrepareUnitRootResult, RECONCILIATION_REASON_TO_RECOVERY_CLASS, RECOVERY_ACTIONS, RECOVERY_ACTION_VALUES, RECOVERY_CLASSES, type ReconciliationRecoveryInput, type RecoveryAction, type RecoveryClass, type RecoveryDecision, type RecoveryDecisionEvidence, type RecoveryFailureInput, type RecoveryFailureKind, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, type WorktreeEvidence, type WorktreeLeaseCheck, type WorktreeLeaseRecord, type WorktreeRecoveryInput, type WorktreeSafetyDeps, addPiSubagentGuidance, advance, checkLeaseOwnership, checkPiSubagentsTempAcl, classifyFailure, commandFileToPiPromptName, createAutoOrchestrator, defaultWorktreeSafetyDeps, generateAgents, generateAll, generatePrompts, generateWorkflows, getStatus, hasGitMarker, isSourceWritingUnit, leaseAcquiredEvent, leaseReleasedEvent, leaseStaleReclaimedEvent, materializeOfficialAgentPaths, normalizeGsdSlashReferences, prepareUnitRoot, readCurrentBranch, readLeaseRecord, reclaimStaleLeaseIfSafe, releaseLeaseOwnership, resolveAgentTargetDir, resolveExpectedUnitRoot, resolveOfficialPackage, resolvePiSubagentsPackage, resume, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitCodeFences, splitFrontmatter, start, stop, syncAgents, transformAskUserQuestionForPi, transformGsdRunLauncher, transformOfficialAgentMarkdown, transformSkillDispatchForPi, transformSubagentDispatchForPi, writeFrontmatter, writeOfficialVersionStamp };
+export { type AclCheckOptions, type AclCheckResult, type AgentSyncScope, type ArtifactGateRecoveryInput, type AutoOrchestrator, type AutoOrchestratorDependencies, type DispatchAdapter, type DispatchRecoveryInput, type DoctorOptions, type DoctorResult, type ExternalRecoveryInput, type FrontmatterData, type FrontmatterValue, type GateRecoveryInput, type GenerateAgentsOptions, type GenerateAgentsResult, type GenerateAllOptions, type GenerateAllResult, type GeneratePromptsOptions, type GeneratePromptsResult, type GenerateWorkflowsOptions, type GenerateWorkflowsResult, type GitProbeDeps, type LeaseJournalEvent, type LeaseOwnershipEvidence, OFFICIAL_PACKAGE_NAME, OFFICIAL_ROOT_PLACEHOLDER, type OfficialPackage, OfficialPackageError, type OfficialPaths, type OrchestrationUnit, type OrchestratorResult, type OrchestratorSessionContext, type OrchestratorStatus, PI_SUBAGENTS_PACKAGE_NAME, type ParsedMarkdown, type PiSubagentsPackage, type PrepareUnitRootInput, type PrepareUnitRootOptions, type PrepareUnitRootResult, RECONCILIATION_REASON_TO_RECOVERY_CLASS, RECOVERY_ACTIONS, RECOVERY_ACTION_VALUES, RECOVERY_CLASSES, type ReconciliationRecoveryInput, type RecoveryAction, type RecoveryClass, type RecoveryDecision, type RecoveryDecisionEvidence, type RecoveryFailureInput, type RecoveryFailureKind, type SyncAgentsOptions, type SyncAgentsResult, type TransformOfficialAgentResult, type WorktreeEvidence, type WorktreeLeaseCheck, type WorktreeLeaseRecord, type WorktreeRecoveryInput, type WorktreeSafetyDeps, addPiSubagentGuidance, advance, checkLeaseOwnership, checkPiSubagentsTempAcl, classifyFailure, commandFileToPiPromptName, createAutoOrchestrator, defaultWorktreeSafetyDeps, generateAgents, generateAll, generatePrompts, generateWorkflows, getStatus, hasGitMarker, isSourceWritingUnit, leaseAcquiredEvent, leaseReleasedEvent, leaseStaleReclaimedEvent, materializeOfficialAgentPaths, normalizeGsdSlashReferences, prepareUnitRoot, readCurrentBranch, readLeaseRecord, reclaimStaleLeaseIfSafe, releaseLeaseOwnership, resolveAgentTargetDir, resolveExpectedUnitRoot, resolveOfficialPackage, resolvePiSubagentsPackage, resume, rewriteOfficialClaudePaths, rewriteRuntimeMessageText, runDoctor, splitCodeFences, splitFrontmatter, start, stop, syncAgents, transformAskUserQuestionForPi, transformGsdRunLauncher, transformOfficialAgentMarkdown, transformSkillDispatchForPi, transformSubagentDispatchForPi, transformWorkflowDispatchForPi, writeFrontmatter, writeOfficialVersionStamp };

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createOfficialFixture } from "./fixtures.js";
-import { generateAll, generatePrompts } from "../src/generator.js";
+import { generateAll, generatePrompts, generateWorkflows } from "../src/generator.js";
 
 describe("generatePrompts", () => {
   it("writes generated official version metadata", () => {
@@ -208,5 +208,107 @@ describe("generatePrompts", () => {
     expect(generated).toContain('AskUserQuestion("Header"');
     // Outside code fences AskUserQuestion is transformed
     expect(generated).toContain('ask_user_question');
+  });
+});
+
+describe("generateWorkflows", () => {
+  it("transforms positional Skill dispatch calls in generated workflows including code fences", () => {
+    const fixture = createOfficialFixture();
+    const workflowsSource = join(fixture.packageRoot, "get-shit-done", "workflows", "chain.md");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    writeFileSync(
+      workflowsSource,
+      [
+        "Launch:",
+        "```",
+        'Skill("gsd-plan-phase", args="${PHASE} --auto")',
+        "```",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    generateWorkflows({ officialRoot: fixture.packageRoot, outDir: workflowsDir, safeRoot: fixture.root });
+
+    const generated = readFileSync(join(workflowsDir, "workflows", "chain.md"), "utf8");
+    expect(generated).toContain("Invoke /gsd-plan-phase ${PHASE} --auto in Pi");
+    expect(generated).not.toContain('Skill("gsd-plan-phase"');
+  });
+
+  it("transforms Workflow dispatch calls in generated workflows", () => {
+    const fixture = createOfficialFixture();
+    const workflowsSource = join(fixture.packageRoot, "get-shit-done", "workflows", "code-review.md");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    writeFileSync(
+      workflowsSource,
+      'Workflow(workflow="get-shit-done/workflows/code-review-fix.md", args="${FIX_ARGS}")\n',
+      "utf8",
+    );
+
+    generateWorkflows({ officialRoot: fixture.packageRoot, outDir: workflowsDir, safeRoot: fixture.root });
+
+    const generated = readFileSync(join(workflowsDir, "workflows", "code-review.md"), "utf8");
+    expect(generated).toContain("Read and execute generated/workflows/workflows/code-review-fix.md");
+    expect(generated).not.toContain("Workflow(");
+  });
+
+  it("passes FIX_REPORT_PATH into code-review-fix Node report parsers", () => {
+    const fixture = createOfficialFixture();
+    const workflowsSource = join(fixture.packageRoot, "get-shit-done", "workflows", "code-review-fix.md");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    writeFileSync(
+      workflowsSource,
+      [
+        'HAS_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" node -e "',
+        "  const fs = require('fs');",
+        "  const content = fs.readFileSync(process.env.FIX_REPORT_PATH, 'utf-8');",
+        '" 2>/dev/null)',
+      ].join("\n"),
+      "utf8",
+    );
+
+    generateWorkflows({ officialRoot: fixture.packageRoot, outDir: workflowsDir, safeRoot: fixture.root });
+
+    const generated = readFileSync(join(workflowsDir, "workflows", "code-review-fix.md"), "utf8");
+    expect(generated).toContain('REVIEW_PATH="${REVIEW_PATH}" FIX_REPORT_PATH="${FIX_REPORT_PATH}" node -e');
+  });
+
+  it("does not add FIX_REPORT_PATH to unrelated workflow Node parsers", () => {
+    const fixture = createOfficialFixture();
+    const workflowsSource = join(fixture.packageRoot, "get-shit-done", "workflows", "code-review.md");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    writeFileSync(
+      workflowsSource,
+      [
+        'FRONTMATTER=$(REVIEW_PATH="${REVIEW_PATH}" node -e "',
+        "  const fs = require('fs');",
+        "  const content = fs.readFileSync(process.env.REVIEW_PATH, 'utf-8');",
+        '" 2>/dev/null)',
+      ].join("\n"),
+      "utf8",
+    );
+
+    generateWorkflows({ officialRoot: fixture.packageRoot, outDir: workflowsDir, safeRoot: fixture.root });
+
+    const generated = readFileSync(join(workflowsDir, "workflows", "code-review.md"), "utf8");
+    expect(generated).toContain('REVIEW_PATH="${REVIEW_PATH}" node -e');
+    expect(generated).not.toContain("FIX_REPORT_PATH");
+  });
+
+  it("normalizes generated SlashCommand handoff phrasing", () => {
+    const fixture = createOfficialFixture();
+    const workflowsSource = join(fixture.packageRoot, "get-shit-done", "workflows", "transition.md");
+    const workflowsDir = join(fixture.root, "generated", "workflows");
+    writeFileSync(
+      workflowsSource,
+      'Exit skill and invoke SlashCommand("/gsd:plan-phase 1 --auto")\n',
+      "utf8",
+    );
+
+    generateWorkflows({ officialRoot: fixture.packageRoot, outDir: workflowsDir, safeRoot: fixture.root });
+
+    const generated = readFileSync(join(workflowsDir, "workflows", "transition.md"), "utf8");
+    expect(generated).toContain("Exit skill and invoke /gsd-plan-phase 1 --auto in Pi");
+    expect(generated).not.toContain("invoke Invoke");
   });
 });

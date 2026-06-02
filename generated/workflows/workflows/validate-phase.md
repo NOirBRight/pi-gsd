@@ -101,17 +101,12 @@ Call AskUserQuestion with gap table and options:
 ## 5. Spawn gsd-nyquist-auditor
 
 ```
-Agent(
-  prompt="Read ~/.claude/agents/gsd-nyquist-auditor.md for instructions.\n\n" +
-    "<files_to_read>{PLAN, SUMMARY, impl files, VALIDATION.md}</files_to_read>" +
-    "<gaps>{gap list}</gaps>" +
-    "<test_infrastructure>{framework, config, commands}</test_infrastructure>" +
-    "<constraints>Never modify impl files. Max 3 debug iterations. Escalate impl bugs.</constraints>" +
-    "${AGENT_SKILLS_AUDITOR}",
-  subagent_type="gsd-nyquist-auditor",
-  model="{AUDITOR_MODEL}",
-  description="Fill validation gaps for Phase {N}"
-)
+Use the Pi subagent tool: subagent({agent: "gsd-nyquist-auditor", task: "Read ~/.claude/agents/gsd-nyquist-auditor.md for instructions.\\n\\n\" +
+    \"<files_to_read>{PLAN, SUMMARY, impl files, VALIDATION.md}</files_to_read>\" +
+    \"<gaps>{gap list}</gaps>\" +
+    \"<test_infrastructure>{framework, config, commands}</test_infrastructure>\" +
+    \"<constraints>Never modify impl files. Max 3 debug iterations. Escalate impl bugs.</constraints>\" +
+    \"${AGENT_SKILLS_AUDITOR}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.

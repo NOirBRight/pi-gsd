@@ -41,6 +41,38 @@ export function createOfficialFixture(options: { omit?: string[]; packageName?: 
     writeFileSync(join(packageRoot, "commands", "gsd", "plan-phase.md"), "# Plan Phase\n");
   }
 
+  if (!omitted.has("get-shit-done/workflows")) {
+    mkdirSync(join(packageRoot, "get-shit-done", "workflows", "discuss-phase", "modes"), { recursive: true });
+    writeFileSync(
+      join(packageRoot, "get-shit-done", "workflows", "discuss-phase", "modes", "chain.md"),
+      [
+        "# --chain mode",
+        'Skill(skill="gsd-plan-phase", args="${PHASE} --auto ${GSD_WS}")',
+        "Auto-advance pipeline finished: discuss -> plan -> execute",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(packageRoot, "get-shit-done", "workflows", "plan-phase.md"),
+      [
+        "# Plan Phase",
+        'Skill(skill="gsd-execute-phase", args="${PHASE} --auto --no-transition ${GSD_WS}")',
+        "The `--no-transition` flag tells execute-phase to return status after verification.",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(packageRoot, "get-shit-done", "workflows", "execute-phase.md"),
+      [
+        "# Execute Phase",
+        "## PHASE COMPLETE",
+        "Verification: {Passed | Gaps Found}",
+        "| `passed` | -> update_roadmap |",
+        "| `human_needed` | Persist and present human testing items |",
+        "| `gaps_found` | Present gap summary |",
+      ].join("\n"),
+    );
+    writeFileSync(join(packageRoot, "get-shit-done", "workflows", "verify-work.md"), "# Verify Work\n", "utf8");
+  }
+
   if (!omitted.has("get-shit-done/bin/gsd-tools.cjs")) {
     mkdirSync(join(packageRoot, "get-shit-done", "bin"), { recursive: true });
     writeFileSync(join(packageRoot, "get-shit-done", "bin", "gsd-tools.cjs"), "module.exports = {};\n");

@@ -82,7 +82,7 @@ describe("orchestrator state machine", () => {
     });
 
     const result = advanceOrchestration(snapshot, {
-      gates: { reconcileBeforeDispatch: passReconcile },
+      gates: { reconcileBeforeDispatch: passReconcile, validateToolContract: pass("validateToolContract", []) },
       dispatch: () => ({ ok: true, messages: ["## ISSUES FOUND\n- blocker"], outcome: { marker: "issues_found" } }),
     });
 
@@ -105,7 +105,7 @@ describe("orchestrator state machine", () => {
     });
 
     const result = advanceOrchestration({ ...snapshot, loopState: { planCheckIterations: 3 } }, {
-      gates: { reconcileBeforeDispatch: passReconcile },
+      gates: { reconcileBeforeDispatch: passReconcile, validateToolContract: pass("validateToolContract", []) },
       dispatch: () => ({ ok: true, messages: ["## ISSUES FOUND\n- still blocked"], outcome: { marker: "issues_found" } }),
     });
 
@@ -114,6 +114,67 @@ describe("orchestrator state machine", () => {
     expect(result.snapshot?.currentUnit?.type).toBe("plan-check");
     expect(result.messages.join("\n")).toContain("Plan checker reached maximum iterations");
   });
+
+  it("continues to verify when code-review is clean", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-code-review-clean-"));
+    mkdirSync(join(cwd, ".planning", "phases", "09-fixture"), { recursive: true });
+    const reviewPath = join(cwd, ".planning", "phases", "09-fixture", "09-REVIEW.md");
+    writeFileSync(reviewPath, "---\nstatus: clean\n---\n\n# Review\n", "utf8");
+    const snapshot = startOrchestration({
+      phase: "09",
+      mode: "chain",
+      settings: { ...settings, workflow: { ...settings.workflow, worktrees: false } },
+      units: [unit("code-review"), unit("verify")],
+      cwd,
+    });
+
+    const result = advanceOrchestration(snapshot, {
+      gates: { reconcileBeforeDispatch: passReconcile },
+      dispatch: () => ({ ok: true, messages: ["review clean"], written: [reviewPath] }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.snapshot?.currentUnit?.type).toBe("verify");
+  });
+
+  it("blocks invalid Tool Contract dispatch before dispatch", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-contract-invalid-"));
+    const snapshot = startOrchestration({ phase: "12", mode: "chain", settings, units: [unit("plan", "12")], cwd });
+    let dispatchCount = 0;
+
+    // Simulate a fail-closed Tool Contract gate: this is what the real
+    // gate emits when the verified snapshot excludes the requested Unit type
+    // or the dispatch-critical fields are invalid (D-05, D-07).
+    const failContract = (): GateResult => ({
+      ok: false,
+      gate: "validateToolContract",
+      reason: "dispatch-contract-invalid",
+      retryable: false,
+      resumeHint: "Fix the dispatch contract before continuing.",
+      evidence: ["failedField:unitType", `unitId:${unit("plan", "12").id}`],
+      recoveryDecision: {
+        class: "dispatch-contract-invalid",
+        action: "stop",
+        message: "Dispatch contract was invalid.",
+        remediation: "Fix the dispatch contract before continuing.",
+      },
+      exitReason: "dispatch-contract-invalid",
+    });
+
+    const result = advanceOrchestration(snapshot, {
+      gates: { reconcileBeforeDispatch: passReconcile, validateToolContract: failContract },
+      dispatch: () => {
+        dispatchCount += 1;
+        return { ok: true, messages: ["should not dispatch"] };
+      },
+    });
+
+    expect(dispatchCount).toBe(0);
+    expect(result.ok).toBe(false);
+    expect(result.snapshot?.status).toBe("stopped");
+    expect(result.events?.find((event) => event.type === "gate_failed")).toEqual(expect.objectContaining({ exitReason: "dispatch-contract-invalid", recoveryDecision: expect.objectContaining({ class: "dispatch-contract-invalid", action: "stop" }) }));
+  });
+
 
   it("blocks invalid execute root with typed worktree recovery before dispatch", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-invalid-root-"));
@@ -212,13 +273,15 @@ describe("orchestrator state machine", () => {
     const phaseDir = join(cwd, ".planning", "phases", "11-fixture");
     mkdirSync(phaseDir, { recursive: true });
     const summary = join(phaseDir, "11-SUMMARY.md");
+    const verification = join(phaseDir, "11-VERIFICATION.md");
     const snapshot = startOrchestration({ phase: "11", mode: "chain", settings, units: [unit("execute", "11")], cwd });
 
     const result = advanceOrchestration(snapshot, {
       gates: { reconcileBeforeDispatch: passReconcile },
       dispatch: () => {
         writeFileSync(summary, "summary\n", "utf8");
-        return { ok: true, messages: ["dispatched"], written: [summary] };
+        writeFileSync(verification, "---\nstatus: passed\n---\n\n# Verification\n", "utf8");
+        return { ok: true, messages: ["dispatched"], written: [summary, verification] };
       },
     });
 
@@ -249,6 +312,7 @@ describe("orchestrator state machine", () => {
     mkdirSync(join(cwd, ".git"), { recursive: true });
     mkdirSync(join(cwd, ".planning", "phases", "11-fixture"), { recursive: true });
     const summary = join(cwd, ".planning", "phases", "11-fixture", "11-SUMMARY.md");
+    const verification = join(cwd, ".planning", "phases", "11-fixture", "11-VERIFICATION.md");
     const leasePath = join(cwd, ".planning", "worktree-leases", "lease.json");
     const snapshot = startOrchestration({ phase: "11", mode: "chain", settings, units: [unit("execute", "11")], cwd });
 
@@ -256,8 +320,9 @@ describe("orchestrator state machine", () => {
       gates: { reconcileBeforeDispatch: passReconcile },
       dispatch: () => {
         writeFileSync(summary, "summary\n", "utf8");
+        writeFileSync(verification, "---\nstatus: passed\n---\n\n# Verification\n", "utf8");
         writeFileSync(leasePath, JSON.stringify({ unitId: "other", phase: "11", branch: undefined, root: cwd, host: hostname(), pid: process.pid }), "utf8");
-        return { ok: true, messages: ["dispatched"], written: [summary] };
+        return { ok: true, messages: ["dispatched"], written: [summary, verification] };
       },
     });
 
@@ -276,6 +341,7 @@ describe("orchestrator state machine", () => {
     mkdirSync(join(cwd, ".planning", "worktree-leases"), { recursive: true });
     writeFileSync(leasePath, JSON.stringify({ unitId: "11:execute", phase: "11", branch: "main", root: cwd, host: hostname(), pid: process.pid }), "utf8");
     const summary = join(phaseDir, "11-SUMMARY.md");
+    const verification = join(phaseDir, "11-VERIFICATION.md");
     const snapshot = startOrchestration({ phase: "11", mode: "chain", settings, units: [unit("execute", "11")], cwd });
 
     const result = advanceOrchestration(snapshot, {
@@ -285,7 +351,8 @@ describe("orchestrator state machine", () => {
       },
       dispatch: () => {
         writeFileSync(summary, "summary\n", "utf8");
-        return { ok: true, messages: ["dispatched"], written: [summary] };
+        writeFileSync(verification, "---\nstatus: passed\n---\n\n# Verification\n", "utf8");
+        return { ok: true, messages: ["dispatched"], written: [summary, verification] };
       },
     });
 
@@ -324,7 +391,7 @@ describe("orchestrator state machine", () => {
   it("post-dispatch artifact gate failure prevents advancing and records evidence", () => {
     const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute"), unit("verify")] });
     const result = advanceOrchestration(snapshot, {
-      gates: { reconcileBeforeDispatch: passReconcile },
+      gates: { reconcileBeforeDispatch: passReconcile, prepareUnitRoot: pass("prepareUnitRoot", []) },
       dispatch: () => ({ ok: true, messages: ["dispatched"] }),
       postDispatchGate: () => ({ ok: false, gate: "artifact", reason: "gate-failed", retryable: false, resumeHint: "create SUMMARY.md", evidence: ["missing SUMMARY"] }),
     });
@@ -394,6 +461,72 @@ describe("artifact gates", () => {
     const structuredGap = runPostDispatchGate(snapshot, unit("verify"), { cwd, written: [verificationPath], outcome: { status: "gaps_found" } });
     expect(structuredGap.ok).toBe(false);
     expect(!structuredGap.ok && structuredGap.resumeHint).toContain("--gaps-only");
+  });
+
+  it("does not complete execute when only SUMMARY.md is written", () => {
+    const { cwd, phaseDir } = artifactFixture();
+    const summaryPath = join(phaseDir, "09-SUMMARY.md");
+    const snapshot = snapshotForArtifactGate(cwd, "execute");
+
+    writeFileSync(summaryPath, "summary\n", "utf8");
+    const result = runPostDispatchGate(snapshot, unit("execute"), { cwd, written: [summaryPath] });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.resumeHint).toContain("required verification artifacts");
+  });
+
+  it("pauses at execute when VERIFICATION.md reports gaps_found", () => {
+    const { cwd, phaseDir } = artifactFixture();
+    const summaryPath = join(phaseDir, "09-SUMMARY.md");
+    const verificationPath = join(phaseDir, "09-VERIFICATION.md");
+    const snapshot = snapshotForArtifactGate(cwd, "execute");
+
+    writeFileSync(summaryPath, "summary\n", "utf8");
+    writeFileSync(verificationPath, "---\nstatus: gaps_found\n---\n\n# Verification\n", "utf8");
+    const result = runPostDispatchGate(snapshot, unit("execute"), { cwd, written: [summaryPath, verificationPath] });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.resumeHint).toContain("/gsd-plan-phase 09 --gaps");
+  });
+
+  it("accepts execute when upstream verification text reports passed", () => {
+    const { cwd, phaseDir } = artifactFixture();
+    const summaryPath = join(phaseDir, "09-SUMMARY.md");
+    const verificationPath = join(phaseDir, "09-VERIFICATION.md");
+    const snapshot = snapshotForArtifactGate(cwd, "execute");
+
+    writeFileSync(summaryPath, "summary\n", "utf8");
+    writeFileSync(verificationPath, "## PHASE COMPLETE\n\nVerification: Passed\n", "utf8");
+
+    expect(runPostDispatchGate(snapshot, unit("execute"), { cwd, written: [summaryPath, verificationPath] }).ok).toBe(true);
+  });
+
+  it("does not complete execute when verification only reports phase complete marker", () => {
+    const { cwd, phaseDir } = artifactFixture();
+    const summaryPath = join(phaseDir, "09-SUMMARY.md");
+    const verificationPath = join(phaseDir, "09-VERIFICATION.md");
+    const snapshot = snapshotForArtifactGate(cwd, "execute");
+
+    writeFileSync(summaryPath, "summary\n", "utf8");
+    writeFileSync(verificationPath, "## PHASE COMPLETE\n", "utf8");
+    const result = runPostDispatchGate(snapshot, unit("execute"), { cwd, written: [summaryPath, verificationPath] });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.resumeHint).toContain("recognized completion outcome");
+  });
+
+  it("does not complete execute when dispatch outcome only reports phase complete marker", () => {
+    const { cwd, phaseDir } = artifactFixture();
+    const summaryPath = join(phaseDir, "09-SUMMARY.md");
+    const verificationPath = join(phaseDir, "09-VERIFICATION.md");
+    const snapshot = snapshotForArtifactGate(cwd, "execute");
+
+    writeFileSync(summaryPath, "summary\n", "utf8");
+    writeFileSync(verificationPath, "# Verification\n", "utf8");
+    const result = runPostDispatchGate(snapshot, unit("execute"), { cwd, written: [summaryPath, verificationPath], outcome: { marker: "phase_complete" } });
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.resumeHint).toContain("recognized completion outcome");
   });
 
   it("requires passed verification before closeout can complete", () => {
@@ -508,7 +641,7 @@ describe("artifact gates", () => {
     expect(!result.ok && result.reason).toBe("artifact-gate-failed");
     expect(!result.ok && result.exitReason).toBe("artifact-gate-failed");
     expect(!result.ok && result.recoveryDecision).toEqual(expect.objectContaining({ class: "artifact-gate-failed", action: "pause-with-remediation" }));
-    expect(result.evidence).toEqual(["missing:09-*-SUMMARY.md"]);
+    expect(result.evidence).toEqual(expect.arrayContaining(["missing:09-*-SUMMARY.md"]));
   });
 });
 
@@ -521,6 +654,13 @@ describe("Unit dispatch target", () => {
       expect(existsSync(join(process.cwd(), target.prompt)), `${type} prompt ${target.prompt}`).toBe(true);
       if (target.agent) expect(existsSync(join(process.cwd(), "generated", "agents", `${target.agent}.md`)), `${type} agent ${target.agent}`).toBe(true);
     }
+  });
+
+  it("maps plan-check to the generated plan review convergence prompt", () => {
+    const target = resolveUnitDispatchTarget(unit("plan-check"));
+
+    expect(target.agent).toBeUndefined();
+    expect(target.prompt).toBe("generated/prompts/gsd-plan-review-convergence.md");
   });
 
   it("validates dispatch resources from resourceRoot while using project cwd for execution", () => {
@@ -550,7 +690,7 @@ describe("Unit dispatch target", () => {
     const result = adapter(unit("plan"), startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("plan")] }));
 
     expect(result.ok).toBe(true);
-    expect(calls).toEqual([expect.objectContaining({ unit: expect.objectContaining({ type: "plan" }), env: expect.objectContaining({ GSD_AUDIT: "1" }) })]);
+    expect(calls).toEqual([expect.objectContaining({ unit: expect.objectContaining({ type: "plan" }), env: expect.objectContaining({ GSD_AUDIT: "1", PI_GSD_NATIVE_CHAIN_OWNER: "1" }) })]);
     expect(JSON.stringify(calls)).not.toContain("prompt body");
     expect(JSON.stringify(calls)).not.toContain("GSD_AUDIT_ARGS");
   });
@@ -567,6 +707,32 @@ describe("Unit dispatch target", () => {
     expect(result.ok).toBe(true);
     expect(result.written).toEqual(["09-VERIFICATION.md"]);
     expect(result.outcome).toEqual({ status: "gaps_found", data: { attempts: 2, human: true } });
+  });
+
+  it("command dispatch runner parses upstream plain text phase outcomes", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-command-plain-outcome-"));
+    const scriptPath = join(cwd, "dispatch.cjs");
+    writeFileSync(scriptPath, "process.stdout.write('## PHASE COMPLETE\\n\\nVerification: Passed\\n');\n", "utf8");
+    const runner = createCommandDispatchRunner({ cwd, command: `node "${scriptPath}"` });
+    const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute")], cwd });
+
+    const result = runner({ unit: unit("execute"), snapshot, target: { prompt: "generated/prompts/gsd-execute-phase.md" }, env: {} });
+
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toEqual({ status: "passed", marker: "phase_complete" });
+  });
+
+  it("command dispatch runner does not treat verification placeholders as gaps", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-command-placeholder-outcome-"));
+    const scriptPath = join(cwd, "dispatch.cjs");
+    writeFileSync(scriptPath, "process.stdout.write('Expected output: Verification: {Passed | Gaps Found}\\n');\n", "utf8");
+    const runner = createCommandDispatchRunner({ cwd, command: `node "${scriptPath}"` });
+    const snapshot = startOrchestration({ phase: "09", mode: "chain", settings, units: [unit("execute")], cwd });
+
+    const result = runner({ unit: unit("execute"), snapshot, target: { prompt: "generated/prompts/gsd-execute-phase.md" }, env: {} });
+
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBeUndefined();
   });
 
   it("passes Unit args to dispatch command payload and environment", () => {
@@ -596,8 +762,30 @@ process.stdout.write(JSON.stringify({
 describe("native auto trigger", () => {
   it("detects supported slash-command text and starts native orchestration", () => {
     expect(detectNativeAutoTrigger("/gsd-discuss-phase 09 --chain")).toEqual(expect.objectContaining({ command: "gsd-discuss-phase", phase: "09", mode: "chain" }));
+    expect(detectNativeAutoTrigger("/gsd-discuss-phase 2.1 --chain")).toEqual(expect.objectContaining({ command: "gsd-discuss-phase", phase: "2.1", mode: "chain" }));
     expect(detectNativeAutoTrigger("/gsd-plan-phase 09 --chain")).toEqual(expect.objectContaining({ command: "gsd-plan-phase", phase: "09", mode: "chain" }));
     expect(detectNativeAutoTrigger("/gsd-execute-phase 09 --auto")).toEqual(expect.objectContaining({ command: "gsd-execute-phase", phase: "09", mode: "auto" }));
+  });
+
+  it("preserves upstream command flags beyond the native mode flag", () => {
+    expect(detectNativeAutoTrigger("/gsd-plan-phase 09 --auto --gaps --text")).toEqual(expect.objectContaining({ extraArgs: "--gaps --text" }));
+    expect(detectNativeAutoTrigger("/gsd-execute-phase 09 --auto --wave 2 --interactive")).toEqual(expect.objectContaining({ extraArgs: "--wave 2 --interactive" }));
+    expect(detectNativeAutoTrigger("/gsd-discuss-phase 09 --chain --power")).toEqual(expect.objectContaining({ extraArgs: "--power" }));
+  });
+
+  it("does not claim optional-phase invocations whose first argument is a flag", () => {
+    expect(detectNativeAutoTrigger("/gsd-plan-phase --auto")).toBeUndefined();
+    expect(detectNativeAutoTrigger("/gsd-plan-phase --research-phase 2 --auto")).toBeUndefined();
+  });
+
+  it("accepts decimal native handoff phase ids", () => {
+    const starts: unknown[] = [];
+    const handoff = createNativeAutoHandoff({ cwd: "/project", createOrchestrator: () => ({ start: (ctx) => { starts.push(ctx); return { ok: true, messages: ["started"] }; }, advance: () => ({ ok: true, messages: [] }), resume: () => ({ ok: true, messages: [] }), stop: () => ({ ok: true, messages: [] }), getStatus: () => ({ status: "completed", remainingUnits: [], attempt: 0 }) }) });
+
+    const result = handoff("/gsd-discuss-phase 2.1 --chain");
+
+    expect(result?.ok).toBe(true);
+    expect(starts).toEqual([expect.objectContaining({ phase: "2.1", startAt: "discuss" })]);
   });
 
   it("rejects invalid native handoff phase ids", () => {
@@ -617,6 +805,16 @@ describe("native auto trigger", () => {
 
     expect(result?.ok).toBe(true);
     expect(starts).toEqual([expect.objectContaining({ phase: "09", mode: "chain", cwd: "/project", startAt: "plan" })]);
+  });
+
+  it("passes preserved command flags into native handoff context", () => {
+    const starts: unknown[] = [];
+    const handoff = createNativeAutoHandoff({ cwd: "/project", createOrchestrator: () => ({ start: (ctx) => { starts.push(ctx); return { ok: true, messages: ["started"] }; }, advance: () => ({ ok: true, messages: [] }), resume: () => ({ ok: true, messages: [] }), stop: () => ({ ok: true, messages: [] }), getStatus: () => ({ status: "completed", remainingUnits: [], attempt: 0 }) }) });
+
+    const result = handoff("/gsd-execute-phase 09 --auto --wave 2 --interactive");
+
+    expect(result?.ok).toBe(true);
+    expect(starts).toEqual([expect.objectContaining({ startAt: "execute", extraArgs: "--wave 2 --interactive" })]);
   });
 
   it("uses the invoked native command as the first orchestration unit", () => {
@@ -654,6 +852,22 @@ describe("orchestrator facade", () => {
       lastEvent: expect.any(Object),
       resumeHint: undefined,
     }));
+  });
+
+  it("forwards preserved native command args into the queue builder", () => {
+    const inputs: unknown[] = [];
+    const orchestrator = createAutoOrchestrator({
+      settingsResolver: () => settings,
+      queueBuilder: (input) => {
+        inputs.push(input);
+        return { decision: "dispatch", settings, units: [unit("execute")] };
+      },
+    });
+
+    const result = orchestrator.start({ phase: "09", mode: "auto", startAt: "execute", extraArgs: "--wave 2" });
+
+    expect(result.ok).toBe(true);
+    expect(inputs).toEqual([expect.objectContaining({ startAt: "execute", extraArgs: "--wave 2" })]);
   });
 
   it("module facade methods exist and delegate without printing", () => {
@@ -725,6 +939,7 @@ describe("orchestrator facade", () => {
     const phaseDir = join(cwd, ".planning", "phases", "11-fixture");
     mkdirSync(phaseDir, { recursive: true });
     const summary = join(phaseDir, "11-SUMMARY.md");
+    const verification = join(phaseDir, "11-VERIFICATION.md");
     const events: string[] = [];
     const gateFailed: unknown[] = [];
     const orchestrator = createAutoOrchestrator({
@@ -734,7 +949,8 @@ describe("orchestrator facade", () => {
       gates: { reconcileBeforeDispatch: passReconcile },
       dispatch: () => {
         writeFileSync(summary, "summary\n", "utf8");
-        return { ok: true, messages: ["dispatched"], written: [summary] };
+        writeFileSync(verification, "---\nstatus: passed\n---\n\n# Verification\n", "utf8");
+        return { ok: true, messages: ["dispatched"], written: [summary, verification] };
       },
       worktreeSafetyDeps: { unlinkSync: () => { throw new Error("lease locked"); } },
     });

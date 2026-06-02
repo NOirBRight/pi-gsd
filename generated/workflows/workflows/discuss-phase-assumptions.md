@@ -262,7 +262,7 @@ If no USER-PROFILE.md: calibration_tier = "standard"
 **Spawn Explore subagent:**
 
 ```
-Agent(subagent_type="gsd-assumptions-analyzer", prompt="""
+Use the Pi subagent tool: subagent({agent: "gsd-assumptions-analyzer", task: "\"\"
 Analyze the codebase for Phase {PHASE}: {phase_name}.
 
 Phase goal: {roadmap_description}
@@ -283,7 +283,7 @@ Return EXACTLY this structure:
 
 ## Assumptions
 
-### [Area Name] (e.g., "Technical Approach")
+### [Area Name] (e.g., \"Technical Approach\")
 - **Assumption:** [Decision statement]
   - **Why this way:** [Evidence from codebase — cite file paths]
   - **If wrong:** [Concrete consequence of this being wrong]
@@ -299,7 +299,7 @@ Return EXACTLY this structure:
 ecosystem best practices, etc. Leave empty if codebase provides enough evidence.]
 
 ${AGENT_SKILLS_ANALYZER}
-""")
+\"\""}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, analyze the codebase, or process assumptions while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
@@ -320,7 +320,7 @@ Parse the subagent's response. Extract:
 If research topics were flagged, spawn a general-purpose research agent:
 
 ```
-Agent(subagent_type="general-purpose", prompt="""
+Use the Pi subagent tool: subagent({agent: "general", task: "\"\"
 Research the following topics for Phase {PHASE}: {phase_name}.
 
 Topics needing research:
@@ -333,7 +333,7 @@ For each topic, return:
 
 Use Context7 (resolve-library-id then query-docs) for library-specific questions.
 Use WebSearch for ecosystem/best-practice questions.
-""")
+\"\""}). Wait for the subagent result before continuing this workflow.
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not independently research any of these topics while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work and wasted context. Only resume when the subagent result is available.
 ```
@@ -655,7 +655,7 @@ Display banner:
 Context captured (assumptions mode). Launching plan-phase...
 ```
 
-Launch: `Skill("gsd-plan-phase", args="${PHASE} --auto")`
+Launch: `If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase ${PHASE} --auto; otherwise Invoke /gsd-plan-phase ${PHASE} --auto in Pi.`
 
 Handle return: PHASE COMPLETE / PLANNING COMPLETE / INCONCLUSIVE / GAPS FOUND
 (identical handling to discuss-phase.md auto_advance step)

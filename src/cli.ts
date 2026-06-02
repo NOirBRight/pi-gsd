@@ -230,8 +230,8 @@ function runOrchestratorCli(args: string[], io: CliIO): number {
     io.stderr("Missing value for --phase\n");
     return 2;
   }
-  if (!isValidPhaseId(phase)) {
-    io.stderr("Invalid --phase; expected two digits such as 09\n");
+  if (!isValidPhaseId(phase, { cwd })) {
+    io.stderr("Invalid --phase; expected integer or decimal phase id such as 9 or 2.1\n");
     return 2;
   }
 

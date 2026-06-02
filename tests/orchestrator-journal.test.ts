@@ -145,6 +145,7 @@ describe("orchestrator journal", () => {
     const phaseDir = join(cwd, ".planning", "phases", "11-fixture");
     mkdirSync(phaseDir, { recursive: true });
     const summary = join(phaseDir, "11-SUMMARY.md");
+    const verification = join(phaseDir, "11-VERIFICATION.md");
     const orchestrator = createAutoOrchestrator({
       settingsResolver: () => settings,
       queueBuilder: () => ({ decision: "dispatch", settings, units: [{ ...unit("11:execute"), phase: "11" }] }),
@@ -152,7 +153,8 @@ describe("orchestrator journal", () => {
       gates: { reconcileBeforeDispatch: () => ({ ok: true, gate: "reconcileBeforeDispatch", evidence: ["test-reconciliation-pass"] }) },
       dispatch: () => {
         writeFileSync(summary, "summary\n", "utf8");
-        return { ok: true, messages: ["dispatched"], written: [summary] };
+        writeFileSync(verification, "---\nstatus: passed\n---\n\n# Verification\n", "utf8");
+        return { ok: true, messages: ["dispatched"], written: [summary, verification] };
       },
     });
 

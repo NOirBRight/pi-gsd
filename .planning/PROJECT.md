@@ -13,6 +13,10 @@ Pi adapter for Get Shit Done (GSD) — an upstream-compatible extension that gen
 - Doctor and sync tooling for agent lifecycle management
 - AskUserQuestion, Skill(), and subagent_type runtime transformations for Pi compatibility
 - rpiv-ask-user-question peer dependency verification in doctor
+- Native v2.0 orchestration safety: generated-first Tool Contracts plus upstream-compatible Settings Bridge context injection
+
+---
+*Last updated: 2026-06-02 after Phase 12 closeout*
 
 ## Non-Goals
 

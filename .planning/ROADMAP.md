@@ -163,7 +163,7 @@ Plans:
 - Pi extension surfaces current GSD settings.json (workflow toggles, model profile) in prompt context at session start
 - `gsd:settings` workflow writes to the same location extension reads from; Pi notifies on change
 
-**Plans:** 2
+**Plans:** 2/2 plans complete
 
 #### Phase 13: SDK Bridge Retirement + v2.0 Release
 
@@ -197,5 +197,5 @@ Plans:
 | 9. Auto Orchestration Module | v2.0 | 3/3 | Complete | 2026-06-01 |
 | 10. State Reconciliation Module | v2.0 | 4/4 | Complete    | 2026-06-01 |
 | 11. Worktree Safety + Recovery Classification | v2.0 | 4/4 | Complete    | 2026-06-02 |
-| 12. Tool Contract + Settings Bridge | v2.0 | 0/2 | Not started | — |
+| 12. Tool Contract + Settings Bridge | v2.0 | 2/2 | Complete    | 2026-06-02 |
 | 13. SDK Retirement + v2.0 Release | v2.0 | 0/2 | Not started | — |

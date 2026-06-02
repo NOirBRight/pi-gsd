@@ -41,17 +41,14 @@ describe("orchestrator settings", () => {
     const result = buildUnitQueue({ mode: "chain", phase: "09" });
 
     expect(result.decision).toBe("dispatch");
-    expect(result.units.map((unit) => unit.type)).toEqual([
-      "discuss",
-      "research",
-      "plan",
-      "plan-check",
-      "execute",
-      "code-review",
-      "verify",
-      "closeout",
-    ]);
+    expect(result.units.map((unit) => unit.type)).toEqual(["discuss", "plan", "execute"]);
     expect(result.units.every((unit) => unit.id.startsWith("09:"))).toBe(true);
+  });
+
+  it("does not enqueue code-review-fix before code-review reports issues", () => {
+    const result = buildUnitQueue({ mode: "chain", phase: "09" });
+
+    expect(result.units.map((unit) => unit.type)).toEqual(["discuss", "plan", "execute"]);
   });
 
   it("attaches upstream args for chain mode", () => {
@@ -82,6 +79,73 @@ describe("orchestrator settings", () => {
     expect(result.units.find((unit) => unit.type === "execute")?.metadata).toMatchObject({ args: "--auto --no-transition" });
   });
 
+  it("appends preserved native command args only to the invoked chain unit", () => {
+    const result = buildUnitQueue({
+      mode: "auto",
+      phase: "09",
+      startAt: "plan",
+      extraArgs: "--gaps --text",
+      settings: resolveWorkflowSettings({
+        defaults: { skip_discuss: false, research: false, plan_check: false, code_review: false, verifier: true },
+      }),
+    });
+
+    expect(result.units.find((unit) => unit.type === "plan")?.metadata).toMatchObject({ args: "--auto --gaps --text" });
+    expect(result.units.find((unit) => unit.type === "execute")?.metadata).toMatchObject({ args: "--auto --no-transition" });
+  });
+
+  it("appends preserved native command args to execute flags", () => {
+    const result = buildUnitQueue({
+      mode: "auto",
+      phase: "09",
+      startAt: "execute",
+      extraArgs: "--wave 2 --interactive",
+      settings: resolveWorkflowSettings({
+        defaults: { skip_discuss: false, research: false, plan_check: false, code_review: false, verifier: true },
+      }),
+    });
+
+    expect(result.units.map((unit) => unit.type)).toEqual(["execute"]);
+    expect(result.units[0].metadata).toMatchObject({ args: "--auto --no-transition --wave 2 --interactive" });
+  });
+
+  it("passes preserved native command args to standalone workflow units", () => {
+    const result = buildUnitQueue({ mode: "auto", phase: "09", startAt: "verify", extraArgs: "--ws feature-x" });
+
+    expect(result.units.map((unit) => unit.type)).toEqual(["verify"]);
+    expect(result.units[0].metadata).toMatchObject({ args: "--ws feature-x" });
+  });
+
+  it("does not continue native chain after explicit assumptions-only discuss mode", () => {
+    const result = buildUnitQueue({
+      mode: "chain",
+      phase: "09",
+      startAt: "discuss",
+      extraArgs: "--assumptions",
+      settings: resolveWorkflowSettings({
+        defaults: { skip_discuss: false, research: false, plan_check: false, code_review: false, verifier: true },
+      }),
+    });
+
+    expect(result.units.map((unit) => unit.type)).toEqual(["discuss"]);
+    expect(result.units[0].metadata).toMatchObject({ args: "--chain --assumptions" });
+  });
+
+  it("does not continue native chain after plan research-only mode", () => {
+    const result = buildUnitQueue({
+      mode: "auto",
+      phase: "09",
+      startAt: "plan",
+      extraArgs: "--research-phase 2 --view",
+      settings: resolveWorkflowSettings({
+        defaults: { skip_discuss: false, research: false, plan_check: false, code_review: false, verifier: true },
+      }),
+    });
+
+    expect(result.units.map((unit) => unit.type)).toEqual(["plan"]);
+    expect(result.units[0].metadata).toMatchObject({ args: "--auto --research-phase 2 --view" });
+  });
+
   it("starts queue at requested command unit", () => {
     const result = buildUnitQueue({
       mode: "chain",
@@ -90,7 +154,19 @@ describe("orchestrator settings", () => {
       settings: resolveWorkflowSettings({ defaults: { skip_discuss: true, research: false, plan_check: false, code_review: false, verifier: true } }),
     });
 
-    expect(result.units.map((unit) => unit.type)).toEqual(["verify", "closeout"]);
+    expect(result.units.map((unit) => unit.type)).toEqual(["verify"]);
+  });
+
+  it("allows explicit startAt verify as standalone UAT workflow", () => {
+    const result = buildUnitQueue({ mode: "chain", phase: "09", startAt: "verify" });
+
+    expect(result.units.map((unit) => unit.type)).toEqual(["verify"]);
+  });
+
+  it("allows explicit startAt closeout as standalone ship workflow", () => {
+    const result = buildUnitQueue({ mode: "chain", phase: "09", startAt: "closeout" });
+
+    expect(result.units.map((unit) => unit.type)).toEqual(["closeout"]);
   });
 
   it("pauses instead of falling back to full queue when requested start unit is disabled", () => {
@@ -239,7 +315,7 @@ describe("orchestrator settings", () => {
       phaseSignals: { isUiPhase: true, isAiPhase: true, requiresSecurityReview: true, requiresNyquistValidation: true },
     });
 
-    expect(result.units.map((unit) => unit.type)).toEqual(["settings-gate", "ui-safety-gate", "ai-integration", "plan", "execute", "security-review", "nyquist-validation", "closeout"]);
+    expect(result.units.map((unit) => unit.type)).toEqual(["settings-gate", "ui-safety-gate", "ai-integration", "plan", "execute", "security-review", "nyquist-validation"]);
   });
 
   it("includes enabled optional units and omits disabled optional units", () => {
@@ -265,7 +341,7 @@ describe("orchestrator settings", () => {
       phaseSignals: { isUiPhase: true },
     });
 
-    expect(result.units.map((unit) => unit.type)).toEqual(["settings-gate", "plan", "plan-check", "execute", "closeout"]);
+    expect(result.units.map((unit) => unit.type)).toEqual(["settings-gate", "plan", "execute"]);
   });
 
   it("infers phase signals only from explicit markers in active plan files", () => {
@@ -289,6 +365,52 @@ describe("orchestrator settings", () => {
       requiresNyquistValidation: true,
       isAiPhase: true,
     });
+  });
+
+  it("resolves active-workstream config when .planning/active-workstream points to a slug", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-active-workstream-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(join(root, ".planning", "active-workstream"), "feature-x", "utf8");
+    mkdirSync(join(root, ".planning", "workstreams", "feature-x"), { recursive: true });
+    writeFileSync(join(root, ".planning", "workstreams", "feature-x", "config.json"), JSON.stringify({ workflow: { verifier: false, code_review: false } }), "utf8");
+    writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { verifier: true, code_review: true } }), "utf8");
+    writeFileSync(join(root, "config.json"), JSON.stringify({ workflow: { verifier: true } }), "utf8");
+
+    const settings = resolveWorkflowSettings({ cwd: root });
+
+    expect(settings.workflow.verifier).toBe(false);
+    expect(settings.workflow.code_review).toBe(false);
+    expect(settings.settingsSource).toMatchObject({ kind: "active-workstream" });
+    expect(settings.settingsSource?.path?.replace(/\\/g, "/")).toContain(".planning/workstreams/feature-x/config.json");
+  });
+
+  it("falls back to .planning/config.json when active-workstream slug has no config", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-active-workstream-missing-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(join(root, ".planning", "active-workstream"), "missing-slug", "utf8");
+    writeFileSync(join(root, ".planning", "config.json"), JSON.stringify({ workflow: { verifier: true } }), "utf8");
+
+    const settings = resolveWorkflowSettings({ cwd: root });
+
+    expect(settings.workflow.verifier).toBe(true);
+    expect(settings.settingsSource).toMatchObject({ kind: "planning-config" });
+  });
+
+  it("includes source path/kind/hash/mtime in settingsSource", () => {
+    const cwd = writeConfig({ verifier: false });
+    const settings = resolveWorkflowSettings({ cwd });
+    expect(settings.settingsSource?.kind).toBe("root-config");
+    expect(settings.settingsSource?.path?.replace(/\\/g, "/")).toMatch(/config\.json$/);
+    expect(settings.settingsSource?.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(typeof settings.settingsSource?.mtimeMs).toBe("number");
+  });
+
+  it("throws instead of silently falling back to defaults when selected config is malformed", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-gsd-malformed-config-"));
+    mkdirSync(join(root, ".planning"), { recursive: true });
+    writeFileSync(join(root, ".planning", "config.json"), "{not valid json", "utf8");
+
+    expect(() => resolveWorkflowSettings({ cwd: root })).toThrow(/Could not read orchestrator settings/);
   });
 
   it("pauses for user when a required phase signal conflicts with disabled settings", () => {

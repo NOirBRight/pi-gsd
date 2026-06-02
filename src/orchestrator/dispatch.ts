@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { readOrchestrationContractSnapshot } from "../orchestration-contract/index.js";
 import type { OrchestrationOutcome, OrchestrationSnapshot, OrchestrationUnit, OrchestratorResult } from "./types.js";
 
 export type UnitDispatchTarget = { agent?: string; prompt: string };
@@ -49,7 +50,8 @@ export function dispatchUnit(options: { cwd: string; resourceRoot?: string; runn
       messages: [`native Pi dispatch unavailable for ${unit.type}; provide a dispatch runner or Pi subagent bridge`],
     };
   }
-  return options.runner({ unit, snapshot, target, env: { GSD_AUDIT: "1" } });
+  const nativeOwnerEnv = readOrchestrationContractSnapshot(options.cwd)?.piOverlay.nativeOwnerEnv ?? "PI_GSD_NATIVE_CHAIN_OWNER";
+  return options.runner({ unit, snapshot, target, env: { GSD_AUDIT: "1", [nativeOwnerEnv]: "1" } });
 }
 
 export function createCommandDispatchRunner(options: { cwd: string; command?: string }): DispatchRunner {
@@ -94,7 +96,7 @@ function parseDispatchCommandOutput(output: string): { written?: string[]; outco
   } catch {
     // Plain-text dispatch output is allowed; it just has no structured artifacts.
   }
-  return {};
+  return { outcome: parsePlainTextOutcome(output) };
 }
 
 function parseOutcome(value: unknown): OrchestrationOutcome | undefined {
@@ -116,4 +118,21 @@ function parseOutcomeData(value: unknown): OrchestrationOutcome["data"] | undefi
       return typeof candidate === "string" || typeof candidate === "number" || typeof candidate === "boolean";
     });
   return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function parsePlainTextOutcome(output: string): OrchestrationOutcome | undefined {
+  const marker = /##\s*PHASE COMPLETE/i.test(output) ? "phase_complete" : undefined;
+  if (hasLineMarker(output, "GAPS FOUND")) return { status: "gaps_found", ...(marker ? { marker } : {}) };
+  if (hasLineMarker(output, "HUMAN NEEDED")) return { status: "human_needed", ...(marker ? { marker } : {}) };
+  if (hasLineMarker(output, "VERIFICATION FAILED")) return { status: "verification_failed", ...(marker ? { marker } : {}) };
+
+  const verification = output.match(/^\s*Verification:\s*(Passed|Gaps Found)\s*$/im);
+  const verificationValue = verification?.[1]?.toLowerCase();
+  if (verificationValue === "passed") return { status: "passed", ...(marker ? { marker } : {}) };
+  if (verificationValue === "gaps found") return { status: "gaps_found", ...(marker ? { marker } : {}) };
+  return marker ? { marker } : undefined;
+}
+
+function hasLineMarker(output: string, marker: string): boolean {
+  return new RegExp(`(?:^|\\n)\\s*(?:#{1,3}\\s*)?${marker}\\b`, "i").test(output);
 }

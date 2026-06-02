@@ -75,8 +75,7 @@ With phase context collected:
 Extract `MILESTONE_REQ_IDS` from REQUIREMENTS.md traceability table — all REQ-IDs assigned to phases in this milestone.
 
 ```
-Agent(
-  prompt="Check cross-phase integration and E2E flows.
+Use the Pi subagent tool: subagent({agent: "gsd-integration-checker", task: "Check cross-phase integration and E2E flows.
 
 Phases: {phase_dirs}
 Phase exports: {from SUMMARYs}
@@ -88,10 +87,7 @@ Milestone Requirements:
 MUST map each integration finding to affected requirement IDs where applicable.
 
 Verify cross-phase wiring and E2E user flows.
-${AGENT_SKILLS_CHECKER}",
-  subagent_type="gsd-integration-checker",
-  model="{integration_checker_model}"
-)
+${AGENT_SKILLS_CHECKER}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.

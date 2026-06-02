@@ -19,6 +19,8 @@
     "generated/prompts",
     "generated/agents",
     "generated/workflows",
+    "generated/orchestration-contract.json",
+    "generated/tool-contracts.json",
     "docs/PUBLISHING.md",
     "README.md",
     "LICENSE"

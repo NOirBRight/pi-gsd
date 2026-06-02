@@ -59,17 +59,13 @@ AGENT_SKILLS_MAPPER=$(gsd_run query agent-skills gsd-codebase-mapper)
 Then spawn `gsd-codebase-mapper` agents with the `--paths` hint:
 
 ```text
-Agent(
-  subagent_type="gsd-codebase-mapper",
-  description="Incremental codebase remap (drift)",
-  prompt="Focus: arch
+Use the Pi subagent tool: subagent({agent: "gsd-codebase-mapper", task: "Focus: arch
 Today's date: {date}
 --paths {affected_paths joined by comma}
 
 Refresh STRUCTURE.md and ARCHITECTURE.md scoped to the listed paths only.
 Stamp last_mapped_commit in each document's frontmatter.
-${AGENT_SKILLS_MAPPER}"
-)
+${AGENT_SKILLS_MAPPER}"}). Wait for the subagent result before continuing this workflow.
 ```
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.

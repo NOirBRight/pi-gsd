@@ -1,5 +1,14 @@
 import { splitFrontmatter, writeFrontmatter } from "../src/frontmatter.js";
-import { addPiSubagentGuidance, commandFileToPiPromptName, normalizeGsdSlashReferences, transformAskUserQuestionForPi, transformGsdRunLauncher, transformSkillDispatchForPi, transformSubagentDispatchForPi } from "../src/prompt-transform.js";
+import {
+  addPiSubagentGuidance,
+  commandFileToPiPromptName,
+  normalizeGsdSlashReferences,
+  transformAskUserQuestionForPi,
+  transformGsdRunLauncher,
+  transformSkillDispatchForPi,
+  transformSubagentDispatchForPi,
+  transformWorkflowDispatchForPi,
+} from "../src/prompt-transform.js";
 
 describe("frontmatter helpers", () => {
   it("splits markdown frontmatter from body", () => {
@@ -324,6 +333,98 @@ describe("transformSkillDispatchForPi", () => {
     const input = 'This is plain text without any dispatch calls.';
 
     expect(transformSkillDispatchForPi(input)).toBe(input);
+  });
+});
+
+describe("transformWorkflowDispatchForPi", () => {
+  it("rewrites positional Skill dispatch calls inside executable workflow fences", () => {
+    const input = [
+      "Launch plan-phase:",
+      "```",
+      'Skill("gsd-plan-phase", args="${PHASE} --auto ${GSD_WS}")',
+      "```",
+    ].join("\n");
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain("Invoke /gsd-plan-phase ${PHASE} --auto ${GSD_WS} in Pi");
+    expect(result).not.toContain('Skill("gsd-plan-phase"');
+  });
+
+  it("rewrites named Skill dispatch calls without losing arguments", () => {
+    const input = 'Skill(skill="gsd-code-review", args="${PHASE_NUM} --fix --auto")';
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain("Invoke /gsd-code-review ${PHASE_NUM} --fix --auto in Pi");
+    expect(result).not.toContain("Skill(");
+  });
+
+  it("guards workflow Skill dispatch when native chain owner is set", () => {
+    const input = 'Skill(skill="gsd-execute-phase", args="${PHASE} --auto --no-transition ${GSD_WS}")';
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain("If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator");
+    expect(result).toContain("otherwise Invoke /gsd-execute-phase ${PHASE} --auto --no-transition ${GSD_WS} in Pi");
+  });
+
+  it("rewrites Workflow dispatch to generated workflow execution instructions", () => {
+    const input = 'Workflow(workflow="get-shit-done/workflows/code-review-fix.md", args="${FIX_ARGS}")';
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain("Read and execute generated/workflows/workflows/code-review-fix.md");
+    expect(result).toContain("with arguments ${FIX_ARGS}");
+    expect(result).not.toContain("Workflow(");
+  });
+
+  it("rewrites short Workflow paths to generated workflow execution instructions", () => {
+    const input = 'Workflow(workflow="workflows/code-review-fix.md", args="${FIX_ARGS}")';
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain("Read and execute generated/workflows/workflows/code-review-fix.md");
+    expect(result).toContain("with arguments ${FIX_ARGS}");
+    expect(result).not.toContain("Workflow(");
+  });
+
+  it("rewrites SlashCommand dispatch and normalizes /gsd colon commands", () => {
+    const input = 'Exit skill and invoke SlashCommand("/gsd:plan-phase [X+1] --auto ${GSD_WS}")';
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain("Invoke /gsd-plan-phase [X+1] --auto ${GSD_WS} in Pi");
+    expect(result).not.toContain("SlashCommand(");
+    expect(result).not.toContain("/gsd:");
+  });
+
+  it("rewrites Agent dispatch calls inside executable workflow fences", () => {
+    const input = [
+      "```text",
+      'Agent(subagent_type="gsd-code-fixer", prompt="Fix REVIEW.md findings")',
+      "```",
+    ].join("\n");
+
+    const result = transformWorkflowDispatchForPi(input);
+
+    expect(result).toContain('Use the Pi subagent tool: subagent({agent: "gsd-code-fixer"');
+    expect(result).toContain('task: "Fix REVIEW.md findings"');
+    expect(result).not.toContain("Agent(");
+  });
+
+  it("keeps default Skill transform code-fence safe for command prompts", () => {
+    const input = [
+      "```",
+      'Skill("gsd-plan-phase", args="4")',
+      "```",
+      'Outside Skill("gsd-execute-phase", args="4")',
+    ].join("\n");
+
+    const result = transformSkillDispatchForPi(input);
+
+    expect(result).toContain('Skill("gsd-plan-phase"');
+    expect(result).toContain("Invoke /gsd-execute-phase 4 in Pi");
   });
 });
 

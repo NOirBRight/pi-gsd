@@ -1,5 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readOrchestrationContractSnapshot } from "../orchestration-contract/index.js";
+import type { ChainUnitContract } from "../orchestration-contract/index.js";
+import { resolveGsdConfigSource } from "../settings-bridge/source.js";
 import { loadOfficialWorkflowConfig } from "./official-config.js";
 import type { OrchestrationUnit, QueueBuildInput, QueueBuildResult, ResolvedWorkflowSettings, UnitType, WorkflowSettingSource } from "./types.js";
 
@@ -27,13 +30,20 @@ export function resolveWorkflowSettings(options: { cwd?: string; configPath?: st
   } as ResolvedWorkflowSettings["workflow"];
   const sources = Object.fromEntries(Object.keys(workflow).map((key) => [key, "default"])) as Record<WorkflowKey, WorkflowSettingSource>;
   const rawWorkflow: Record<string, unknown> = { ...officialConfig.defaults.workflow };
-  const configPath = options.configPath ?? join(options.cwd ?? process.cwd(), ".planning", "config.json");
-  const fallbackConfigPath = options.configPath ? undefined : join(options.cwd ?? process.cwd(), "config.json");
-  const actualConfigPath = existsSync(configPath) ? configPath : fallbackConfigPath && existsSync(fallbackConfigPath) ? fallbackConfigPath : undefined;
 
-  if (actualConfigPath) {
-    const config = readConfig(actualConfigPath);
-    const configWorkflow = isRecord(config) && isRecord(config.workflow) ? config.workflow : {};
+  // Use the shared Settings Bridge source resolver (D-13) to honor
+  // active-workstream precedence and produce source path/kind metadata.
+  const configSource = resolveGsdConfigSource({
+    cwd: options.cwd ?? process.cwd(),
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+  });
+
+  if (configSource.parseError) {
+    throw new OrchestratorSettingsError(`Could not read orchestrator settings from ${configSource.path ?? "resolved config source"}: ${configSource.parseError}`);
+  }
+
+  if (configSource.config) {
+    const configWorkflow = isRecord(configSource.config) && isRecord(configSource.config.workflow) ? configSource.config.workflow : {};
     Object.assign(rawWorkflow, configWorkflow);
     applyKnownWorkflowConfig(configWorkflow, workflow, sources);
   }
@@ -48,6 +58,12 @@ export function resolveWorkflowSettings(options: { cwd?: string; configPath?: st
       schemaKeys: officialConfig.schema.workflowKeys,
     },
     sources,
+    settingsSource: {
+      path: configSource.path,
+      kind: configSource.kind,
+      hash: configSource.hash,
+      mtimeMs: configSource.mtimeMs,
+    },
   };
 }
 
@@ -60,32 +76,124 @@ export function buildUnitQueue(input: QueueBuildInput): QueueBuildResult {
     return { decision: "pause_for_user", settings, resumeHint, units: [unit(phase, "pause-for-user", settings, { resumeHint, source: "phase-signal" })] };
   }
 
-  const units: OrchestrationUnit[] = [];
-  if (!settings.workflow.skip_discuss) units.push(unit(phase, "discuss", settings, withArgs(input, "discuss")));
-  if (settings.workflow.research) units.push(unit(phase, "research", settings));
-  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_phase) units.push(unit(phase, "settings-gate", settings, { label: "UI phase settings gate", source: "phase-signal", metadata: { setting: "workflow.ui_phase" } }));
-  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_safety_gate) units.push(unit(phase, "ui-safety-gate", settings, { label: "UI Safety Gate", source: "phase-signal", metadata: { setting: "workflow.ui_safety_gate" } }));
-  if (input.phaseSignals?.isAiPhase && settings.workflow.ai_integration_phase) units.push(unit(phase, "ai-integration", settings, { label: "AI Integration", source: "phase-signal", metadata: { setting: "workflow.ai_integration_phase" } }));
-  units.push(unit(phase, "plan", settings, withArgs(input, "plan")));
-  if (settings.workflow.plan_check) units.push(unit(phase, "plan-check", settings));
-  units.push(unit(phase, "execute", settings, withArgs(input, "execute")));
-  if (settings.workflow.code_review) units.push(unit(phase, "code-review", settings));
-  if (input.phaseSignals?.requiresSecurityReview && settings.workflow.security_enforcement) units.push(unit(phase, "security-review", settings, { source: "phase-signal", metadata: { setting: "workflow.security_enforcement" } }));
-  if (settings.workflow.verifier) units.push(unit(phase, "verify", settings));
-  if (input.phaseSignals?.requiresNyquistValidation && settings.workflow.nyquist_validation) units.push(unit(phase, "nyquist-validation", settings, { source: "phase-signal", metadata: { setting: "workflow.nyquist_validation" } }));
-  if (input.phaseSignals?.requiresUiReview && settings.workflow.ui_review) units.push(unit(phase, "ui-review", settings));
-  units.push(unit(phase, "closeout", settings));
+  const orchestrationContract = readOrchestrationContractSnapshot(input.cwd ?? process.cwd());
+  const queueContract = orchestrationContract?.chain.defaultQueue ?? fallbackDefaultQueue();
+  const units = buildContractQueue(input, settings, queueContract);
 
   if (input.startAt) {
     const startIndex = units.findIndex((candidate) => candidate.type === input.startAt);
-    if (startIndex === -1) {
+    if (startIndex >= 0) {
+      return { decision: "dispatch", settings, units: appendExtraArgsToFirstUnit(units.slice(startIndex), input.extraArgs) };
+    }
+    if (standaloneUnitEnabled(input.startAt, settings)) {
+      return { decision: "dispatch", settings, units: appendExtraArgsToFirstUnit([unit(phase, input.startAt, settings, { source: "default" })], input.extraArgs) };
+    } else {
       const resumeHint = `Cannot start at ${input.startAt}; the Unit is disabled by workflow settings. Enable it or run without native auto handoff.`;
       return { decision: "pause_for_user", settings, resumeHint, units: [unit(phase, "pause-for-user", settings, { resumeHint, source: "phase-signal" })] };
     }
-    return { decision: "dispatch", settings, units: units.slice(startIndex) };
   }
 
   return { decision: "dispatch", settings, units };
+}
+
+function appendExtraArgsToFirstUnit(units: OrchestrationUnit[], extraArgs?: string): OrchestrationUnit[] {
+  const normalizedExtraArgs = normalizeUnitArgs(extraArgs);
+  if (!normalizedExtraArgs || units.length === 0) return units;
+  const [first, ...rest] = units;
+  const firstWithArgs = {
+    ...first,
+    metadata: {
+      ...first.metadata,
+      args: mergeUnitArgs(first.metadata?.args, normalizedExtraArgs),
+    },
+  };
+  if (isTerminalNativeMode(first.type, normalizedExtraArgs)) return [firstWithArgs];
+  return [firstWithArgs, ...rest];
+}
+
+function mergeUnitArgs(baseArgs?: string, extraArgs?: string): string | undefined {
+  return [normalizeUnitArgs(baseArgs), normalizeUnitArgs(extraArgs)].filter(Boolean).join(" ") || undefined;
+}
+
+function normalizeUnitArgs(args?: string): string {
+  return args?.trim().replace(/\s+/g, " ") ?? "";
+}
+
+function isTerminalNativeMode(type: UnitType, extraArgs: string): boolean {
+  if (type === "discuss") return hasFlag(extraArgs, "assumptions");
+  if (type === "plan") return hasFlag(extraArgs, "research-phase");
+  return false;
+}
+
+function hasFlag(args: string, flag: string): boolean {
+  return new RegExp(`(?:^|\\s)--${flag}(?=\\s|$)`).test(args);
+}
+
+function buildContractQueue(input: QueueBuildInput, settings: ResolvedWorkflowSettings, queueContract: ChainUnitContract[]): OrchestrationUnit[] {
+  const phase = input.phase;
+  const units: OrchestrationUnit[] = [];
+
+  for (const entry of queueContract) {
+    if (entry.unitType === "discuss" && settings.workflow.skip_discuss) continue;
+    if (entry.unitType === "plan") units.push(...prePlanSignalUnits(input, settings));
+    units.push(unitFromContract(phase, entry, input, settings));
+    if (entry.unitType === "execute") units.push(...postExecuteSignalUnits(input, settings));
+  }
+
+  return units;
+}
+
+function unitFromContract(phase: string, entry: ChainUnitContract, input: QueueBuildInput, settings: ResolvedWorkflowSettings): OrchestrationUnit {
+  const args = entry.argsByMode[input.mode];
+  return unit(phase, entry.unitType, settings, {
+    required: entry.required,
+    source: "default",
+    metadata: {
+      ...(args ? { args } : {}),
+      contractSource: entry.sourcePaths.join(","),
+    },
+  });
+}
+
+function prePlanSignalUnits(input: QueueBuildInput, settings: ResolvedWorkflowSettings): OrchestrationUnit[] {
+  const phase = input.phase;
+  const units: OrchestrationUnit[] = [];
+  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_phase) units.push(unit(phase, "settings-gate", settings, { label: "UI phase settings gate", source: "phase-signal", metadata: { setting: "workflow.ui_phase" } }));
+  if (input.phaseSignals?.isUiPhase && settings.workflow.ui_safety_gate) units.push(unit(phase, "ui-safety-gate", settings, { label: "UI Safety Gate", source: "phase-signal", metadata: { setting: "workflow.ui_safety_gate" } }));
+  if (input.phaseSignals?.isAiPhase && settings.workflow.ai_integration_phase) units.push(unit(phase, "ai-integration", settings, { label: "AI Integration", source: "phase-signal", metadata: { setting: "workflow.ai_integration_phase" } }));
+  return units;
+}
+
+function postExecuteSignalUnits(input: QueueBuildInput, settings: ResolvedWorkflowSettings): OrchestrationUnit[] {
+  const phase = input.phase;
+  const units: OrchestrationUnit[] = [];
+  if (input.phaseSignals?.requiresSecurityReview && settings.workflow.security_enforcement) units.push(unit(phase, "security-review", settings, { source: "phase-signal", metadata: { setting: "workflow.security_enforcement" } }));
+  if (input.phaseSignals?.requiresNyquistValidation && settings.workflow.nyquist_validation) units.push(unit(phase, "nyquist-validation", settings, { source: "phase-signal", metadata: { setting: "workflow.nyquist_validation" } }));
+  if (input.phaseSignals?.requiresUiReview && settings.workflow.ui_review) units.push(unit(phase, "ui-review", settings));
+  return units;
+}
+
+function fallbackDefaultQueue(): ChainUnitContract[] {
+  return [
+    { unitType: "discuss", argsByMode: { chain: "--chain", auto: "--auto" }, required: false, sourcePaths: ["fallback"] },
+    { unitType: "plan", argsByMode: { chain: "--auto", auto: "--auto" }, required: true, sourcePaths: ["fallback"] },
+    { unitType: "execute", argsByMode: { chain: "--auto --no-transition", auto: "--auto --no-transition" }, required: true, sourcePaths: ["fallback"] },
+  ];
+}
+
+function standaloneUnitEnabled(type: UnitType, settings: ResolvedWorkflowSettings): boolean {
+  if (type === "verify") return settings.workflow.verifier;
+  if (type === "closeout") return true;
+  if (type === "code-review") return settings.workflow.code_review;
+  if (type === "research") return settings.workflow.research;
+  if (type === "plan-check") return Boolean(settings.workflow.plan_review_convergence);
+  if (type === "settings-gate") return Boolean(settings.workflow.ui_phase);
+  if (type === "ui-safety-gate") return Boolean(settings.workflow.ui_safety_gate);
+  if (type === "security-review") return Boolean(settings.workflow.security_enforcement);
+  if (type === "nyquist-validation") return Boolean(settings.workflow.nyquist_validation);
+  if (type === "ai-integration") return Boolean(settings.workflow.ai_integration_phase);
+  if (type === "ui-review") return Boolean(settings.workflow.ui_review);
+  return type !== "pause-for-user";
 }
 
 function unit(phase: string, type: UnitType, settings: ResolvedWorkflowSettings, overrides: Partial<OrchestrationUnit> = {}): OrchestrationUnit {
@@ -99,19 +207,6 @@ function unit(phase: string, type: UnitType, settings: ResolvedWorkflowSettings,
     source: settings.sources?.[settingForType(type) ?? "_auto_chain_active"] ?? "default",
     ...overrides,
   };
-}
-
-function withArgs(input: QueueBuildInput, type: UnitType, overrides: Partial<OrchestrationUnit> = {}): Partial<OrchestrationUnit> {
-  const args = argsForUnit(input, type);
-  if (!args) return overrides;
-  return { ...overrides, metadata: { ...overrides.metadata, args } };
-}
-
-function argsForUnit(input: QueueBuildInput, type: UnitType): string | undefined {
-  if (type === "discuss") return input.mode === "auto" ? "--auto" : "--chain";
-  if (type === "plan") return "--auto";
-  if (type === "execute") return "--auto --no-transition";
-  return undefined;
 }
 
 function labelForType(type: UnitType) {

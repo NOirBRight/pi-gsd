@@ -1,10 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { classifyFailure } from "../recovery/classify-failure.js";
+import { compileToolContracts, readSnapshot, validateUnitToolContract, validateUnitToolContractAgainstDisk } from "../tool-contract/index.js";
 import { prepareUnitRoot as prepareSafeUnitRoot } from "../worktree-safety/index.js";
-import { evaluatePostDispatchPolicy, POST_DISPATCH_POLICIES } from "./outcomes.js";
+import { evaluatePostDispatchPolicy, resolvePostDispatchPolicy } from "./outcomes.js";
 import { reconcileBeforeDispatch } from "./reconciliation.js";
 import type { GateAdapter, GateName, GateResult, OrchestrationOutcome, OrchestrationSnapshot, OrchestrationUnit } from "./types.js";
+import type { ToolContractSnapshot } from "../tool-contract/types.js";
 
 export type GateOverrides = Partial<Record<Exclude<GateName, "artifact">, GateAdapter>>;
 
@@ -48,14 +50,27 @@ export function runPostDispatchGate(snapshot: OrchestrationSnapshot, unit: Orche
     return pass("artifact", "closeout roadmap/state evidence exists");
   }
 
-  const policy = POST_DISPATCH_POLICIES[unit.type];
+  const policy = resolvePostDispatchPolicy(unit.type, cwd);
   if (policy) {
-    const artifactPath = policy.artifactSuffix ? findMatchingArtifact(cwd, phaseDir, unit.phase, policy.artifactSuffix, exists, options.written) : undefined;
-    if (policy.artifactSuffix && !artifactPath) {
-      return fail(`${unit.label} Unit did not produce a *-${policy.artifactSuffix} artifact.`, [`missing:${unit.phase}-*-${policy.artifactSuffix}`]);
+    const suffixes = unique([
+      ...(policy.artifactSuffix ? [policy.artifactSuffix] : []),
+      ...(policy.artifactSuffixes ?? []),
+      ...(policy.requiredArtifacts ?? []),
+    ]);
+    const artifactPaths = suffixes
+      .map((suffix) => [suffix, findMatchingArtifact(cwd, phaseDir, unit.phase, suffix, exists, options.written)] as const);
+    const requiredSuffixes = policy.requiredArtifacts ?? (policy.artifactSuffix ? [policy.artifactSuffix] : []);
+    const missingRequired = requiredSuffixes
+      .filter((suffix) => !artifactPaths.some(([candidateSuffix, path]) => candidateSuffix === suffix && path));
+    if (missingRequired.length > 0) {
+      const evidence = missingRequired.map((suffix) => `missing:${unit.phase}-*-${suffix}`);
+      const resumeHint = policy.requiredArtifacts
+        ? `${unit.label} Unit did not produce required verification artifacts.`
+        : `${unit.label} Unit did not produce a *-${missingRequired[0]} artifact.`;
+      return fail(resumeHint, evidence);
     }
     const outcome = evaluatePostDispatchPolicy(policy, {
-      artifactPath,
+      artifactPaths: artifactPaths.map(([, path]) => path).filter((path): path is string => Boolean(path)),
       messages: options.messages,
       outcome: options.outcome,
       phase: unit.phase,
@@ -80,8 +95,88 @@ function decideDispatch(_snapshot: OrchestrationSnapshot, unit: OrchestrationUni
   return pass("decideDispatch", `dispatch:${unit.type}`);
 }
 
-function validateToolContract(_snapshot: OrchestrationSnapshot, unit: OrchestrationUnit): GateResult {
-  return pass("validateToolContract", `phase-12-contract-seam:${unit.type}`);
+function validateToolContract(snapshot: OrchestrationSnapshot, unit: OrchestrationUnit): GateResult {
+  const cwd = snapshot.cwd ?? process.cwd();
+  // Prefer the verified snapshot (D-04). If the snapshot file is missing,
+  // fall back to an inline compile so the gate still produces a stable
+  // contract decision without depending on disk I/O race conditions.
+  let contractSnapshot: ToolContractSnapshot | undefined = readSnapshot(cwd);
+  if (!contractSnapshot) {
+    try {
+      contractSnapshot = compileToolContracts({ cwd });
+    } catch (error) {
+      return toolContractGateFailure(unit, {
+        unitId: unit.id,
+        unitType: unit.type,
+        failedField: "snapshot",
+        expected: "generated/tool-contracts.json or upstream package",
+        actual: error instanceof Error ? error.message : String(error),
+        sourcePaths: ["generated/tool-contracts.json"],
+      });
+    }
+  }
+  // If the contract snapshot is empty (no generated files in the cwd), the
+  // project is not configured for native auto orchestration in this context,
+  // so the contract gate is a no-op. This preserves the seam behaviour for
+  // smoke tests that exercise gates in fresh temp directories.
+  if (contractSnapshot.contracts.length === 0) {
+    return pass("validateToolContract", `contract:empty-snapshot:${unit.type}`);
+  }
+  if (!contractSnapshot.contracts.some((entry) => entry.unitType === unit.type)) {
+    return toolContractGateFailure(unit, {
+      unitId: unit.id,
+      unitType: unit.type,
+      failedField: "unitType",
+      expected: "known unit type",
+      actual: String(unit.type),
+      sourcePaths: ["generated/tool-contracts.json"],
+    });
+  }
+  // Cheap runtime validation against the verified snapshot.
+  const cheap = validateUnitToolContract(unit, { snapshot: contractSnapshot });
+  if (!cheap.ok) {
+    return toolContractGateFailure(unit, cheap.failure);
+  }
+  // Disk-backed verification: the prompt and agent paths in the snapshot
+  // must still resolve to existing files (D-04/D-05).
+  const disk = validateUnitToolContractAgainstDisk({ cwd, snapshot: contractSnapshot, unit });
+  if (!disk.ok) {
+    return toolContractGateFailure(unit, disk.failure);
+  }
+  return pass("validateToolContract", `contract:${unit.type}:${disk.contract.promptHash.slice(0, 12)}`);
+}
+
+function toolContractGateFailure(unit: OrchestrationUnit, failure: { unitId?: string; unitType: string; contractHash?: string; contractVersion?: number; failedField: string; expected?: string; actual?: string; sourcePaths?: string[] }): GateResult {
+  const recoveryDecision = classifyFailure({
+    kind: "dispatch",
+    reason: "dispatch-contract-invalid",
+    evidence: {
+      reasonCode: "dispatch-contract-invalid",
+      unitId: unit.id,
+      unitType: unit.type,
+      contractHash: failure.contractHash,
+      contractVersion: failure.contractVersion,
+      failedField: failure.failedField,
+      expected: failure.expected,
+      actual: failure.actual,
+      sourcePaths: failure.sourcePaths,
+    },
+  });
+  return {
+    ok: false,
+    gate: "validateToolContract",
+    reason: recoveryDecision.class,
+    retryable: false,
+    resumeHint: recoveryDecision.remediation,
+    evidence: [
+      `failedField:${failure.failedField}`,
+      `unitId:${unit.id}`,
+      failure.contractHash ? `contractHash:${failure.contractHash}` : undefined,
+      ...(failure.sourcePaths ?? []).map((path) => `path:${path}`),
+    ].filter((item): item is string => Boolean(item)),
+    recoveryDecision,
+    exitReason: recoveryDecision.class,
+  };
 }
 
 function prepareUnitRoot(snapshot: OrchestrationSnapshot, unit: OrchestrationUnit): GateResult {
@@ -182,6 +277,10 @@ function escapeRegExp(value: string): string {
 
 function normalizeWrittenPath(cwd: string, value: string): string {
   return resolve(isAbsolute(value) ? value : resolve(cwd, value));
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function closeoutEvidence(cwd: string, phase: string, written?: string[]): boolean {

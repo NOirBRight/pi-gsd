@@ -25,7 +25,7 @@ function writeFixture(root: string) {
 }
 
 describe("orchestrator chain e2e", () => {
-  it("completes a fixture Plan -> Execute -> Verify -> Closeout chain without prompt checklist reminders", () => {
+  it("completes a fixture Plan -> Execute chain without prompt checklist reminders", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-chain-"));
     writeFixture(cwd);
     const dispatched: string[] = [];
@@ -38,12 +38,12 @@ describe("orchestrator chain e2e", () => {
           const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
           const written: string[] = [];
           if (unit.type === "plan") { const path = join(phaseDir, "09-01-PLAN.md"); writeFileSync(path, "plan\n", "utf8"); written.push(path); }
-          if (unit.type === "execute") { const path = join(phaseDir, "09-01-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
-          if (unit.type === "verify") { const path = join(phaseDir, "09-VERIFICATION.md"); writeFileSync(path, "---\nstatus: passed\n---\n\n# Verification\n", "utf8"); written.push(path); }
-          if (unit.type === "closeout") {
-            writeFileSync(join(cwd, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\n", "utf8");
-            writeFileSync(join(cwd, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
-            written.push(join(cwd, ".planning", "ROADMAP.md"), join(cwd, ".planning", "STATE.md"));
+          if (unit.type === "execute") {
+            const summary = join(phaseDir, "09-01-SUMMARY.md");
+            const verification = join(phaseDir, "09-VERIFICATION.md");
+            writeFileSync(summary, "summary\n", "utf8");
+            writeFileSync(verification, "---\nstatus: passed\n---\n\n# Verification\n", "utf8");
+            written.push(summary, verification);
           }
           return { ok: true, messages: [`dispatched ${unit.type}`], written };
         },
@@ -59,14 +59,14 @@ describe("orchestrator chain e2e", () => {
     }
 
     expect(orchestrator.getStatus().status).toBe("completed");
-    expect(dispatched).toEqual(["plan:1", "execute:1", "verify:1", "closeout:1"]);
+    expect(dispatched).toEqual(["plan:1", "execute:1"]);
     const journal = JSON.parse(readFileSync(join(cwd, ".planning", "orchestration-state.json"), "utf8"));
     expect(journal.snapshot.status).toBe("completed");
     expect(JSON.stringify(journal)).not.toContain("AUTO_MODE_CHECKLIST");
     expect(JSON.stringify(journal)).not.toContain("pi_auto_mode_fidelity");
   });
 
-  it("pauses before closeout when verification reports gaps_found", () => {
+  it("pauses at execute when verification reports gaps_found", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-chain-gap-"));
     writeFixture(cwd);
     const dispatched: string[] = [];
@@ -79,9 +79,13 @@ describe("orchestrator chain e2e", () => {
           const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
           const written: string[] = [];
           if (unit.type === "plan") { const path = join(phaseDir, "09-01-PLAN.md"); writeFileSync(path, "plan\n", "utf8"); written.push(path); }
-          if (unit.type === "execute") { const path = join(phaseDir, "09-01-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
-          if (unit.type === "verify") { const path = join(phaseDir, "09-VERIFICATION.md"); writeFileSync(path, "---\nstatus: gaps_found\n---\n\n# Verification\n", "utf8"); written.push(path); }
-          if (unit.type === "closeout") throw new Error("closeout must not run with verification gaps");
+          if (unit.type === "execute") {
+            const summary = join(phaseDir, "09-01-SUMMARY.md");
+            const verification = join(phaseDir, "09-VERIFICATION.md");
+            writeFileSync(summary, "summary\n", "utf8");
+            writeFileSync(verification, "---\nstatus: gaps_found\n---\n\n# Verification\n", "utf8");
+            written.push(summary, verification);
+          }
           return { ok: true, messages: [`dispatched ${unit.type}`], written };
         },
       }),
@@ -95,12 +99,12 @@ describe("orchestrator chain e2e", () => {
 
     expect(result.ok).toBe(false);
     expect(orchestrator.getStatus().status).toBe("paused");
-    expect(orchestrator.getStatus().currentUnit?.type).toBe("verify");
-    expect(dispatched).toEqual(["plan", "execute", "verify"]);
+    expect(orchestrator.getStatus().currentUnit?.type).toBe("execute");
+    expect(dispatched).toEqual(["plan", "execute"]);
     expect(result.messages.join("\n")).toContain("/gsd-plan-phase 09 --gaps");
   });
 
-  it("pauses before closeout when dispatch outcome reports gaps_found", () => {
+  it("pauses at execute when dispatch outcome reports gaps_found", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-chain-structured-gap-"));
     writeFixture(cwd);
     const dispatched: string[] = [];
@@ -113,9 +117,14 @@ describe("orchestrator chain e2e", () => {
           const phaseDir = join(cwd, ".planning", "phases", "09-fixture");
           const written: string[] = [];
           if (unit.type === "plan") { const path = join(phaseDir, "09-01-PLAN.md"); writeFileSync(path, "plan\n", "utf8"); written.push(path); }
-          if (unit.type === "execute") { const path = join(phaseDir, "09-01-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
-          if (unit.type === "verify") { const path = join(phaseDir, "09-VERIFICATION.md"); writeFileSync(path, "# Verification\n", "utf8"); written.push(path); return { ok: true, messages: ["structured verification gap"], written, outcome: { status: "gaps_found" } }; }
-          if (unit.type === "closeout") throw new Error("closeout must not run with structured verification gaps");
+          if (unit.type === "execute") {
+            const summary = join(phaseDir, "09-01-SUMMARY.md");
+            const verification = join(phaseDir, "09-VERIFICATION.md");
+            writeFileSync(summary, "summary\n", "utf8");
+            writeFileSync(verification, "# Verification\n", "utf8");
+            written.push(summary, verification);
+            return { ok: true, messages: ["structured verification gap"], written, outcome: { status: "gaps_found" } };
+          }
           return { ok: true, messages: [`dispatched ${unit.type}`], written };
         },
       }),
@@ -129,12 +138,12 @@ describe("orchestrator chain e2e", () => {
 
     expect(result.ok).toBe(false);
     expect(orchestrator.getStatus().status).toBe("paused");
-    expect(orchestrator.getStatus().currentUnit?.type).toBe("verify");
-    expect(dispatched).toEqual(["plan", "execute", "verify"]);
+    expect(orchestrator.getStatus().currentUnit?.type).toBe("execute");
+    expect(dispatched).toEqual(["plan", "execute"]);
     expect(result.messages.join("\n")).toContain("/gsd-plan-phase 09 --gaps");
   });
 
-  it("revises plans through checker issues before continuing the chain", () => {
+  it("does not enqueue standalone plan-check during upstream native chain", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-chain-plan-revision-"));
     writeFixture(cwd);
     writeFileSync(join(cwd, ".planning", "config.json"), JSON.stringify({
@@ -157,16 +166,12 @@ describe("orchestrator chain e2e", () => {
             writeFileSync(path, `plan ${dispatched.filter((type) => type.startsWith("plan:")).length}\n`, "utf8");
             written.push(path);
           }
-          if (unit.type === "plan-check" && dispatched.filter((type) => type.startsWith("plan-check:")).length < 2) {
-            return { ok: true, messages: ["## ISSUES FOUND\n- tighten scope"], written, outcome: { marker: "issues_found" } };
-          }
-          if (unit.type === "plan-check") return { ok: true, messages: ["## VERIFICATION PASSED"], written, outcome: { marker: "verification_passed" } };
-          if (unit.type === "execute") { const path = join(phaseDir, "09-01-SUMMARY.md"); writeFileSync(path, "summary\n", "utf8"); written.push(path); }
-          if (unit.type === "verify") { const path = join(phaseDir, "09-VERIFICATION.md"); writeFileSync(path, "---\nstatus: passed\n---\n\n# Verification\n", "utf8"); written.push(path); }
-          if (unit.type === "closeout") {
-            writeFileSync(join(cwd, ".planning", "ROADMAP.md"), "| 9. Auto Orchestration Module | v2.0 | 1/1 | Complete | 2026-06-01 |\n", "utf8");
-            writeFileSync(join(cwd, ".planning", "STATE.md"), "## Current Position\n\nPhase: 9 — Auto Orchestration Native Module (**completed**)\n", "utf8");
-            written.push(join(cwd, ".planning", "ROADMAP.md"), join(cwd, ".planning", "STATE.md"));
+          if (unit.type === "execute") {
+            const summary = join(phaseDir, "09-01-SUMMARY.md");
+            const verification = join(phaseDir, "09-VERIFICATION.md");
+            writeFileSync(summary, "summary\n", "utf8");
+            writeFileSync(verification, "---\nstatus: passed\n---\n\n# Verification\n", "utf8");
+            written.push(summary, verification);
           }
           return { ok: true, messages: [`dispatched ${unit.type}`], written };
         },
@@ -182,14 +187,10 @@ describe("orchestrator chain e2e", () => {
     expect(orchestrator.getStatus().status).toBe("completed");
     expect(dispatched).toEqual([
       "plan:--auto",
-      "plan-check:",
-      "plan:--auto --revision",
-      "plan-check:",
       "execute:--auto --no-transition",
-      "verify:",
-      "closeout:",
     ]);
   });
+
 
   it("pauses before dispatch when native reconciliation reports summary-count-mismatch", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-gsd-chain-blocked-"));

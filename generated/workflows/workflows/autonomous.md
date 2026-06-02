@@ -270,7 +270,7 @@ The discuss step in `--auto` mode MUST NOT loop. If CONTEXT.md already exists af
 **If `INTERACTIVE` is set:** Run the standard discuss-phase skill inline (asks interactive questions, waits for user answers). This preserves user input on all design decisions while keeping plan+execute out of the main context:
 
 ```
-Skill("gsd-discuss-phase", args="${PHASE_NUM}")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-discuss-phase ${PHASE_NUM}; otherwise Invoke /gsd-discuss-phase ${PHASE_NUM} in Pi.
 ```
 
 **If `INTERACTIVE` is NOT set:** Execute the smart_discuss step for this phase (batch table proposals, auto-optimized).
@@ -314,7 +314,7 @@ Phase ${PHASE_NUM}: Frontend phase detected — generating UI design contract...
 ```
 
 ```
-Skill("gsd-ui-phase", args="${PHASE_NUM}")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-ui-phase ${PHASE_NUM}; otherwise Invoke /gsd-ui-phase ${PHASE_NUM} in Pi.
 ```
 
 Verify UI-SPEC was created:
@@ -335,7 +335,7 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR}"/*-UI-SPEC.md 2>/dev/null | head -1)
 Agent(
   description="Plan phase ${PHASE_NUM}: ${PHASE_NAME}",
   run_in_background=true,
-  prompt="Run plan-phase for phase ${PHASE_NUM}: Skill(\"gsd-plan-phase\", args=\"${PHASE_NUM}\")"
+  prompt="Run plan-phase for phase ${PHASE_NUM}: If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase ${PHASE_NUM}; otherwise Invoke /gsd-plan-phase ${PHASE_NUM} in Pi."
 )
 ```
 
@@ -344,7 +344,7 @@ Store the agent task_id. After discuss for the next phase completes (or if no ne
 **If `INTERACTIVE` is NOT set (default):** Run plan inline as before.
 
 ```
-Skill("gsd-plan-phase", args="${PHASE_NUM}")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase ${PHASE_NUM}; otherwise Invoke /gsd-plan-phase ${PHASE_NUM} in Pi.
 ```
 
 Verify plan produced output — re-run `init phase-op` and check `has_plans`. If false → go to handle_blocker: "Plan phase ${PHASE_NUM} did not produce any plans."
@@ -357,7 +357,7 @@ Verify plan produced output — re-run `init phase-op` and check `has_plans`. If
 Agent(
   description="Execute phase ${PHASE_NUM}: ${PHASE_NAME}",
   run_in_background=true,
-  prompt="Run execute-phase for phase ${PHASE_NUM}: Skill(\"gsd-execute-phase\", args=\"${PHASE_NUM} --no-transition\")"
+  prompt="Run execute-phase for phase ${PHASE_NUM}: If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-execute-phase ${PHASE_NUM} --no-transition; otherwise Invoke /gsd-execute-phase ${PHASE_NUM} --no-transition in Pi."
 )
 ```
 
@@ -366,7 +366,7 @@ Store the agent task_id. The workflow can now start discussing the next phase wh
 **If `INTERACTIVE` is NOT set (default):** Run execute inline as before.
 
 ```
-Skill("gsd-execute-phase", args="${PHASE_NUM} --no-transition")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-execute-phase ${PHASE_NUM} --no-transition; otherwise Invoke /gsd-execute-phase ${PHASE_NUM} --no-transition in Pi.
 ```
 
 **3c.5. Code Review and Fix**
@@ -380,12 +380,12 @@ CODE_REVIEW_ENABLED=$(gsd_run query config-get workflow.code_review 2>/dev/null 
 If `"false"`: display "Code review skipped (workflow.code_review=false)" and proceed to 3d.
 
 ```
-Skill("gsd-code-review", args="${PHASE_NUM}")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-code-review ${PHASE_NUM}; otherwise Invoke /gsd-code-review ${PHASE_NUM} in Pi.
 ```
 
 Parse status from REVIEW.md frontmatter. If "clean" or "skipped": proceed to 3d. If findings found: auto-invoke:
 ```
-Skill("gsd-code-review", args="${PHASE_NUM} --fix --auto")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-code-review ${PHASE_NUM} --fix --auto; otherwise Invoke /gsd-code-review ${PHASE_NUM} --fix --auto in Pi.
 ```
 
 **Error handling:** If either Skill fails, catch the error, display as non-blocking, and proceed to 3d.
@@ -456,14 +456,14 @@ Ask user via AskUserQuestion:
 On **"Run gap closure"**: Execute gap closure cycle (limit: 1 attempt):
 
 ```
-Skill("gsd-plan-phase", args="${PHASE_NUM} --gaps")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-plan-phase ${PHASE_NUM} --gaps; otherwise Invoke /gsd-plan-phase ${PHASE_NUM} --gaps in Pi.
 ```
 
 Verify gap plans were created — re-run `init phase-op ${PHASE_NUM}` and check `has_plans`. If no new gap plans → go to handle_blocker: "Gap closure planning for phase ${PHASE_NUM} did not produce plans."
 
 Re-execute:
 ```
-Skill("gsd-execute-phase", args="${PHASE_NUM} --no-transition")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-execute-phase ${PHASE_NUM} --no-transition; otherwise Invoke /gsd-execute-phase ${PHASE_NUM} --no-transition in Pi.
 ```
 
 Re-read verification status:
@@ -511,7 +511,7 @@ Phase ${PHASE_NUM}: Frontend phase with UI-SPEC — running UI review audit...
 ```
 
 ```
-Skill("gsd-ui-review", args="${PHASE_NUM}")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-ui-review ${PHASE_NUM}; otherwise Invoke /gsd-ui-review ${PHASE_NUM} in Pi.
 ```
 
 Display the review result summary (score from UI-REVIEW.md if produced). Continue to iterate step regardless of score — UI review is advisory, not blocking.
@@ -624,7 +624,7 @@ Display lifecycle transition banner:
 **5a. Audit**
 
 ```
-Skill("gsd-audit-milestone")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-audit-milestone; otherwise Invoke /gsd-audit-milestone in Pi.
 ```
 
 After audit completes, detect the result:
@@ -680,7 +680,7 @@ On **"Stop"**: Go to handle_blocker with "User stopped — tech debt to address.
 **5b. Complete Milestone**
 
 ```
-Skill("gsd-complete-milestone", args="${milestone_version}")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-complete-milestone ${milestone_version}; otherwise Invoke /gsd-complete-milestone ${milestone_version} in Pi.
 ```
 
 After complete-milestone returns, verify it produced output:
@@ -694,7 +694,7 @@ If the archive file does not exist, go to handle_blocker: "Complete milestone di
 **5c. Cleanup**
 
 ```
-Skill("gsd-cleanup")
+If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-cleanup; otherwise Invoke /gsd-cleanup in Pi.
 ```
 
 Cleanup shows its own dry-run and asks user for approval internally — this is an acceptable pause per CTRL-01 since it's an explicit decision about file deletion.
@@ -769,7 +769,7 @@ When any phase operation fails or a blocker is detected, present 3 options via A
 - [ ] Final completion or stop summary displayed
 - [ ] After all phases complete, lifecycle step is invoked (not manual suggestion)
 - [ ] Lifecycle transition banner displayed before audit
-- [ ] Audit invoked via Skill("gsd-audit-milestone")
+- [ ] Audit invoked via If PI_GSD_NATIVE_CHAIN_OWNER is set, return control to the native orchestrator for /gsd-audit-milestone; otherwise Invoke /gsd-audit-milestone in Pi.
 - [ ] Audit result routing: passed → auto-continue, gaps_found → user decides, tech_debt → user decides
 - [ ] Audit technical failure (no file/no status) routes to handle_blocker
 - [ ] Complete-milestone invoked via Skill() with ${milestone_version} arg
